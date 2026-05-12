@@ -65,6 +65,17 @@ export default function ScanDesktopPage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sessionToken = session?.session_token ?? null;
+  const socketTarget = (() => {
+    const fromMobileUrl = (session?.mobile_url || '').trim();
+    if (fromMobileUrl) {
+      try {
+        return new URL(fromMobileUrl).origin;
+      } catch {
+        // Ignore malformed URLs and fall back
+      }
+    }
+    return null;
+  })();
 
   const {
     connected,
@@ -76,7 +87,7 @@ export default function ScanDesktopPage() {
     recentThumbnails,
     scanError,
     resetForRetry,
-  } = useDesktopScanSocket(sessionToken);
+  } = useDesktopScanSocket(sessionToken, socketTarget);
 
   useEffect(() => {
     if (mobileConnected && desktopState === 'waiting_for_mobile') {

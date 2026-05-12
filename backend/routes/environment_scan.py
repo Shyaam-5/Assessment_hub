@@ -277,7 +277,7 @@ async def get_session(session_id: int, userId: str = Query(...)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     scan = await db.fetchone(
-        "SELECT * FROM prescan_room_scans WHERE exam_session_id = %s ORDER BY created_at DESC LIMIT 1",
+        "SELECT * FROM prescan_room_scans WHERE exam_session_id = %s ORDER BY id DESC LIMIT 1",
         (session_id,),
     )
 
@@ -522,7 +522,7 @@ async def validate_mobile_link(token: str, request: Request):
         SELECT id, scan_start_time, total_frames, final_verdict
         FROM prescan_room_scans
         WHERE exam_session_id = %s
-        ORDER BY created_at DESC LIMIT 1
+        ORDER BY id DESC LIMIT 1
         """,
         (session["id"],),
     )

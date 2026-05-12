@@ -347,7 +347,7 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
             scan = await db.fetchone(
                 """
                 SELECT * FROM prescan_room_scans
-                WHERE exam_session_id = %s ORDER BY created_at DESC LIMIT 1
+                WHERE exam_session_id = %s ORDER BY id DESC LIMIT 1
                 """,
                 (session["id"],),
             )

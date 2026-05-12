@@ -80,7 +80,7 @@ async def get_active_scan(db: PrescanDB, exam_session_id: int) -> Optional[Dict]
         """
         SELECT * FROM prescan_room_scans
         WHERE exam_session_id = %s AND final_verdict IS NULL
-        ORDER BY created_at DESC LIMIT 1
+        ORDER BY id DESC LIMIT 1
         """,
         (exam_session_id,),
     )

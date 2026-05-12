@@ -184,6 +184,7 @@ class ScanAggregator:
         device_flagged_count = 0
         book_flagged_count = 0
         multiple_people_count = 0
+        analysis_error_count = 0
 
         for frame in frames:
             try:
@@ -202,6 +203,8 @@ class ScanAggregator:
                     book_flagged_count += 1
                 if "multiple_people" in r:
                     multiple_people_count += 1
+                if "analysis_error" in r:
+                    analysis_error_count += 1
 
         details: Dict[str, Any] = {
             "total_frames": total_frames,
@@ -212,10 +215,16 @@ class ScanAggregator:
             "device_flagged_frames": device_flagged_count,
             "book_flagged_frames": book_flagged_count,
             "multiple_people_frames": multiple_people_count,
+            "analysis_error_frames": analysis_error_count,
         }
 
         # Decision logic
-        if multiple_people_count > 0:
+        if analysis_error_count > 0:
+            verdict, reason = "incomplete", (
+                f"AI frame analysis unavailable for {analysis_error_count} frame(s). "
+                "Please retry the environment scan."
+            )
+        elif multiple_people_count > 0:
             verdict, reason = "rejected", f"Multiple people detected in {multiple_people_count} frame(s)"
         elif device_flagged_count > MAX_DEVICE_FLAGGED_FRAMES:
             verdict, reason = "rejected", f"Unauthorized device detected in {device_flagged_count} frames"

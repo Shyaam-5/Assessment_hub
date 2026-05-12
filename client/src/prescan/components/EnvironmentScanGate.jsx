@@ -17,6 +17,7 @@ export default function EnvironmentScanGate({ userId, examTitle, onApproved, onC
   const [retryCount, setRetryCount] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const mountedRef = useRef(true);
+  const sessionInitRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -45,10 +46,23 @@ export default function EnvironmentScanGate({ userId, examTitle, onApproved, onC
   }, [userId]);
 
   useEffect(() => {
+    if (sessionInitRef.current) return;
+    sessionInitRef.current = true;
     createSession();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sessionToken = session?.session_token ?? null;
+  const socketTarget = (() => {
+    const fromMobileUrl = (session?.mobile_url || '').trim();
+    if (fromMobileUrl) {
+      try {
+        return new URL(fromMobileUrl).origin;
+      } catch {
+        // Ignore malformed URLs and fall back
+      }
+    }
+    return null;
+  })();
 
   const {
     connected,
@@ -60,7 +74,7 @@ export default function EnvironmentScanGate({ userId, examTitle, onApproved, onC
     recentThumbnails,
     scanError,
     resetForRetry,
-  } = useDesktopScanSocket(sessionToken);
+  } = useDesktopScanSocket(sessionToken, socketTarget);
 
   // Transition from waiting → scanning when mobile connects
   useEffect(() => {

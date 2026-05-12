@@ -50,7 +50,7 @@ const safeUseRef = (initialValue) => {
   }
 };
 
-export function useDesktopScanSocket(sessionToken) {
+export function useDesktopScanSocket(sessionToken, wsUrl) {
   const [connected, setConnected] = safeUseState(false);
   const [mobileConnected, setMobileConnected] = safeUseState(false);
   const [status, setStatus] = safeUseState('pending');
@@ -131,7 +131,7 @@ export function useDesktopScanSocket(sessionToken) {
   safeUseEffect(() => {
     if (!sessionToken) return;
 
-    const socket = prescanSocketManager.connect();
+    const socket = prescanSocketManager.connect(wsUrl || undefined);
     socketRef.current = socket;
 
     const onDisconnect = () => setConnected(false);
@@ -148,6 +148,7 @@ export function useDesktopScanSocket(sessionToken) {
 
     const onMobileDisconnected = () => {
       setMobileConnected(false);
+      requestStatus(socket);
     };
 
     const onScanProgressUpdate = (data) => {
@@ -172,6 +173,15 @@ export function useDesktopScanSocket(sessionToken) {
 
       if (data.session_status === 'scanning' || mobileNow) setStatus('scanning');
       if (data.session_status === 'pending') setStatus('pending');
+
+      if (data.scan) {
+        setProgress((prev) => ({
+          ...(prev ?? {}),
+          frames_processed: Number(data.scan.total_frames ?? prev?.frames_processed ?? 0),
+          flagged_frames: Number(data.scan.flagged_frames ?? prev?.flagged_frames ?? 0),
+          running_detections: prev?.running_detections ?? {},
+        }));
+      }
 
       const serverAngles = data.scan?.angles_covered ?? {};
       const normalizedAngles = {
@@ -220,7 +230,15 @@ export function useDesktopScanSocket(sessionToken) {
     socket.on('scan_status_response', onScanStatusResponse);
     socket.on('scan_error', onScanError);
 
+    // Keep desktop status in sync even if a realtime event is missed.
+    const statusPoll = setInterval(() => {
+      if (socket.connected) {
+        requestStatus(socket);
+      }
+    }, 3000);
+
     return () => {
+      clearInterval(statusPoll);
       socket.off('connect', handleConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('session_joined', onSessionJoined);
@@ -232,7 +250,7 @@ export function useDesktopScanSocket(sessionToken) {
       socket.off('scan_status_response', onScanStatusResponse);
       socket.off('scan_error', onScanError);
     };
-  }, [sessionToken, handleConnect, updateProgress, updateAngles, requestStatus]);
+  }, [sessionToken, wsUrl, handleConnect, updateProgress, updateAngles, requestStatus]);
 
   const resetForRetry = safeUseCallback(() => {
     setMobileConnected(false);

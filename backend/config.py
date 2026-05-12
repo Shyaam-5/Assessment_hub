@@ -29,7 +29,10 @@ class Settings:
         self.GROQ_API_KEYS: list[str] = self._load_groq_keys()
         self.GROQ_API_KEY: str = self.GROQ_API_KEYS[0] if self.GROQ_API_KEYS else ""
         self.GROQ_MODEL: str = os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip()
-        fallback_models = os.getenv("GROQ_FALLBACK_MODELS", "llama-3.1-8b-instant")
+        fallback_models = os.getenv(
+            "GROQ_FALLBACK_MODELS",
+            "meta-llama/llama-4-maverick-17b-128e-instruct,meta-llama/llama-4-scout-17b-16e-instruct",
+        )
         self.GROQ_FALLBACK_MODELS: list[str] = [
             m.strip() for m in fallback_models.split(",")
             if m.strip() and m.strip() != self.GROQ_MODEL
@@ -46,7 +49,10 @@ class Settings:
         self.ALLOWED_ORIGINS: list[str] = [o.strip() for o in _origins.split(",") if o.strip()] if _origins.strip() else []
 
         # --- Groq Vision (for image analysis - must be a vision-capable model) ---
-        self.GROQ_VISION_MODEL: str = os.getenv("GROQ_VISION_MODEL", "llama-3.2-90b-vision-preview")
+        self.GROQ_VISION_MODEL: str = os.getenv(
+            "GROQ_VISION_MODEL",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+        ).strip()
         self.FRONTEND_URL: str = os.getenv("FRONTEND_URL", "").strip()
 
         # --- Google Sign-In (OIDC id_token verification; must match SPA client ID) ---

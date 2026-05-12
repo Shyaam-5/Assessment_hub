@@ -91,6 +91,14 @@ class GroqVisionService:
         self._model = settings.GROQ_VISION_MODEL  # Must be a vision-capable model
         self._fallback_model = settings.GROQ_FALLBACK_MODEL
         self._client = None
+        self._vision_fallback_candidates = [
+            m for m in (
+                self._fallback_model,
+                "llama-3.2-11b-vision-preview",
+                "llama-3.2-90b-vision-preview",
+            )
+            if m
+        ]
 
     def _get_client(self):
         if self._client is None:
@@ -102,6 +110,7 @@ class GroqVisionService:
         return self._client
 
     def _create_chat_completion(self, client, model: str, image_b64: str):
+        # Keep payload OpenAI-compatible for multimodal Groq vision models.
         return client.chat.completions.create(
             model=model,
             messages=[
@@ -118,26 +127,46 @@ class GroqVisionService:
         )
 
     @staticmethod
+    def _is_vision_model(model: str) -> bool:
+        m = (model or "").lower()
+        return ("vision" in m) or ("llama-4-scout" in m) or ("llama-4-maverick" in m)
+
+    @staticmethod
     def _is_decommissioned_error(exc: Exception) -> bool:
         return "model_decommissioned" in str(exc).lower() or "decommissioned" in str(exc).lower()
 
     def _call_groq_sync(self, image_b64: str) -> Dict[str, Any]:
         client = self._get_client()
+        candidates: List[str] = []
+        for candidate in [self._model, *self._vision_fallback_candidates]:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        last_exc: Optional[Exception] = None
+        response = None
         model_used = self._model
-        try:
-            response = self._create_chat_completion(client, model_used, image_b64)
-        except Exception as exc:
-            should_fallback = (
-                self._is_decommissioned_error(exc)
-                and bool(self._fallback_model)
-                and self._fallback_model != model_used
-            )
-            if not should_fallback:
+
+        for idx, candidate in enumerate(candidates):
+            if not self._is_vision_model(candidate):
+                continue
+            try:
+                response = self._create_chat_completion(client, candidate, image_b64)
+                model_used = candidate
+                if idx > 0:
+                    logger.warning("Groq model fallback: using '%s'.", candidate)
+                self._model = candidate
+                break
+            except Exception as exc:
+                last_exc = exc
+                # Try next only for model-availability issues; fail fast for request-shape issues.
+                if self._is_decommissioned_error(exc):
+                    continue
                 raise
-            logger.warning("Groq model '%s' unavailable, falling back to '%s'.", model_used, self._fallback_model)
-            model_used = self._fallback_model
-            self._model = model_used
-            response = self._create_chat_completion(client, model_used, image_b64)
+
+        if response is None:
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("No usable Groq vision model configured")
 
         raw_text = response.choices[0].message.content or "{}"
         return {"raw_text": raw_text, "model": model_used}
@@ -207,8 +236,8 @@ class GroqVisionService:
             logger.error("Groq vision error on frame %d: %s", frame_index, exc)
             return FrameVerdict(
                 frame_index=frame_index,
-                is_flagged=False,
-                flag_reasons=[],
+                is_flagged=True,
+                flag_reasons=["analysis_error:vision_model_unavailable_or_invalid_payload"],
                 detections=[],
                 people_count=1,
             )

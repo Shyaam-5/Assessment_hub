@@ -35,7 +35,7 @@ class PrescanSocketIOManager:
         room_name = f"scan:{session_token}"
         try:
             await self.sio.enter_room(sid, room_name)
-        except KeyError:
+        except (KeyError, ValueError):
             logger.info("Stale sid=%s for session=%s role=%s - skipping join", sid, session_token, role)
             return False
 
