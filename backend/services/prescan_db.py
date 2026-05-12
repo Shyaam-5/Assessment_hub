@@ -1,4 +1,4 @@
-﻿"""
+"""
 prescan_db.py
 -------------
 Thin async wrapper around the main backend's PyMySQLPool that provides
@@ -8,14 +8,13 @@ expected by the environment-scan services.
 from __future__ import annotations
 
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 from typing import Any, Dict, List, Optional
 
 from database import get_pool
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 
 class PrescanDB:

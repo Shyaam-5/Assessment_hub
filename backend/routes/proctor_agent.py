@@ -1,19 +1,17 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
-
-"""Proctoring Intelligence Agent â€” API routes.
+"""Proctoring Intelligence Agent — API routes.
 
 Endpoints for admins to trigger analysis, view results, generate reports,
 and detect collusion. Also exposes a real-time hook so the existing
 proctoring log endpoints can trigger incremental analysis.
 """
 
+import logging
+from logging_config import LogConfig
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
+from audit_logger import get_audit_logger, AuditEventType
 from services.proctor_agent import (
     agent_analyze_session,
     agent_generate_integrity_report,
@@ -25,6 +23,9 @@ from services.proctor_agent import (
     _ensure_agent_tables,
 )
 from database import get_pool
+
+logger = LogConfig.get_logger(__name__)
+_audit = get_audit_logger()
 
 router = APIRouter(prefix="/api/proctor-agent", tags=["proctor-agent"])
 
@@ -68,7 +69,7 @@ async def analyze_session(req: AnalyzeRequest):
 
     Returns fraud score, detected patterns, AI reasoning, and recommended action.
     If the AI recommends 'terminate', automatically sends a socket terminate signal
-    to the student's session and alerts admins â€” no manual admin action required.
+    to the student's session and alerts admins - no manual admin action required.
     """
     try:
         result = await agent_analyze_session(
@@ -81,7 +82,7 @@ async def analyze_session(req: AnalyzeRequest):
         row_id = await save_analysis({**result, "source": req.source})
         result["analysis_id"] = row_id
 
-        # â”€â”€ Auto-terminate: if AI recommends terminate, emit socket events immediately â”€â”€
+        # â"€â"€ Auto-terminate: if AI recommends terminate, emit socket events immediately â"€â"€
         if result.get("recommended_action") == "terminate":
             try:
                 from main import sio
@@ -115,6 +116,14 @@ async def analyze_session(req: AnalyzeRequest):
                 print(f"[ProctorAgent] Auto-terminate emit failed: {te}")
                 result["auto_terminated"] = False
 
+        _audit.log_proctor_event(
+            event_type=AuditEventType.PROCTOR_ACTION_TAKEN,
+            student_id=req.user_id or "UNKNOWN",
+            ip_address=None,
+            session_id=req.session_id,
+            violation_type=result.get("risk_level"),
+            details={"fraud_score": result.get("fraud_score"), "recommended_action": result.get("recommended_action"), "auto_terminated": result.get("auto_terminated", False)},
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent analysis failed: {str(e)}")
@@ -198,6 +207,14 @@ async def terminate_session(req: TerminateRequest):
             "recommended_action": "terminate",
             "reason": req.reason,
         }, room="admin_room")
+        _audit.log_proctor_event(
+            event_type=AuditEventType.PROCTOR_ACTION_TAKEN,
+            student_id=req.user_id or "UNKNOWN",
+            ip_address=None,
+            session_id=req.session_id,
+            violation_type="manual_terminate",
+            details={"reason": req.reason, "manual": True},
+        )
         return {"success": True, "message": f"Terminate signal sent for session {req.session_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Terminate failed: {str(e)}")

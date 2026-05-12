@@ -1,8 +1,3 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
-
 """Groq AI API wrapper with key rotation / failover.
 
 Provides generation & evaluation helpers for the Skill-Test assessment system:
@@ -10,6 +5,8 @@ MCQ, Coding, SQL, Interview, and Final Report.
 """
 
 import json
+import logging
+from logging_config import LogConfig
 import math
 import random
 import re
@@ -18,7 +15,9 @@ from typing import Any
 import httpx
 from config import settings
 
-# â”€â”€â”€ Topic pools for variety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+logger = LogConfig.get_logger(__name__)
+
+# â"€â"€â"€ Topic pools for variety â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 TOPIC_POOLS = {
     "concepts": [
         "design patterns", "concurrency", "memory management", "error handling",
@@ -47,7 +46,7 @@ def _pick_random(arr: list, n: int) -> list:
     return random.sample(arr, min(n, len(arr)))
 
 
-# â”€â”€â”€ Low-level Groq caller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Low-level Groq caller â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 def _build_model_candidates(preferred_model: str | None) -> list[str]:
     models = [preferred_model or settings.GROQ_MODEL, *settings.GROQ_FALLBACK_MODELS]
     # Last-resort defaults that are broadly available in Groq accounts.
@@ -131,7 +130,7 @@ async def cerebras_chat(
     raise last_error or RuntimeError("All AI API keys/models failed.")
 
 
-# â”€â”€â”€ Helper: call Groq and return content string â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Helper: call Groq and return content string â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 async def _call_cerebras(
     messages: list[dict],
     *,
@@ -149,7 +148,7 @@ async def _call_cerebras(
     )
 
 
-# â”€â”€â”€ JSON parser (handles code-fenced responses) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ JSON parser (handles code-fenced responses) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 def parse_json(text: str) -> Any:
     """Parse JSON from AI response, handling markdown code blocks."""
     if not text:
@@ -676,7 +675,7 @@ async def generate_final_report(
                 '- "roadmap": array of objects with "week" (1-4), "focus_area", "action_items" (array)\n'
                 '- "performance_metrics": object with "accuracy", "speed", "completeness", "code_quality" (0-100)\n'
                 '- "concept_mastery": object with concept names as keys and scores 0-100\n'
-                '- "section_feedback": object with keys "mcq", "coding", "sql", "interview" â€” each a string\n'
+                '- "section_feedback": object with keys "mcq", "coding", "sql", "interview" - each a string\n'
                 '- "mcq_question_analysis": array of objects with "question_summary", "correct", "skill", "feedback"'
             ),
         },

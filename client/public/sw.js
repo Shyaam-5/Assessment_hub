@@ -1,8 +1,8 @@
 // Service Worker for AI Assessment Hub PWA
 // Features: Caching, Offline Support, Background Sync
 
-const CACHE_NAME = 'assessment-hub-v1'
-const API_CACHE = 'assessment-hub-api-v1'
+const CACHE_NAME = 'assessment-hub-v2'
+const API_CACHE = 'assessment-hub-api-v2'
 const OFFLINE_URL = '/offline.html'
 
 // Static assets to pre-cache
@@ -65,15 +65,20 @@ self.addEventListener('fetch', (event) => {
         return
     }
 
+    // Never cache Vite dev-server internals or prescan mobile page — must always be fresh
+    if (url.pathname.includes('/.vite/') || url.pathname.startsWith('/scan/mobile')) {
+        return
+    }
+
     // API requests: Network-first with cache fallback
     if (url.pathname.startsWith('/api/')) {
         event.respondWith(networkFirstStrategy(request))
         return
     }
 
-    // Static assets: Cache-first with network fallback
+    // JS/CSS assets: Network-first (content hashes make cache-first unsafe across deploys)
     if (isStaticAsset(url.pathname)) {
-        event.respondWith(cacheFirstStrategy(request))
+        event.respondWith(networkFirstStrategy(request))
         return
     }
 

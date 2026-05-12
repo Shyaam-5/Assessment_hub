@@ -1,4 +1,4 @@
-﻿"""
+"""
 prescan_token_service.py
 ------------------------
 HMAC-signed mobile scan token generation and validation.
@@ -10,13 +10,12 @@ import hashlib
 import hmac
 import json
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 import time
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 TOKEN_TTL_SECONDS = 1800  # 30 minutes
 

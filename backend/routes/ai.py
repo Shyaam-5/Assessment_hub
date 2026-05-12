@@ -1,6 +1,7 @@
 """AI generation & chat routes used by AdminPortal and AIChatbot."""
 
 import logging
+from logging_config import LogConfig
 from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 from services.ai_service import (
@@ -12,7 +13,7 @@ from services.ai_service import (
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

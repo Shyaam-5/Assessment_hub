@@ -1,11 +1,10 @@
-﻿"""Deliver one-time login codes by email (SMTP) or log them when SMTP is not configured."""
+"""Deliver one-time login codes by email (SMTP) or log them when SMTP is not configured."""
 
 from __future__ import annotations
 
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
@@ -13,14 +12,14 @@ from email.mime.text import MIMEText
 
 from config import settings
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 
 def send_login_otp_email(to_email: str, code: str, expires_minutes: int) -> None:
     """Send OTP to the user's email, or log it when SMTP is not configured."""
     if not settings.SMTP_HOST:
         logger.warning(
-            "[OTP] SMTP not configured â€” login code for %s: %s (expires in %s min). "
+            "[OTP] SMTP not configured - login code for %s: %s (expires in %s min). "
             "Set SMTP_HOST, SMTP_FROM, and credentials to send by email.",
             to_email,
             code,
@@ -30,7 +29,7 @@ def send_login_otp_email(to_email: str, code: str, expires_minutes: int) -> None
 
     if not settings.SMTP_FROM:
         logger.warning(
-            "[OTP] SMTP_FROM is not set â€” cannot send email to %s. Code: %s",
+            "[OTP] SMTP_FROM is not set - cannot send email to %s. Code: %s",
             to_email,
             code,
         )

@@ -75,7 +75,10 @@ class LogConfig:
         error_formatter = logging.Formatter(LogConfig.DETAILED_FORMAT)
         error_handler.setFormatter(error_formatter)
         logger.addHandler(error_handler)
-        
+
+        # Prevent messages from also being handled by parent/root logger handlers
+        logger.propagate = False
+
         return logger
 
 

@@ -1,7 +1,6 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+import logging
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 
 """Reusable pagination helper."""
 

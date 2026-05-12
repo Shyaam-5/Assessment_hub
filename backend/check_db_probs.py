@@ -1,7 +1,5 @@
-﻿import logging
+import logging
 logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
 
 import asyncio
 from database import get_pool, init_db

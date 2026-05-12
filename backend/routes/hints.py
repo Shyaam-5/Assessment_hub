@@ -1,13 +1,14 @@
 """AI-powered hint generation route."""
 
 import logging
+from logging_config import LogConfig
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from services.ai_service import cerebras_chat
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["hints"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

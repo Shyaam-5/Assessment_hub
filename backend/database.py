@@ -1,7 +1,6 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+import logging
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 
 """Async-compatible MySQL connection pool using synchronous PyMySQL under the hood.
 
@@ -26,7 +25,7 @@ import pymysql.cursors
 
 from config import settings
 
-# â”€â”€â”€ Global pool â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Global pool â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _pool: "PyMySQLPool | None" = None
 
@@ -185,12 +184,12 @@ class PyMySQLPool:
         self.close()
 
 
-# â”€â”€â”€ Public helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Public helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async def get_pool() -> PyMySQLPool:
     """Return the pool or raise if not initialised."""
     if _pool is None:
-        raise RuntimeError("Database pool not initialised â€“ call init_db() first.")
+        raise RuntimeError("Database pool not initialised - call init_db() first.")
     return _pool
 
 
@@ -240,7 +239,7 @@ async def close_db() -> None:
         print("[OK] Database pool closed.")
 
 
-# â”€â”€â”€ Prescan table DDL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Prescan table DDL â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _PRESCAN_TABLES_SQL = [
     """
@@ -427,7 +426,7 @@ async def _ensure_prescan_identity_columns() -> None:
 async def create_prescan_tables() -> None:
     """Create prescan environment-scan tables if they don't exist."""
     if _pool is None:
-        print("[WARNING] Cannot create prescan tables â€“ pool not initialised.")
+        print("[WARNING] Cannot create prescan tables - pool not initialised.")
         return
 
     for sql in _PRESCAN_TABLES_SQL:
@@ -462,7 +461,7 @@ async def create_prescan_tables() -> None:
 async def ensure_auth_login_schema() -> None:
     """Add OTP / first-login columns and helper tables for authentication."""
     if _pool is None:
-        print("[WARNING] Cannot run auth schema migration â€“ pool not initialised.")
+        print("[WARNING] Cannot run auth schema migration - pool not initialised.")
         return
 
     try:

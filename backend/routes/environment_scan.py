@@ -1,4 +1,4 @@
-﻿"""
+"""
 environment_scan.py
 -------------------
 REST API router for the environment scan (preScan) feature.
@@ -13,15 +13,14 @@ from __future__ import annotations
 
 import json
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
+from audit_logger import get_audit_logger, AuditEventType
 from config import settings
 from services.prescan_db import get_prescan_db
 from services.prescan_session_service import (
@@ -34,7 +33,8 @@ from services.prescan_token_service import (
     validate_mobile_token,
 )
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
+_audit = get_audit_logger()
 
 router = APIRouter(prefix="/api/prescan", tags=["environment_scan"])
 
@@ -167,6 +167,13 @@ async def create_session(body: CreateSessionBody, request: Request):
     logger.info(
         "Exam session created: id=%d candidate=%s exam=%d scan=%d",
         session["id"], body.userId, body.exam_id, scan["id"],
+    )
+    _audit.log_proctor_event(
+        event_type=AuditEventType.PROCTOR_SESSION_STARTED,
+        student_id=body.userId,
+        ip_address=request.client.host if request.client else None,
+        session_id=str(session["id"]),
+        details={"exam_id": body.exam_id, "room_scan_id": scan["id"]},
     )
 
     return {
@@ -464,7 +471,7 @@ async def list_frames(
 
 
 # ---------------------------------------------------------------------------
-# Mobile link validation (public â€” no userId required)
+# Mobile link validation (public - no userId required)
 # ---------------------------------------------------------------------------
 
 @router.get("/mobile/{token}")

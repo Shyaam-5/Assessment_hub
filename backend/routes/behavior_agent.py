@@ -6,6 +6,7 @@ viewing results, and generating behavioral reports.
 
 import json
 import logging
+from logging_config import LogConfig
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
@@ -24,7 +25,7 @@ from database import get_pool
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/behavior", tags=["behavior-agent"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

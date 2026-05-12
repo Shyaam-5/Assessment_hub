@@ -1,22 +1,19 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+"""Behavior Analysis Agent — AI-powered student behavior profiling engine.
 
-"""Behavior Analysis Agent â€” AI-powered student behavior profiling engine.
-
-Analyzes *how* a student works during an exam to produce a Trust Score (0â€“100):
-  1. Typing patterns  â€” keystroke velocity, rhythm, bursts vs pauses
-  2. Code progression â€” organic growth vs bulk-paste jumps
-  3. Focus/engagement â€” active vs idle time, interaction density
-  4. Anomaly detection â€” sudden skill jumps, timing anomalies
-  5. AI reasoning     â€” Cerebras-generated behavioral narrative
+Analyzes *how* a student works during an exam to produce a Trust Score (0-100):
+  1. Typing patterns  - keystroke velocity, rhythm, bursts vs pauses
+  2. Code progression - organic growth vs bulk-paste jumps
+  3. Focus/engagement - active vs idle time, interaction density
+  4. Anomaly detection - sudden skill jumps, timing anomalies
+  5. AI reasoning     - Cerebras-generated behavioral narrative
 
 Works alongside the existing ProctorAgent (which detects violations)
 to provide a holistic integrity picture.
 """
 
 import json
+import logging
+from logging_config import LogConfig
 import math
 import statistics
 from datetime import datetime, timedelta, timezone
@@ -24,6 +21,8 @@ from typing import Any
 
 from services.ai_service import cerebras_chat, parse_json
 from database import get_pool
+
+logger = LogConfig.get_logger(__name__)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -63,7 +62,7 @@ def analyze_typing_patterns(events: list[dict]) -> dict:
     keystrokes = [e for e in events if e.get("type") == "keystroke"]
     if len(keystrokes) < 5:
         return {
-            "score": 70,  # Neutral â€” not enough data
+            "score": 70,  # Neutral - not enough data
             "total_keystrokes": len(keystrokes),
             "avg_wpm": 0,
             "rhythm_consistency": 0,
@@ -83,7 +82,7 @@ def analyze_typing_patterns(events: list[dict]) -> dict:
     chars_per_min = len(keystrokes) / total_time_min
     wpm = chars_per_min / 5  # Standard: 5 chars = 1 word
 
-    # Rhythm consistency â€” lower StdDev = more robotic/paste-like
+    # Rhythm consistency - lower StdDev = more robotic/paste-like
     rhythm_std = statistics.stdev(intervals) if len(intervals) >= 2 else 0
     rhythm_mean = statistics.mean(intervals) if intervals else 200
     cv = rhythm_std / rhythm_mean if rhythm_mean > 0 else 0  # Coefficient of variation
@@ -96,7 +95,7 @@ def analyze_typing_patterns(events: list[dict]) -> dict:
     idle_gaps = sum(1 for gap in intervals if gap > IDLE_THRESHOLD_SEC * 1000)
     long_idles = sum(1 for gap in intervals if gap > LONG_IDLE_SEC * 1000)
 
-    # â”€â”€ Score calculation â”€â”€
+    # â"€â"€ Score calculation â"€â"€
     score = 100.0
 
     # Penalize unnatural speed
@@ -203,7 +202,7 @@ def analyze_code_progression(snapshots: list[dict]) -> dict:
 
     max_jump = max(deltas) if deltas else 0
 
-    # â”€â”€ Score â”€â”€
+    # â"€â"€ Score â"€â"€
     score = 100.0
 
     # Penalize suspicious jumps
@@ -216,7 +215,7 @@ def analyze_code_progression(snapshots: list[dict]) -> dict:
     elif max_jump >= SUSPICIOUS_JUMP_LINES:
         score -= 10
 
-    # Penalize zero backtracking (too perfect â€” likely pasted)
+    # Penalize zero backtracking (too perfect - likely pasted)
     if backtrack_ratio < 0.05 and final_lines > 10:
         score -= 15
 
@@ -305,7 +304,7 @@ def analyze_engagement(events: list[dict], session_duration_sec: int = 0) -> dic
     # Focus switches (blur â†’ focus pairs)
     focus_switches = min(len(blur_events), len(focus_events))
 
-    # â”€â”€ Score â”€â”€
+    # â"€â"€ Score â"€â"€
     score = 100.0
 
     if active_ratio < MIN_ENGAGEMENT_RATIO:
@@ -352,23 +351,23 @@ def detect_anomalies(
     """Detect behavioral anomalies across all metrics."""
     anomalies: list[dict] = []
 
-    # 1. Speed anomaly â€” finished too fast for difficulty
+    # 1. Speed anomaly - finished too fast for difficulty
     expected_min = {"easy": 5, "medium": 15, "hard": 30}.get(problem_difficulty, 15)
     if time_spent_sec > 0 and time_spent_sec < expected_min * 60 * 0.3:
         anomalies.append({
             "type": "speed_anomaly",
             "severity": "high",
-            "description": f"Completed in {time_spent_sec // 60}m â€” unusually fast for {problem_difficulty} difficulty",
+            "description": f"Completed in {time_spent_sec // 60}m - unusually fast for {problem_difficulty} difficulty",
         })
 
-    # 2. Typing-code mismatch â€” lots of code, few keystrokes
+    # 2. Typing-code mismatch - lots of code, few keystrokes
     final_lines = progression.get("final_line_count", 0)
     total_keys = typing.get("total_keystrokes", 0)
     if final_lines > 15 and total_keys < final_lines * 5:
         anomalies.append({
             "type": "typing_code_mismatch",
             "severity": "critical",
-            "description": f"{final_lines} lines of code with only {total_keys} keystrokes â€” likely pasted from external source",
+            "description": f"{final_lines} lines of code with only {total_keys} keystrokes - likely pasted from external source",
         })
 
     # 3. Burst-paste pattern
@@ -376,7 +375,7 @@ def detect_anomalies(
         anomalies.append({
             "type": "burst_paste_pattern",
             "severity": "high",
-            "description": f"{typing.get('burst_ratio', 0) * 100:.0f}% of keystrokes in rapid bursts â€” indicates pasting",
+            "description": f"{typing.get('burst_ratio', 0) * 100:.0f}% of keystrokes in rapid bursts - indicates pasting",
         })
 
     # 4. Suspicious code jumps
@@ -392,7 +391,7 @@ def detect_anomalies(
         anomalies.append({
             "type": "low_engagement",
             "severity": "medium",
-            "description": f"Only {engagement.get('active_ratio', 0) * 100:.0f}% active time â€” possible unfocused or away from screen",
+            "description": f"Only {engagement.get('active_ratio', 0) * 100:.0f}% active time - possible unfocused or away from screen",
         })
 
     # 6. Zero-backtrack perfection
@@ -400,10 +399,10 @@ def detect_anomalies(
         anomalies.append({
             "type": "zero_backtrack",
             "severity": "medium",
-            "description": "Code written with virtually no corrections â€” unusually perfect for live coding",
+            "description": "Code written with virtually no corrections - unusually perfect for live coding",
         })
 
-    # â”€â”€ Score: start at 100, deduct per anomaly â”€â”€
+    # â"€â"€ Score: start at 100, deduct per anomaly â"€â"€
     penalty = 0
     for a in anomalies:
         if a["severity"] == "critical":
@@ -429,7 +428,7 @@ def detect_anomalies(
 def compute_trust_score(
     typing: dict, progression: dict, engagement: dict, anomaly: dict,
 ) -> dict:
-    """Compute weighted composite Trust Score (0â€“100)."""
+    """Compute weighted composite Trust Score (0-100)."""
     t = typing.get("score", 70)
     p = progression.get("score", 70)
     e = engagement.get("score", 70)
@@ -476,7 +475,7 @@ def compute_trust_score(
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-#  Main Agent â€” orchestrates the full analysis
+#  Main Agent - orchestrates the full analysis
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def agent_analyze_behavior(
@@ -491,7 +490,7 @@ async def agent_analyze_behavior(
     Gathers behavior events from DB, runs all analyzers,
     computes trust score, and optionally reasons via AI.
     """
-    # â”€â”€ Step 1: Fetch behavior events â”€â”€
+    # â"€â"€ Step 1: Fetch behavior events â"€â"€
     events = await _fetch_behavior_events(session_id)
     if not events:
         return {
@@ -514,7 +513,7 @@ async def agent_analyze_behavior(
     if len(ts_list) >= 2:
         time_spent = int((max(ts_list) - min(ts_list)).total_seconds())
 
-    # â”€â”€ Step 2: Run each analyzer â”€â”€
+    # â"€â"€ Step 2: Run each analyzer â"€â"€
     typing = analyze_typing_patterns(events)
     progression = analyze_code_progression(snapshot_events)
     engagement = analyze_engagement(all_engagement, time_spent)
@@ -524,10 +523,10 @@ async def agent_analyze_behavior(
         problem_difficulty=problem_difficulty,
     )
 
-    # â”€â”€ Step 3: Compute trust score â”€â”€
+    # â"€â"€ Step 3: Compute trust score â"€â"€
     trust = compute_trust_score(typing, progression, engagement, anomaly)
 
-    # â”€â”€ Step 4: AI reasoning â”€â”€
+    # â"€â"€ Step 4: AI reasoning â"€â"€
     ai_insights = await _ai_behavior_reason(
         typing=typing,
         progression=progression,
@@ -538,7 +537,7 @@ async def agent_analyze_behavior(
         exam_title=exam_title,
     )
 
-    # â”€â”€ Step 5: Compose result â”€â”€
+    # â"€â"€ Step 5: Compose result â"€â"€
     result = {
         "session_id": session_id,
         "user_id": user_id,
@@ -588,13 +587,13 @@ Behavioral Analysis Data:
 {json.dumps(analysis, indent=2, default=str)}
 
 Write a report with these sections:
-1. EXECUTIVE SUMMARY â€” 2-3 sentences on the candidate's behavior profile
-2. TYPING BEHAVIOR â€” Was typing natural? Any paste patterns?
-3. CODE DEVELOPMENT â€” Was code built iteratively or pasted in chunks?
-4. ENGAGEMENT PROFILE â€” Was the candidate actively engaged throughout?
-5. ANOMALIES â€” Any suspicious behavioral patterns?
-6. TRUST ASSESSMENT â€” Overall trust score explanation
-7. RECOMMENDATION â€” For the examiner
+1. EXECUTIVE SUMMARY - 2-3 sentences on the candidate's behavior profile
+2. TYPING BEHAVIOR - Was typing natural? Any paste patterns?
+3. CODE DEVELOPMENT - Was code built iteratively or pasted in chunks?
+4. ENGAGEMENT PROFILE - Was the candidate actively engaged throughout?
+5. ANOMALIES - Any suspicious behavioral patterns?
+6. TRUST ASSESSMENT - Overall trust score explanation
+7. RECOMMENDATION - For the examiner
 
 Return as JSON:
 {{
@@ -1020,7 +1019,7 @@ Respond with JSON:
                     "role": "system",
                     "content": (
                         "You are a behavioral analysis AI for exam proctoring. "
-                        "Analyze patterns objectively. Be fair â€” consider innocent explanations. "
+                        "Analyze patterns objectively. Be fair - consider innocent explanations. "
                         "Respond ONLY with valid JSON."
                     ),
                 },

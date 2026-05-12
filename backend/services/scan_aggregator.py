@@ -1,4 +1,4 @@
-﻿"""
+"""
 scan_aggregator.py
 ------------------
 Aggregates frame verdicts and computes the final scan verdict.
@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -19,7 +18,7 @@ from config import settings
 from services.prescan_db import PrescanDB
 from services.groq_vision import FrameVerdict
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 MAX_DEVICE_FLAGGED_FRAMES = 1
 MAX_BOOK_FLAGGED_FRAMES = 3

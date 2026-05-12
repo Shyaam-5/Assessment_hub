@@ -6,6 +6,7 @@ import re
 import asyncio
 import json
 import logging
+from logging_config import LogConfig
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 import duckdb
@@ -13,7 +14,7 @@ import httpx
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["code_execution"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

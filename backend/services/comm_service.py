@@ -1,7 +1,6 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+import logging
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 
 """Communication Skills evaluation service using Cerebras AI.
 
@@ -19,7 +18,7 @@ import re
 
 from services.ai_service import cerebras_chat, parse_json
 
-# â”€â”€â”€ Static content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Static content â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 SENTENCES_A = [
     "The sun rises in the east and sets in the west.",
@@ -96,14 +95,14 @@ QUESTIONS_BANK = [
 ]
 
 
-# â”€â”€â”€ AI evaluation via Cerebras â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ AI evaluation via Cerebras â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async def evaluate_speaking(user_text: str, context_text: str, *, mode: str = "topic", metrics: dict | None = None) -> dict:
     """Evaluate a spoken response using Cerebras AI.
 
     Modes:
-        'topic'      â€“ Module C free speaking (relevance/grammar/vocabulary/coherence, each 0-25).
-        'repetition' â€“ Module A/B read & repeat (accuracy/pronunciation/fluency, 0-40/0-30/0-30).
+        'topic'      - Module C free speaking (relevance/grammar/vocabulary/coherence, each 0-25).
+        'repetition' - Module A/B read & repeat (accuracy/pronunciation/fluency, 0-40/0-30/0-30).
     """
 
     if mode == "topic":
@@ -137,9 +136,9 @@ async def evaluate_speaking(user_text: str, context_text: str, *, mode: str = "t
             f'User\'s transcribed response: "{user_text}"\n{metrics_info}\n'
             "Instructions: Ignore differences in capitalization/punctuation.\n\n"
             "Evaluate based on:\n"
-            "1. Accuracy â€“ correct words (0-40)\n"
-            "2. Clarity/Pronunciation â€“ transcription closeness (0-30)\n"
-            "3. Fluency/Pacing â€“ natural speech rate (0-30)\n\n"
+            "1. Accuracy - correct words (0-40)\n"
+            "2. Clarity/Pronunciation - transcription closeness (0-30)\n"
+            "3. Fluency/Pacing - natural speech rate (0-30)\n\n"
             "Respond with ONLY valid JSON:\n"
             '{"accuracy_score":<0-40>,"pronunciation_score":<0-30>,"fluency_score":<0-30>,'
             '"total_score":<0-100>,"feedback":"<constructive feedback>",'
@@ -168,7 +167,7 @@ async def evaluate_speaking(user_text: str, context_text: str, *, mode: str = "t
         return {"error": str(e), "feedback": "AI evaluation unavailable.", "total_score": 0}
 
 
-# â”€â”€â”€ Module A: Read & Speak â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Module A: Read & Speak â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async def run_module_a(transcribed_text: str, duration: float, sentence_id: int, target_sentence: str | None = None) -> dict:
     # Use the actual sentence text passed from the frontend when available,
@@ -212,7 +211,7 @@ async def run_module_a(transcribed_text: str, duration: float, sentence_id: int,
     }
 
 
-# â”€â”€â”€ Module B: Listen & Repeat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Module B: Listen & Repeat â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async def run_module_b(transcribed_text: str, sentence_id: int, duration: float = 0, target_sentence: str | None = None) -> dict:
     # Use the actual sentence text when provided, so evaluation always
@@ -244,7 +243,7 @@ async def run_module_b(transcribed_text: str, sentence_id: int, duration: float 
     }
 
 
-# â”€â”€â”€ Module C: Topic Speaking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Module C: Topic Speaking â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async def run_module_c(transcribed_text: str, topic_id: int | None = None) -> dict:
     topic = "General Topic"
@@ -274,7 +273,7 @@ async def run_module_c(transcribed_text: str, topic_id: int | None = None) -> di
     }
 
 
-# â”€â”€â”€ Module D: Grammar Quiz (no AI â€“ rule based) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Module D: Grammar Quiz (no AI - rule based) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def get_quiz(num_questions: int = 5, excluded_indices: list[int] | None = None) -> dict:
     if excluded_indices is None:
@@ -349,7 +348,7 @@ def submit_quiz_answers(submissions: list[dict]) -> dict:
     }
 
 
-# â”€â”€â”€ TTS audio generation (edge-tts â€” human-sounding voices) â”€â”€â”€â”€
+# â"€â"€â"€ TTS audio generation (edge-tts - human-sounding voices) â"€â"€â"€â"€
 
 async def generate_tts_audio(text: str, sentence_id: int | str, output_dir: str) -> str | None:
     """Generate TTS MP3 for a sentence using edge-tts (Microsoft Neural TTS).

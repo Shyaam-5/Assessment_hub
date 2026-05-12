@@ -1,9 +1,8 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+import logging
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 
-"""Proctoring Intelligence Agent â€” ReAct-based fraud reasoning engine.
+"""Proctoring Intelligence Agent - ReAct-based fraud reasoning engine.
 
 Replaces dumb violation counting with an AI agent that:
   1. Observes the event stream for a session
@@ -41,7 +40,7 @@ SEVERITY_WEIGHTS = {
     "low": 1,
 }
 
-# Event type risk multipliers â€” higher = more suspicious
+# Event type risk multipliers - higher = more suspicious
 EVENT_RISK = {
     # Camera / visual
     "camera_blocked":       8,
@@ -70,17 +69,17 @@ EVENT_RISK = {
     "camera_started":       0,
 }
 
-# Compound pattern definitions â€” combinations that indicate specific fraud types
+# Compound pattern definitions - combinations that indicate specific fraud types
 COMPOUND_PATTERNS = {
     "external_source_copy": {
-        "description": "Tab switch followed by content paste â€” likely copying from external source",
+        "description": "Tab switch followed by content paste - likely copying from external source",
         "events": ["tab_switch", "window_switch", "copy_paste", "copy_attempt"],
         "window_seconds": 10,
         "severity": "critical",
         "confidence": 0.85,
     },
     "impersonation": {
-        "description": "No person detected while activity continues â€” possible remote access or impersonation",
+        "description": "No person detected while activity continues - possible remote access or impersonation",
         "events": ["no_person", "face_not_detected"],
         "min_count": 3,
         "window_seconds": 120,
@@ -88,7 +87,7 @@ COMPOUND_PATTERNS = {
         "confidence": 0.70,
     },
     "receiving_answers": {
-        "description": "Phone/device detected repeatedly â€” may be receiving answers",
+        "description": "Phone/device detected repeatedly - may be receiving answers",
         "events": ["phone_detected"],
         "min_count": 2,
         "window_seconds": 300,
@@ -96,28 +95,28 @@ COMPOUND_PATTERNS = {
         "confidence": 0.80,
     },
     "assisted_test": {
-        "description": "Multiple people detected with camera blocks â€” someone else may be assisting",
+        "description": "Multiple people detected with camera blocks - someone else may be assisting",
         "events": ["multiple_people", "multiple_faces", "camera_blocked"],
         "window_seconds": 180,
         "severity": "critical",
         "confidence": 0.75,
     },
     "devtools_cheating": {
-        "description": "DevTools access attempted â€” trying to inspect or modify exam content",
+        "description": "DevTools access attempted - trying to inspect or modify exam content",
         "events": ["devtools_attempt"],
         "min_count": 1,
         "severity": "critical",
         "confidence": 0.95,
     },
     "multi_monitor_leak": {
-        "description": "External display detected â€” exam content may be visible to others or reference material in use",
+        "description": "External display detected - exam content may be visible to others or reference material in use",
         "events": ["multiple_monitors", "tab_switch", "window_switch"],
         "window_seconds": 60,
         "severity": "high",
         "confidence": 0.70,
     },
     "camera_avoidance": {
-        "description": "Repeated camera blocks â€” deliberately avoiding monitoring",
+        "description": "Repeated camera blocks - deliberately avoiding monitoring",
         "events": ["camera_blocked"],
         "min_count": 3,
         "window_seconds": 300,
@@ -133,7 +132,7 @@ THRESHOLD_CRITICAL = 60
 THRESHOLD_TERMINATE = 65
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-#  Tools â€” standalone functions the agent can call
+#  Tools - standalone functions the agent can call
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def tool_get_event_timeline(session_id: str, source: str = "comm") -> list[dict]:
@@ -263,7 +262,7 @@ def tool_correlate_events(events: list[dict]) -> list[dict]:
 
 
 def tool_calculate_fraud_score(events: list[dict], patterns: list[dict]) -> dict:
-    """Compute a weighted composite fraud score (0â€“100).
+    """Compute a weighted composite fraud score (0-100).
 
     Components:
       - Event-based score: sum of (severity_weight Ã— event_risk) per event
@@ -294,7 +293,7 @@ def tool_calculate_fraud_score(events: list[dict], patterns: list[dict]) -> dict
         else:
             pattern_score += confidence * 10
 
-    # 3. Velocity â€” how clustered are events?
+    # 3. Velocity - how clustered are events?
     velocity_score = 0.0
     if len(events) >= 3:
         first = _parse_ts(events[0].get("created_at", ""))
@@ -337,7 +336,7 @@ def tool_calculate_fraud_score(events: list[dict], patterns: list[dict]) -> dict
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-#  ReAct Agent â€” the reasoning core
+#  ReAct Agent - the reasoning core
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 AGENT_SYSTEM_PROMPT = """You are the Proctoring Intelligence Agent for an exam assessment platform.
@@ -347,12 +346,12 @@ whether the candidate is behaving honestly or committing fraud.
 You operate in a ReAct loop: Thought â†’ Action â†’ Observation â†’ Thought â†’ ...
 
 Available tools:
-1. analyze_events â€” Given event summary and detected patterns, reason about what happened
-2. recommend_action â€” Based on your analysis, recommend: "monitor" | "warn" | "flag_for_review" | "terminate"
+1. analyze_events - Given event summary and detected patterns, reason about what happened
+2. recommend_action - Based on your analysis, recommend: "monitor" | "warn" | "flag_for_review" | "terminate"
 
 IMPORTANT CONTEXT:
 - This is a HIGH-STAKES proctored exam (university exam or HR hiring assessment)
-- Fraud undermines exam integrity for ALL candidates â€” act decisively when evidence is clear.
+- Fraud undermines exam integrity for ALL candidates - act decisively when evidence is clear.
 - For clear patterns (repeated phone detections, camera blocks, multiple people), recommend termination.
 - A single accidental tab switch or brief camera glitch can be forgiven, but repeated violations cannot.
 
@@ -385,7 +384,7 @@ async def agent_analyze_session(
 
     Returns the full analysis including fraud score, patterns, and AI reasoning.
     """
-    # â”€â”€ Step 1: Observe â€” gather all data â”€â”€
+    # â"€â"€ Step 1: Observe - gather all data â"€â"€
     events = await tool_get_event_timeline(session_id, source)
     summary = await tool_get_event_summary(session_id, source)
 
@@ -400,13 +399,13 @@ async def agent_analyze_session(
             "message": "No proctoring events recorded for this session.",
         }
 
-    # â”€â”€ Step 2: Correlate â€” detect compound patterns â”€â”€
+    # â"€â"€ Step 2: Correlate - detect compound patterns â"€â"€
     patterns = tool_correlate_events(events)
 
-    # â”€â”€ Step 3: Calculate â€” compute fraud score â”€â”€
+    # â"€â"€ Step 3: Calculate - compute fraud score â"€â"€
     score_result = tool_calculate_fraud_score(events, patterns)
 
-    # â”€â”€ Step 4: Reason â€” AI analysis via Cerebras â”€â”€
+    # â"€â"€ Step 4: Reason - AI analysis via Cerebras â"€â"€
     ai_analysis = await _ai_reason(
         summary=summary,
         patterns=patterns,
@@ -416,7 +415,7 @@ async def agent_analyze_session(
         event_sample=events[-20:],  # Last 20 events for context
     )
 
-    # â”€â”€ Step 5: Compose result â”€â”€
+    # â"€â"€ Step 5: Compose result â"€â"€
     return {
         "session_id": session_id,
         "user_id": user_id,
@@ -460,19 +459,19 @@ Analysis Data:
 {json.dumps(analysis, indent=2, default=str)}
 
 Write a professional integrity report with these sections:
-1. EXECUTIVE SUMMARY â€” 2-3 sentence overview
-2. SESSION OVERVIEW â€” exam duration, total events, timeline
-3. VIOLATION ANALYSIS â€” detailed breakdown of each violation category
-4. PATTERN ANALYSIS â€” any compound fraud patterns detected and their significance
-5. RISK ASSESSMENT â€” fraud score explanation with confidence level
-6. RECOMMENDATION â€” clear recommendation for the examiner/HR
-7. EVIDENCE LOG â€” key events with timestamps (from the data)
+1. EXECUTIVE SUMMARY - 2-3 sentence overview
+2. SESSION OVERVIEW - exam duration, total events, timeline
+3. VIOLATION ANALYSIS - detailed breakdown of each violation category
+4. PATTERN ANALYSIS - any compound fraud patterns detected and their significance
+5. RISK ASSESSMENT - fraud score explanation with confidence level
+6. RECOMMENDATION - clear recommendation for the examiner/HR
+7. EVIDENCE LOG - key events with timestamps (from the data)
 
 The report should be:
 - Factual and evidence-based (cite specific event counts and timestamps)
 - Professional tone suitable for university exam boards or HR compliance
-- Balanced â€” note both incriminating and potentially innocent explanations
-- Actionable â€” clear recommendation at the end
+- Balanced - note both incriminating and potentially innocent explanations
+- Actionable - clear recommendation at the end
 
 Return as JSON:
 {{
@@ -536,7 +535,7 @@ async def agent_batch_analyze(
     session_ids: list[str],
     source: str = "comm",
 ) -> list[dict]:
-    """Analyze multiple sessions in parallel â€” useful for post-exam batch review."""
+    """Analyze multiple sessions in parallel - useful for post-exam batch review."""
     async def _safe_analyze(sid: str) -> dict:
         try:
             return await agent_analyze_session(sid, source)
@@ -569,7 +568,7 @@ async def agent_detect_collusion(
         except Exception:
             all_events[sid] = []
 
-    # Find temporal clusters â€” sessions with violations at the same time
+    # Find temporal clusters - sessions with violations at the same time
     clusters: list[dict] = []
     event_times: dict[str, list[tuple[str, str]]] = {}  # session â†’ [(event_type, timestamp)]
 
@@ -614,7 +613,7 @@ async def agent_detect_collusion(
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-#  DB persistence â€” store agent analysis results
+#  DB persistence - store agent analysis results
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 _AGENT_TABLE_SQL = """
@@ -803,7 +802,7 @@ Respond with the JSON format specified in your instructions."""
     # Fallback: rule-based reasoning
     action = fraud_score.get("risk_level", "monitor")
     return {
-        "reasoning": "AI reasoning unavailable â€” using rule-based assessment.",
+        "reasoning": "AI reasoning unavailable - using rule-based assessment.",
         "fraud_assessment": "suspicious" if fraud_score.get("fraud_score", 0) > THRESHOLD_FLAG else "clean",
         "confidence": 0.5,
         "recommended_action": action,

@@ -1,12 +1,11 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
-
 """
 Database schema for audit logging and security event storage.
 Contains SQL migrations for creating audit tables.
 """
+
+import logging
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 
 AUDIT_TABLES_SCHEMA = """
 -- Audit Events Table
@@ -212,9 +211,9 @@ async def create_audit_tables(db_connection) -> None:
                     await cursor.execute(statement)
             
             await db_connection.commit()
-            print("âœ“ Audit tables created successfully")
+            print("[OK] Audit tables created successfully")
     except Exception as e:
-        print(f"âœ— Error creating audit tables: {e}")
+        print(f"[ERROR] Error creating audit tables: {e}")
         raise
 
 
@@ -240,8 +239,8 @@ async def drop_audit_tables(db_connection) -> None:
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
             
             await db_connection.commit()
-            print("âœ“ Audit tables dropped successfully")
+            print("[OK] Audit tables dropped successfully")
     except Exception as e:
-        print(f"âœ— Error dropping audit tables: {e}")
+        print(f"[ERROR] Error dropping audit tables: {e}")
         raise
 

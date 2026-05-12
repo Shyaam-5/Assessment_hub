@@ -1,4 +1,4 @@
-﻿"""
+"""
 prescan_session_service.py
 --------------------------
 Session and room-scan lifecycle helpers for environment scan.
@@ -7,16 +7,15 @@ Adapted from preScan/backend/services/session_service.py.
 from __future__ import annotations
 
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 import secrets
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from services.prescan_db import PrescanDB
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 
 def _utcnow_str() -> str:

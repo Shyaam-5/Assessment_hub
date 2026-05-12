@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+from logging_config import LogConfig
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -13,7 +14,7 @@ from database import get_pool
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["aptitude"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

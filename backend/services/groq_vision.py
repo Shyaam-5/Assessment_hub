@@ -1,4 +1,4 @@
-﻿"""
+"""
 groq_vision.py
 --------------
 Groq Vision service for environment scan frame analysis.
@@ -9,16 +9,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from config import settings
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 UNAUTHORIZED_CLASSES = {"cell phone", "laptop", "tablet", "smartwatch", "remote"}
 STUDY_MATERIAL_CLASSES = {"book", "notebook", "paper", "magazine"}

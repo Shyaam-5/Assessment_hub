@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from logging_config import LogConfig
 import secrets
 import string
 import uuid
@@ -20,7 +21,7 @@ from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

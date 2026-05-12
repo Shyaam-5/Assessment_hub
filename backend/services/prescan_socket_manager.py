@@ -1,4 +1,4 @@
-﻿"""
+"""
 prescan_socket_manager.py
 -------------------------
 Socket.IO room manager for environment scan sessions.
@@ -7,12 +7,11 @@ Adapted from preScan/backend/websocket/manager.py.
 from __future__ import annotations
 
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 from typing import Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 
 class PrescanSocketIOManager:
@@ -37,7 +36,7 @@ class PrescanSocketIOManager:
         try:
             await self.sio.enter_room(sid, room_name)
         except KeyError:
-            logger.info("Stale sid=%s for session=%s role=%s â€” skipping join", sid, session_token, role)
+            logger.info("Stale sid=%s for session=%s role=%s - skipping join", sid, session_token, role)
             return False
 
         if session_token not in self.session_rooms:

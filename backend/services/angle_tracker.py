@@ -1,4 +1,4 @@
-﻿"""
+"""
 angle_tracker.py
 ----------------
 Tracks which room angles have been covered during an environment scan.
@@ -6,10 +6,9 @@ Adapted from preScan/backend/services/angle_tracker.py.
 """
 from __future__ import annotations
 import logging
+from logging_config import LogConfig
 
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger("audit")
-audit_logger.debug("Audit logger initialized for module")
+logger = LogConfig.get_logger(__name__)
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 

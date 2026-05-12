@@ -1,7 +1,5 @@
-﻿import logging
+import logging
 logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
 
 """One-off script to create a new user in the database."""
 

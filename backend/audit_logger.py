@@ -130,7 +130,7 @@ class AuditLogger:
         }
         
         # Choose logger based on event type
-        if any(keyword in event_type.value for keyword in ["AUTH", "ACCESS_DENIED", "PERMISSION", "VIOLATION"]):
+        if any(keyword in event_type.name for keyword in ["AUTH_", "ACCESS_DENIED", "PERMISSION_DENIED", "VIOLATION"]):
             self.security_logger.warning(
                 f"{event_type.value}: {action or ''} | User: {user_id} | IP: {ip_address}",
                 extra=log_context

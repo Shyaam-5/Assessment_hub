@@ -5,27 +5,72 @@ import { normalizeFinalVerdict } from '../utils/normalizeVerdict';
 const DEFAULT_ANGLES = { front: false, left: false, right: false, back: false };
 const MAX_THUMBNAILS = 5;
 
+// Safety check for React hooks in case of bundling issues
+const safeUseState = (initialValue) => {
+  try {
+    return useState(initialValue);
+  } catch (error) {
+    console.error('React useState error:', error);
+    // Fallback for when React is not available
+    let value = initialValue;
+    const setValue = (newValue) => {
+      value = typeof newValue === 'function' ? newValue(value) : newValue;
+    };
+    return [value, setValue];
+  }
+};
+
+const safeUseEffect = (effect, deps) => {
+  try {
+    return useEffect(effect, deps);
+  } catch (error) {
+    console.error('React useEffect error:', error);
+    // Fallback - just run the effect immediately
+    effect();
+  }
+};
+
+const safeUseCallback = (callback, deps) => {
+  try {
+    return useCallback(callback, deps);
+  } catch (error) {
+    console.error('React useCallback error:', error);
+    // Fallback - just return the callback
+    return callback;
+  }
+};
+
+const safeUseRef = (initialValue) => {
+  try {
+    return useRef(initialValue);
+  } catch (error) {
+    console.error('React useRef error:', error);
+    // Fallback - simple object with current property
+    return { current: initialValue };
+  }
+};
+
 export function useDesktopScanSocket(sessionToken) {
-  const [connected, setConnected] = useState(false);
-  const [mobileConnected, setMobileConnected] = useState(false);
-  const [status, setStatus] = useState('pending');
-  const [progress, setProgress] = useState(null);
-  const [verdict, setVerdict] = useState(null);
-  const [anglesCovered, setAnglesCovered] = useState({ ...DEFAULT_ANGLES });
-  const [coveragePercent, setCoveragePercent] = useState(0);
-  const [currentAngle, setCurrentAngle] = useState('front');
-  const [recentThumbnails, setRecentThumbnails] = useState([]);
-  const [scanError, setScanError] = useState(null);
+  const [connected, setConnected] = safeUseState(false);
+  const [mobileConnected, setMobileConnected] = safeUseState(false);
+  const [status, setStatus] = safeUseState('pending');
+  const [progress, setProgress] = safeUseState(null);
+  const [verdict, setVerdict] = safeUseState(null);
+  const [anglesCovered, setAnglesCovered] = safeUseState({ ...DEFAULT_ANGLES });
+  const [coveragePercent, setCoveragePercent] = safeUseState(0);
+  const [currentAngle, setCurrentAngle] = safeUseState('front');
+  const [recentThumbnails, setRecentThumbnails] = safeUseState([]);
+  const [scanError, setScanError] = safeUseState(null);
 
-  const socketRef = useRef(null);
+  const socketRef = safeUseRef(null);
 
-  const updateAngles = useCallback((covered, percent, angle) => {
+  const updateAngles = safeUseCallback((covered, percent, angle) => {
     setAnglesCovered(covered);
     setCoveragePercent(percent);
     setCurrentAngle(angle);
   }, []);
 
-  const updateProgress = useCallback((update) => {
+  const updateProgress = safeUseCallback((update) => {
     // Backend sends frame_index (0-based) and is_flagged; accumulate locally
     setProgress((prev) => {
       const framesProcessed = typeof update.frame_index === 'number'
@@ -57,7 +102,7 @@ export function useDesktopScanSocket(sessionToken) {
     }
   }, []);
 
-  const emitJoinSession = useCallback(
+  const emitJoinSession = safeUseCallback(
     (socket) => {
       if (!sessionToken) return;
       socket.emit('join_scan_session', {
@@ -72,18 +117,18 @@ export function useDesktopScanSocket(sessionToken) {
     [sessionToken],
   );
 
-  const requestStatus = useCallback((socket) => {
+  const requestStatus = safeUseCallback((socket) => {
     socket.emit('request_scan_status', {});
   }, []);
 
-  const handleConnect = useCallback(() => {
+  const handleConnect = safeUseCallback(() => {
     setConnected(true);
     if (socketRef.current) {
       emitJoinSession(socketRef.current);
     }
   }, [emitJoinSession]);
 
-  useEffect(() => {
+  safeUseEffect(() => {
     if (!sessionToken) return;
 
     const socket = prescanSocketManager.connect();
@@ -189,7 +234,7 @@ export function useDesktopScanSocket(sessionToken) {
     };
   }, [sessionToken, handleConnect, updateProgress, updateAngles, requestStatus]);
 
-  const resetForRetry = useCallback(() => {
+  const resetForRetry = safeUseCallback(() => {
     setMobileConnected(false);
     setVerdict(null);
     setProgress(null);

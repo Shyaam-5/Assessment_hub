@@ -3,12 +3,13 @@
 import os
 import uuid
 import logging
+from logging_config import LogConfig
 
 from fastapi import APIRouter, File, Form, UploadFile, Request
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 _MAX_BYTES = 15 * 1024 * 1024  # 15 MiB

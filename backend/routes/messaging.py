@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+from logging_config import LogConfig
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel, Field
@@ -10,7 +11,7 @@ import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["messaging"])
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
 

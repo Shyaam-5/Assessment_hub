@@ -1,4 +1,4 @@
-﻿"""
+"""
 prescan_socket_handlers.py
 --------------------------
 Registers environment-scan Socket.IO event handlers on the main sio instance.
@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -26,7 +25,7 @@ from services.prescan_session_service import (
     update_session_status,
 )
 
-logger = logging.getLogger(__name__)
+logger = LogConfig.get_logger(__name__)
 
 # Module-level state
 _prescan_manager: Optional[PrescanSocketIOManager] = None
@@ -85,7 +84,7 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
     _prescan_manager = PrescanSocketIOManager(sio)
     manager = _prescan_manager
 
-    # â”€â”€ join_scan_session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ join_scan_session â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     @sio.on("join_scan_session")
     async def handle_join_session(sid: str, data: dict) -> None:
         session_token = data.get("session_token")
@@ -147,7 +146,7 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
                 },
             )
 
-    # â”€â”€ frame_result â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ frame_result â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     @sio.on("frame_result")
     async def handle_frame_result(sid: str, data: dict) -> None:
         meta = manager.get_sid_meta(sid)
@@ -242,7 +241,7 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
                 logger.error("Failed to update session after rejection: %s", exc)
             _angle_trackers.pop(room_scan_id, None)
 
-    # â”€â”€ angle_update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ angle_update â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     @sio.on("angle_update")
     async def handle_angle_update(sid: str, data: dict) -> None:
         meta = manager.get_sid_meta(sid)
@@ -269,7 +268,7 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
         }
         await manager.emit_to_desktop(meta["session_token"], "angle_coverage_update", coverage_data)
 
-    # â”€â”€ scan_complete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ scan_complete â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     @sio.on("scan_complete")
     async def handle_scan_complete(sid: str, data: dict) -> None:
         meta = manager.get_sid_meta(sid)
@@ -326,9 +325,9 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
         }
         await manager.emit_to_all(session_token, "verdict_issued", verdict_data)
         _angle_trackers.pop(room_scan_id, None)
-        logger.info("Scan %d completed: %s â€“ %s", room_scan_id, final_verdict.verdict, final_verdict.reason)
+        logger.info("Scan %d completed: %s - %s", room_scan_id, final_verdict.verdict, final_verdict.reason)
 
-    # â”€â”€ request_scan_status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ request_scan_status â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     @sio.on("request_scan_status")
     async def handle_request_status(sid: str, data: dict) -> None:
         meta = manager.get_sid_meta(sid)
@@ -382,7 +381,7 @@ def register_prescan_socket_handlers(sio) -> PrescanSocketIOManager:
         except Exception as exc:
             logger.error("handle_request_status error: %s", exc)
 
-    # â”€â”€ proctor_override â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ proctor_override â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     @sio.on("proctor_override")
     async def handle_proctor_override(sid: str, data: dict) -> None:
         """Allow admin/mentor to override a scan verdict. Uses main backend users table."""

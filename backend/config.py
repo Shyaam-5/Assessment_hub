@@ -1,7 +1,6 @@
-﻿import logging
-logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('audit')
-audit_logger.debug('Audit logger initialized for module')
+import logging
+from logging_config import LogConfig
+logger = LogConfig.get_logger(__name__)
 
 """Application configuration loaded from environment variables."""
 
@@ -46,7 +45,7 @@ class Settings:
         _origins = os.getenv("ALLOWED_ORIGINS", "")
         self.ALLOWED_ORIGINS: list[str] = [o.strip() for o in _origins.split(",") if o.strip()] if _origins.strip() else []
 
-        # --- Groq Vision (for image analysis â€” must be a vision-capable model) ---
+        # --- Groq Vision (for image analysis - must be a vision-capable model) ---
         self.GROQ_VISION_MODEL: str = os.getenv("GROQ_VISION_MODEL", "llama-3.2-90b-vision-preview")
         self.FRONTEND_URL: str = os.getenv("FRONTEND_URL", "").strip()
 
