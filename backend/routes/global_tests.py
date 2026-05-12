@@ -1,0 +1,1352 @@
+"""Global test routes: CRUD for tests, questions, submissions, and AI reports."""
+
+import json
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
+
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from pydantic import BaseModel
+
+import pymysql.cursors
+from database import get_pool
+from config import settings
+from services.ai_service import cerebras_chat
+from audit_logger import get_audit_logger, AuditEventType
+
+router = APIRouter(prefix="/api", tags=["global-tests"])
+audit_logger = get_audit_logger()
+
+PISTON_URL = "https://emkc.org/api/v2/piston/execute"
+SECTIONS = ["aptitude", "verbal", "logical", "coding", "sql"]
+
+
+def _client_ip(request: Request) -> str:
+    if "x-forwarded-for" in request.headers:
+        return request.headers["x-forwarded-for"].split(",")[0].strip()
+    if "cf-connecting-ip" in request.headers:
+        return request.headers["cf-connecting-ip"]
+    return request.client.host if request.client else "UNKNOWN"
+
+
+async def _log_read_access(request: Request):
+    if request.method != "GET":
+        return
+    audit_logger.log_data_access(
+        user_id=request.headers.get("x-user-id", "anonymous"),
+        ip_address=_client_ip(request),
+        resource_type="global_tests_read",
+        query_params={"path": request.url.path, "query": request.url.query},
+    )
+
+
+router.dependencies.append(Depends(_log_read_access))
+
+LANGUAGE_MAP = {
+    "Python": {"language": "python", "version": "3.10.0"},
+    "JavaScript": {"language": "javascript", "version": "18.15.0"},
+    "Java": {"language": "java", "version": "15.0.2"},
+    "C": {"language": "c", "version": "10.2.0"},
+    "C++": {"language": "cpp", "version": "10.2.0"},
+    "SQL": {"language": "sqlite3", "version": "3.36.0"},
+}
+
+
+# ─── Request Bodies ────────────────────────────────────────────
+
+class GlobalTestCreate(BaseModel):
+    title: str = "Untitled"
+    type: str = "comprehensive"
+    difficulty: Optional[str] = None
+    duration: int = 180
+    passingScore: int = 60
+    description: str = ""
+    startTime: Optional[str] = None
+    deadline: Optional[str] = None
+    maxAttempts: int = 1
+    maxTabSwitches: int = 3
+    status: str = "draft"
+    createdBy: Optional[str] = None
+    sectionConfig: Optional[dict] = None
+    proctoring: Optional[dict] = None
+
+
+class GlobalTestUpdate(BaseModel):
+    title: Optional[str] = None
+    type: Optional[str] = None
+    difficulty: Optional[str] = None
+    duration: Optional[int] = None
+    passingScore: Optional[int] = None
+    description: Optional[str] = None
+    startTime: Optional[str] = None
+    deadline: Optional[str] = None
+    maxAttempts: Optional[int] = None
+    maxTabSwitches: Optional[int] = None
+    status: Optional[str] = None
+    sectionConfig: Optional[dict] = None
+    proctoring: Optional[dict] = None
+
+
+class QuestionBatch(BaseModel):
+    section: str
+    questions: List[dict]
+
+
+class GlobalTestSubmit(BaseModel):
+    studentId: str
+    answers: Optional[Dict[str, Any]] = None
+    selectedLanguages: Optional[Dict[str, str]] = None
+    sectionScores: Optional[dict] = None
+    timeSpent: int = 0
+    tabSwitches: int = 0
+    copyPasteAttempts: int = 0
+    cameraBlockedCount: int = 0
+    phoneDetectionCount: int = 0
+    faceMissingCount: int = 0
+    totalViolations: int = 0
+    multipleMonitorCount: int = 0
+    proctoringEnabled: Optional[bool] = None
+    behaviorSessionId: Optional[str] = None
+    submissionType: Optional[str] = None
+    terminationReason: Optional[str] = None
+
+
+# ─── Helpers ───────────────────────────────────────────────────
+
+def _fmt_dt(iso: Optional[str]) -> Optional[str]:
+    if not iso or not iso.strip():
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return iso.replace("T", " ")[:19] if iso else None
+
+
+def _safe_json(val) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except Exception:
+            return None
+    return val
+
+
+async def _get_table_columns(cur, table_name: str) -> set[str]:
+    await cur.execute(
+        """SELECT COLUMN_NAME
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s""",
+        (table_name,),
+    )
+    rows = await cur.fetchall()
+    if not rows:
+        return set()
+
+    if isinstance(rows[0], dict):
+        return {r["COLUMN_NAME"] for r in rows}
+    return {r[0] for r in rows}
+
+
+def _to_bool(v: Any, default: bool = False) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return default
+
+
+def _normalize_proctoring_config(raw: Any, fallback_max_tab: int = 3) -> dict:
+    cfg = raw if isinstance(raw, dict) else {}
+    enabled = _to_bool(cfg.get("enabled"), False)
+    track_tab = _to_bool(cfg.get("trackTabSwitches"), False) if enabled else False
+
+    max_tab = cfg.get("maxTabSwitches", fallback_max_tab)
+    try:
+        max_tab = int(max_tab)
+    except Exception:
+        max_tab = fallback_max_tab
+    max_tab = max(0, max_tab)
+    if not enabled or not track_tab:
+        max_tab = 0
+
+    enable_video = _to_bool(cfg.get("enableVideoAudio", cfg.get("videoAudio")), False) if enabled else False
+    disable_copy = _to_bool(cfg.get("disableCopyPaste"), False) if enabled else False
+    detect_block = _to_bool(cfg.get("detectCameraBlocking", cfg.get("enableFaceDetection")), False) if enabled else False
+    detect_phone = _to_bool(cfg.get("detectPhoneUsage"), False) if enabled else False
+    fullscreen = _to_bool(cfg.get("enforceFullscreen"), False) if enabled else False
+    auto_submit = _to_bool(cfg.get("autoSubmitOnViolation"), False) if enabled else False
+
+    return {
+        "enabled": enabled,
+        "trackTabSwitches": track_tab,
+        "maxTabSwitches": max_tab,
+        "enableVideoAudio": enable_video,
+        "disableCopyPaste": disable_copy,
+        "detectCameraBlocking": detect_block,
+        "detectPhoneUsage": detect_phone,
+        "enforceFullscreen": fullscreen,
+        "autoSubmitOnViolation": auto_submit,
+        # Compatibility keys for consumers that still use problem-style naming.
+        "videoAudio": enable_video,
+        "enableFaceDetection": detect_block,
+    }
+
+
+def _normalize_section_config(raw: Any, fallback_duration: int) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+
+    sections = raw.get("sections")
+    if not isinstance(sections, list):
+        return None
+
+    normalized_sections = []
+    seen = set()
+    default_order = {s: i + 1 for i, s in enumerate(SECTIONS)}
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        sid = str(sec.get("id", "")).strip().lower()
+        if sid not in SECTIONS or sid in seen:
+            continue
+        seen.add(sid)
+
+        enabled = _to_bool(sec.get("enabled"), True)
+        try:
+            q_count = max(0, int(sec.get("questionsCount", 0)))
+        except Exception:
+            q_count = 0
+        try:
+            time_minutes = max(0, int(sec.get("timeMinutes", 0)))
+        except Exception:
+            time_minutes = 0
+        try:
+            order = int(sec.get("order", default_order[sid]))
+        except Exception:
+            order = default_order[sid]
+
+        normalized_sections.append({
+            "id": sid,
+            "enabled": enabled,
+            "order": order,
+            "questionsCount": q_count,
+            "timeMinutes": time_minutes,
+        })
+
+    normalized_sections.sort(key=lambda s: s["order"])
+
+    section_time_mode = raw.get("sectionTimeMode") or "fixed"
+    if section_time_mode not in ("fixed", "free"):
+        section_time_mode = "fixed"
+
+    try:
+        total_duration = int(raw.get("totalDurationMinutes", fallback_duration))
+    except Exception:
+        total_duration = fallback_duration
+    total_duration = max(1, total_duration)
+
+    return {
+        "sections": normalized_sections,
+        "totalDurationMinutes": total_duration,
+        "sectionTimeMode": section_time_mode,
+    }
+
+
+def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _validate_schedule(start: Optional[str], end: Optional[str]):
+    start_dt = _parse_dt(start)
+    end_dt = _parse_dt(end)
+    if start and not start_dt:
+        raise HTTPException(400, "Invalid startTime format")
+    if end and not end_dt:
+        raise HTTPException(400, "Invalid deadline format")
+    if start_dt and end_dt and start_dt >= end_dt:
+        raise HTTPException(400, "startTime must be earlier than deadline")
+
+
+def _clean_global_test(t: dict) -> dict:
+    proctoring = _normalize_proctoring_config(
+        _safe_json(t.get("proctoring_config")),
+        fallback_max_tab=t.get("max_tab_switches") or 3,
+    )
+    section_cfg = _normalize_section_config(
+        _safe_json(t.get("section_config")),
+        fallback_duration=t.get("duration") or 180,
+    )
+    return {
+        "id": t["id"],
+        "title": t["title"],
+        "type": t.get("type"),
+        "difficulty": t.get("difficulty"),
+        "duration": t.get("duration"),
+        "totalQuestions": t.get("total_questions"),
+        "passingScore": t.get("passing_score"),
+        "status": t.get("status"),
+        "createdBy": t.get("created_by"),
+        "createdAt": str(t.get("created_at", "")),
+        "description": t.get("description") or "",
+        "startTime": str(t["start_time"]) if t.get("start_time") else None,
+        "deadline": str(t["deadline"]) if t.get("deadline") else None,
+        "maxAttempts": t.get("max_attempts") or 1,
+        "maxTabSwitches": proctoring.get("maxTabSwitches", t.get("max_tab_switches") or 0),
+        "sectionConfig": section_cfg,
+        "proctoring": proctoring,
+    }
+
+
+def _normalize_sql(s: str) -> str:
+    return "\n".join(l.strip() for l in s.split("\n") if l.strip())
+
+
+def _compare_sql_data_only(actual: str, expected: str) -> bool:
+    try:
+        def _extract(s: str):
+            normalised = s.replace("|", "\n").replace("\r", "")
+            lines = [l.strip() for l in normalised.split("\n") if l.strip()]
+            data_lines = [l for l in lines if re.search(r"\d", l) or "|" in l]
+            all_vals = sorted(
+                v.strip().lower()
+                for l in lines
+                for v in re.split(r"[|\s]+", l)
+                if v.strip()
+            )
+            return "|".join(data_lines).lower(), "|".join(all_vals)
+
+        ad, av = _extract(actual)
+        ed, ev = _extract(expected)
+        if ad == ed:
+            return True
+        if av == ev:
+            return True
+        an = sorted(re.findall(r"[\d.]+", actual))
+        en = sorted(re.findall(r"[\d.]+", expected))
+        return an == en and len(an) > 0
+    except Exception:
+        return False
+
+
+async def _run_inline_coding_tests(code: str, language: str, test_cases: list) -> dict:
+    """Run code against test cases using Piston API."""
+    if not test_cases or not isinstance(test_cases, list) or len(test_cases) == 0:
+        return {"passedCount": 0, "total": 0, "percentage": 0, "isCorrect": False}
+
+    runtime = LANGUAGE_MAP.get(language, {"language": "python", "version": "3.10.0"})
+    passed = 0
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for tc in test_cases:
+            stdin = str(tc.get("input") or "")
+            expected = str(tc.get("expected_output") or tc.get("expectedOutput") or "").strip()
+            try:
+                resp = await client.post(PISTON_URL, json={
+                    "language": runtime["language"],
+                    "version": runtime["version"],
+                    "files": [{"content": code}],
+                    "stdin": stdin,
+                })
+                data = resp.json()
+                actual = (data.get("run", {}).get("output") or "").strip()
+                if actual == expected:
+                    passed += 1
+            except Exception:
+                pass
+
+    total = len(test_cases)
+    pct = round((passed / total) * 100) if total else 0
+    return {"passedCount": passed, "total": total, "percentage": pct, "isCorrect": passed == total}
+
+
+async def _run_sql_and_compare(schema: str, query: str, expected_output: str) -> dict:
+    """Run SQL via Piston and compare output."""
+    expected = (expected_output or "").strip().replace("\r", "")
+    try:
+        full_q = f"{schema}\n\n{query}" if schema else query
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(PISTON_URL, json={
+                "language": "sqlite3",
+                "version": "3.36.0",
+                "files": [{"content": full_q}],
+            })
+        data = resp.json()
+        actual = (data.get("run", {}).get("output") or "").strip().replace("\r", "")
+        is_correct = False
+        if data.get("run", {}).get("code") == 0:
+            is_correct = (
+                actual == expected
+                or _normalize_sql(actual) == _normalize_sql(expected)
+                or _compare_sql_data_only(actual, expected)
+            )
+        return {"isCorrect": is_correct, "output": actual}
+    except Exception as e:
+        return {"isCorrect": False, "output": str(e)}
+
+
+# ─── CRUD Routes ───────────────────────────────────────────────
+
+@router.get("/global-tests")
+async def list_global_tests(
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+):
+    pool = await get_pool()
+    query = "SELECT * FROM global_tests WHERE 1=1"
+    params: list = []
+    if status:
+        query += " AND status = %s"
+        params.append(status)
+    if type:
+        query += " AND type = %s"
+        params.append(type)
+    query += " ORDER BY created_at DESC"
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(query, params)
+                rows = await cur.fetchall()
+        return [_clean_global_test(t) for t in rows]
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/global-tests/{test_id}")
+async def get_global_test(test_id: str):
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT * FROM global_tests WHERE id = %s", (test_id,))
+                t = await cur.fetchone()
+                if not t:
+                    raise HTTPException(404, "Test not found")
+
+                await cur.execute(
+                    "SELECT * FROM test_questions WHERE test_id = %s ORDER BY section, question_id",
+                    (test_id,),
+                )
+                questions = await cur.fetchall()
+
+        by_section: dict = {s: [] for s in SECTIONS}
+        for q in questions:
+            item = {
+                "id": q["question_id"],
+                "question": q["question"],
+                "options": [q["option_1"], q["option_2"], q["option_3"], q["option_4"]],
+                "correctAnswer": q["correct_answer"],
+                "explanation": q.get("explanation"),
+                "category": q.get("category"),
+                "questionType": q.get("question_type"),
+                "section": q["section"],
+                "testCases": _safe_json(q.get("test_cases")),
+                "starterCode": q.get("starter_code"),
+                "solutionCode": q.get("solution_code"),
+                "points": q.get("points") or 1,
+                "timeLimit": q.get("time_limit"),
+            }
+            sec = q["section"]
+            if sec in by_section:
+                by_section[sec].append(item)
+
+        result = _clean_global_test(t)
+        result["questionsBySection"] = by_section
+        result["questions"] = [
+            {
+                "id": q["question_id"],
+                "section": q["section"],
+                "question": q["question"],
+                "options": [q["option_1"], q["option_2"], q["option_3"], q["option_4"]],
+                "correctAnswer": q["correct_answer"],
+                "questionType": q.get("question_type"),
+                "explanation": q.get("explanation"),
+                "category": q.get("category"),
+            }
+            for q in questions
+        ]
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.post("/global-tests")
+async def create_global_test(body: GlobalTestCreate, request: Request):
+    pool = await get_pool()
+    test_id = str(uuid.uuid4())
+    if body.duration <= 0:
+        raise HTTPException(400, "duration must be greater than 0")
+    if body.passingScore < 0 or body.passingScore > 100:
+        raise HTTPException(400, "passingScore must be between 0 and 100")
+    if body.maxAttempts <= 0:
+        raise HTTPException(400, "maxAttempts must be greater than 0")
+    _validate_schedule(body.startTime, body.deadline)
+
+    normalized_section_cfg = _normalize_section_config(body.sectionConfig, body.duration)
+    normalized_proctoring = _normalize_proctoring_config(body.proctoring, body.maxTabSwitches or 3)
+
+    sc_json = json.dumps(normalized_section_cfg) if normalized_section_cfg else None
+    pc_json = json.dumps(normalized_proctoring)
+    total_q = 0
+    if normalized_section_cfg and normalized_section_cfg.get("sections"):
+        total_q = sum(
+            s.get("questionsCount", 0)
+            for s in normalized_section_cfg["sections"]
+            if s.get("enabled")
+        )
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """INSERT INTO global_tests
+                       (id, title, type, difficulty, duration, total_questions,
+                        passing_score, status, created_by, description,
+                        start_time, deadline, max_attempts, max_tab_switches,
+                        section_config, proctoring_config)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        test_id, body.title, body.type, body.difficulty,
+                        body.duration, total_q, body.passingScore,
+                        body.status, body.createdBy, body.description,
+                        _fmt_dt(body.startTime), _fmt_dt(body.deadline),
+                        body.maxAttempts, normalized_proctoring.get("maxTabSwitches", 0),
+                        sc_json, pc_json,
+                    ),
+                )
+            await conn.commit()
+
+        audit_logger.log_event(
+            AuditEventType.ADMIN_TEST_CREATED,
+            user_id=request.headers.get("x-user-id", "anonymous"),
+            ip_address=_client_ip(request),
+            resource_id=test_id,
+            resource_type="global_test",
+            action="Global test created",
+            details={"title": body.title, "type": body.type},
+        )
+        return {
+            "id": test_id,
+            "title": body.title,
+            "type": body.type,
+            "duration": body.duration,
+            "totalQuestions": total_q,
+            "passingScore": body.passingScore,
+            "status": body.status,
+            "sectionConfig": normalized_section_cfg,
+            "proctoring": normalized_proctoring,
+        }
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.put("/global-tests/{test_id}")
+async def update_global_test(test_id: str, body: GlobalTestUpdate, request: Request):
+    pool = await get_pool()
+    if body.duration is not None and body.duration <= 0:
+        raise HTTPException(400, "duration must be greater than 0")
+    if body.passingScore is not None and (body.passingScore < 0 or body.passingScore > 100):
+        raise HTTPException(400, "passingScore must be between 0 and 100")
+    if body.maxAttempts is not None and body.maxAttempts <= 0:
+        raise HTTPException(400, "maxAttempts must be greater than 0")
+    _validate_schedule(body.startTime, body.deadline)
+
+    updates: list[str] = []
+    params: list = []
+
+    field_map = {
+        "title": "title", "type": "type", "difficulty": "difficulty",
+        "duration": "duration", "passingScore": "passing_score",
+        "description": "description", "maxAttempts": "max_attempts",
+        "maxTabSwitches": "max_tab_switches", "status": "status",
+    }
+    for attr, col in field_map.items():
+        val = getattr(body, attr, None)
+        if val is not None:
+            updates.append(f"{col} = %s")
+            params.append(val)
+
+    if body.startTime is not None:
+        updates.append("start_time = %s")
+        params.append(_fmt_dt(body.startTime))
+    if body.deadline is not None:
+        updates.append("deadline = %s")
+        params.append(_fmt_dt(body.deadline))
+
+    if body.sectionConfig is not None:
+        duration_for_sections = body.duration if body.duration is not None else 180
+        normalized_section_cfg = _normalize_section_config(body.sectionConfig, duration_for_sections)
+        updates.append("section_config = %s")
+        params.append(json.dumps(normalized_section_cfg))
+        total_q = sum(
+            s.get("questionsCount", 0)
+            for s in (normalized_section_cfg or {}).get("sections", [])
+            if s.get("enabled")
+        )
+        updates.append("total_questions = %s")
+        params.append(total_q)
+
+    if body.proctoring is not None:
+        fallback_tab = body.maxTabSwitches if body.maxTabSwitches is not None else 3
+        normalized_proctoring = _normalize_proctoring_config(body.proctoring, fallback_tab)
+        updates.append("proctoring_config = %s")
+        params.append(json.dumps(normalized_proctoring))
+        updates.append("max_tab_switches = %s")
+        params.append(normalized_proctoring.get("maxTabSwitches", 0))
+
+    if not updates:
+        raise HTTPException(400, "No fields to update")
+
+    params.append(test_id)
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"UPDATE global_tests SET {', '.join(updates)} WHERE id = %s", params
+                )
+            await conn.commit()
+        audit_logger.log_event(
+            AuditEventType.ADMIN_TEST_MODIFIED,
+            user_id=request.headers.get("x-user-id", "anonymous"),
+            ip_address=_client_ip(request),
+            resource_id=test_id,
+            resource_type="global_test",
+            action="Global test updated",
+            details=body.model_dump(exclude_none=True),
+        )
+        return {"success": True}
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/global-tests/{test_id}")
+async def delete_global_test(test_id: str, request: Request):
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT id FROM global_test_submissions WHERE test_id = %s", (test_id,))
+                subs = await cur.fetchall()
+                sub_ids = [s["id"] for s in subs]
+
+                if sub_ids:
+                    ph = ",".join(["%s"] * len(sub_ids))
+                    await cur.execute(f"DELETE FROM question_results WHERE submission_id IN ({ph})", sub_ids)
+                    await cur.execute(f"DELETE FROM section_results WHERE submission_id IN ({ph})", sub_ids)
+                    await cur.execute(f"DELETE FROM personalized_reports WHERE submission_id IN ({ph})", sub_ids)
+
+                await cur.execute("DELETE FROM global_test_submissions WHERE test_id = %s", (test_id,))
+                await cur.execute("DELETE FROM test_questions WHERE test_id = %s", (test_id,))
+                await cur.execute("DELETE FROM global_tests WHERE id = %s", (test_id,))
+                if cur.rowcount == 0:
+                    raise HTTPException(404, "Test not found")
+            await conn.commit()
+        audit_logger.log_event(
+            AuditEventType.ADMIN_TEST_DELETED,
+            user_id=request.headers.get("x-user-id", "anonymous"),
+            ip_address=_client_ip(request),
+            resource_id=test_id,
+            resource_type="global_test",
+            action="Global test deleted",
+        )
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+# ─── Question routes ──────────────────────────────────────────
+
+@router.post("/global-tests/{test_id}/questions")
+async def add_questions(test_id: str, body: QuestionBatch):
+    if body.section not in SECTIONS:
+        raise HTTPException(400, f"Invalid section. Use: {', '.join(SECTIONS)}")
+    if not body.questions:
+        raise HTTPException(400, "questions array required")
+
+    pool = await get_pool()
+    inserted: list[str] = []
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                for q in body.questions:
+                    qid = str(uuid.uuid4())
+                    opts = q.get("options", [])
+                    opts += [""] * (4 - len(opts))
+                    ca = str(q.get("correctAnswer", q.get("correct_answer", "")))
+                    qt = q.get("questionType", "mcq")
+                    tc_json = None
+                    raw_tc = q.get("testCases")
+                    if raw_tc:
+                        tc_json = json.dumps(raw_tc) if not isinstance(raw_tc, str) else raw_tc
+                    pts = q.get("points", 10 if qt in ("coding", "sql") else 1)
+                    try:
+                        time_limit = int(q.get("timeLimit") or q.get("time_limit") or 0)
+                    except Exception:
+                        time_limit = 0
+                    if time_limit < 0:
+                        time_limit = 0
+
+                    await cur.execute(
+                        """INSERT INTO test_questions
+                           (question_id, test_id, section, question_type, question,
+                            option_1, option_2, option_3, option_4,
+                            correct_answer, explanation, category,
+                            test_cases, starter_code, solution_code, points, time_limit)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (
+                            qid, test_id, body.section, qt,
+                            q.get("question", ""),
+                            opts[0], opts[1], opts[2], opts[3],
+                            ca, q.get("explanation", ""), q.get("category", "general"),
+                            tc_json, q.get("starterCode"), q.get("solutionCode"), pts, time_limit,
+                        ),
+                    )
+                    inserted.append(qid)
+
+                # Update total
+                await cur.execute("SELECT COUNT(*) AS c FROM test_questions WHERE test_id = %s", (test_id,))
+                cnt = (await cur.fetchone())["c"]
+                await cur.execute("UPDATE global_tests SET total_questions = %s WHERE id = %s", (cnt, test_id))
+            await conn.commit()
+
+        return {"added": len(inserted), "questionIds": inserted}
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/global-tests/{test_id}/questions")
+async def delete_questions(test_id: str, section: Optional[str] = None):
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                q = "DELETE FROM test_questions WHERE test_id = %s"
+                p: list = [test_id]
+                if section and section in SECTIONS:
+                    q += " AND section = %s"
+                    p.append(section)
+                await cur.execute(q, p)
+                deleted = cur.rowcount
+
+                await cur.execute("SELECT COUNT(*) AS c FROM test_questions WHERE test_id = %s", (test_id,))
+                cnt = (await cur.fetchone())["c"]
+                await cur.execute("UPDATE global_tests SET total_questions = %s WHERE id = %s", (cnt, test_id))
+            await conn.commit()
+        return {"deleted": deleted}
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/global-tests/{test_id}/questions")
+async def get_questions(test_id: str, section: Optional[str] = None):
+    pool = await get_pool()
+    try:
+        q = "SELECT * FROM test_questions WHERE test_id = %s"
+        p: list = [test_id]
+        if section and section in SECTIONS:
+            q += " AND section = %s"
+            p.append(section)
+        q += " ORDER BY section, question_id"
+
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(q, p)
+                rows = await cur.fetchall()
+
+        return [
+            {
+                "id": r["question_id"],
+                "testId": r["test_id"],
+                "section": r["section"],
+                "questionType": r.get("question_type"),
+                "question": r["question"],
+                "options": [r["option_1"], r["option_2"], r["option_3"], r["option_4"]],
+                "correctAnswer": r["correct_answer"],
+                "explanation": r.get("explanation"),
+                "category": r.get("category"),
+                "testCases": _safe_json(r.get("test_cases")),
+                "starterCode": r.get("starter_code"),
+                "solutionCode": r.get("solution_code"),
+                "points": r.get("points") or 1,
+                "timeLimit": r.get("time_limit"),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+# ─── Submit ────────────────────────────────────────────────────
+
+@router.post("/global-tests/{test_id}/submit")
+async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Request):
+    if not body.studentId:
+        raise HTTPException(400, "studentId required")
+
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT * FROM global_tests WHERE id = %s", (test_id,))
+            test = await cur.fetchone()
+            if not test:
+                raise HTTPException(404, "Test not found")
+
+            if test.get("status") != "live":
+                raise HTTPException(400, "This test is not active")
+
+            now = datetime.now(timezone.utc)
+            if test.get("start_time") and now < test["start_time"]:
+                raise HTTPException(400, "This test has not started yet")
+            if test.get("deadline") and now > test["deadline"]:
+                raise HTTPException(400, "This test has ended")
+
+            await cur.execute(
+                "SELECT COUNT(*) AS c FROM global_test_submissions WHERE test_id = %s AND student_id = %s",
+                (test_id, body.studentId),
+            )
+            prior_attempts = (await cur.fetchone())["c"]
+            max_attempts = test.get("max_attempts") or 1
+            if prior_attempts >= max_attempts:
+                raise HTTPException(400, "Maximum attempts reached for this test")
+
+            await cur.execute("SELECT * FROM test_questions WHERE test_id = %s", (test_id,))
+            questions = await cur.fetchall()
+
+    answers = body.answers or {}
+
+    # Score per section
+    section_correct = {s: 0 for s in SECTIONS}
+    section_total = {s: 0 for s in SECTIONS}
+    section_pts_earned = {s: 0 for s in SECTIONS}
+    section_pts_total = {s: 0 for s in SECTIONS}
+
+    for q in questions:
+        sec = q["section"]
+        section_total[sec] += 1
+        section_pts_total[sec] += (q.get("points") or 1)
+
+    question_results: list[dict] = []
+
+    for q in questions:
+        user_ans = str(answers.get(q["question_id"], "")).strip() if answers.get(q["question_id"]) is not None else ""
+        options = [q["option_1"], q["option_2"], q["option_3"], q["option_4"]]
+        options = [o for o in options if o]
+        is_correct = False
+        pts_earned = 0
+        correct_text = ""
+
+        qt = q.get("question_type", "mcq")
+        pts = q.get("points") or (10 if qt in ("coding", "sql") else 1)
+
+        if qt == "coding":
+            tc_raw = _safe_json(q.get("test_cases"))
+            lang = (tc_raw.get("language") if isinstance(tc_raw, dict) else None) or "Python"
+            cases = tc_raw if isinstance(tc_raw, list) else (tc_raw.get("cases", []) if isinstance(tc_raw, dict) else [])
+            result = await _run_inline_coding_tests(user_ans, lang, cases)
+            is_correct = result["isCorrect"]
+            pts_earned = pts if is_correct else round((result["percentage"] / 100) * pts)
+            correct_text = f"{result['passedCount']}/{result['total']} test cases passed" if result["total"] else "N/A"
+
+        elif qt == "sql":
+            schema = q.get("starter_code") or ""
+            tc_raw = _safe_json(q.get("test_cases"))
+            exp_out = ""
+            if isinstance(tc_raw, dict):
+                exp_out = tc_raw.get("expectedOutput", "")
+            result = await _run_sql_and_compare(schema, user_ans, exp_out)
+            is_correct = result["isCorrect"]
+            pts_earned = pts if is_correct else 0
+            if is_correct:
+                correct_text = f"Correct! Expected: {exp_out[:200]}"
+            else:
+                correct_text = f"Expected: {exp_out[:200]} | User Output: {(result.get('output') or 'Error')[:150]}"
+
+        else:  # mcq
+            ca = q["correct_answer"]
+            if options:
+                try:
+                    idx = int(ca)
+                    is_correct = user_ans == ca or (idx < len(options) and user_ans == options[idx])
+                except (ValueError, IndexError):
+                    is_correct = user_ans == ca
+            else:
+                is_correct = user_ans == ca
+            pts_earned = pts if is_correct else 0
+            try:
+                correct_text = options[int(ca)] if options and int(ca) < len(options) else ca
+            except (ValueError, IndexError):
+                correct_text = ca
+
+        sec = q["section"]
+        if is_correct:
+            section_correct[sec] += 1
+        section_pts_earned[sec] += pts_earned
+
+        question_results.append({
+            "questionId": q["question_id"],
+            "section": sec,
+            "userAnswer": (user_ans[:500] + "..." if len(user_ans) > 500 else user_ans) if user_ans else "Not Answered",
+            "correctAnswer": correct_text,
+            "isCorrect": is_correct,
+            "pointsEarned": pts_earned,
+            "explanation": q.get("explanation"),
+        })
+
+    # Compute section %
+    section_scores = {}
+    for s in SECTIONS:
+        if section_total[s] > 0:
+            if section_pts_total[s] > 0:
+                section_scores[s] = round((section_pts_earned[s] / section_pts_total[s]) * 100)
+            else:
+                section_scores[s] = round((section_correct[s] / section_total[s]) * 100)
+        else:
+            section_scores[s] = 0
+
+    total_q = len(questions)
+    total_correct = sum(1 for r in question_results if r["isCorrect"])
+    total_pts_possible = sum(section_pts_total.values())
+    total_pts_earned = sum(section_pts_earned.values())
+    overall_pct = round((total_pts_earned / total_pts_possible) * 100) if total_pts_possible else 0
+    total_score = overall_pct
+    status = "passed" if overall_pct >= test["passing_score"] else "failed"
+    sub_id = f"gts-{str(uuid.uuid4())[:12]}"
+    submitted_at = datetime.now(timezone.utc)
+
+    # Persist
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            submission_values = {
+                "id": sub_id,
+                "test_id": test_id,
+                "test_title": test["title"],
+                "student_id": body.studentId,
+                "aptitude_score": section_scores.get("aptitude", 0),
+                "verbal_score": section_scores.get("verbal", 0),
+                "logical_score": section_scores.get("logical", 0),
+                "coding_score": section_scores.get("coding", 0),
+                "sql_score": section_scores.get("sql", 0),
+                "total_score": total_score,
+                "overall_percentage": overall_pct,
+                "status": status,
+                "time_spent": body.timeSpent,
+                "tab_switches": body.tabSwitches,
+                "copy_paste_attempts": body.copyPasteAttempts,
+                "camera_blocked_count": body.cameraBlockedCount,
+                "phone_detection_count": body.phoneDetectionCount,
+                "face_missing_count": body.faceMissingCount,
+                "total_violations": body.totalViolations,
+                "multiple_monitor_count": body.multipleMonitorCount,
+                "proctoring_enabled": 1 if body.proctoringEnabled else 0,
+                "behavior_session_id": body.behaviorSessionId,
+                "submission_type": body.submissionType or "manual",
+                "termination_reason": body.terminationReason,
+                "submitted_at": submitted_at,
+            }
+
+            existing_columns = await _get_table_columns(cur, "global_test_submissions")
+            insert_columns = [c for c in submission_values.keys() if c in existing_columns]
+            insert_values = [submission_values[c] for c in insert_columns]
+            placeholders = ",".join(["%s"] * len(insert_columns))
+            columns_sql = ", ".join(insert_columns)
+
+            await cur.execute(
+                f"INSERT INTO global_test_submissions ({columns_sql}) VALUES ({placeholders})",
+                insert_values,
+            )
+
+            for sr in SECTIONS:
+                if section_total[sr] == 0:
+                    continue
+                pct = round((section_correct[sr] / section_total[sr]) * 100) if section_total[sr] else 0
+                await cur.execute(
+                    """INSERT INTO section_results
+                       (id, submission_id, section, correct_count, total_questions,
+                        score, percentage, time_spent)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        f"sr-{uuid.uuid4().hex[:16]}", sub_id, sr,
+                        section_correct[sr], section_total[sr],
+                        section_scores[sr], pct,
+                        (body.timeSpent or 0) // 5,
+                    ),
+                )
+
+            for qr in question_results:
+                await cur.execute(
+                    """INSERT INTO question_results
+                       (id, submission_id, question_id, section, user_answer,
+                        correct_answer, is_correct, points_earned, time_taken, explanation)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        f"qr-{uuid.uuid4().hex[:16]}", sub_id, qr["questionId"],
+                        qr["section"], qr["userAnswer"], qr["correctAnswer"],
+                        1 if qr["isCorrect"] else 0, qr["pointsEarned"],
+                        None, qr.get("explanation") or "",
+                    ),
+                )
+
+        await conn.commit()
+
+    audit_logger.log_event(
+        AuditEventType.TEST_COMPLETED,
+        user_id=body.studentId,
+        ip_address=_client_ip(request),
+        resource_id=sub_id,
+        resource_type="global_test_submission",
+        action="Global test submitted",
+        details={"testId": test_id, "status": status, "overallPercentage": overall_pct},
+    )
+    return {
+        "submission": {
+            "id": sub_id,
+            "score": overall_pct,
+            "totalScore": total_score,
+            "status": status,
+            "sectionScores": section_scores,
+            "correctCount": total_correct,
+            "totalQuestions": total_q,
+            "tabSwitches": body.tabSwitches,
+            "timeSpent": body.timeSpent,
+            "copyPasteAttempts": body.copyPasteAttempts,
+            "cameraBlockedCount": body.cameraBlockedCount,
+            "phoneDetectionCount": body.phoneDetectionCount,
+            "faceMissingCount": body.faceMissingCount,
+            "totalViolations": body.totalViolations,
+            "multipleMonitorCount": body.multipleMonitorCount,
+            "proctoringEnabled": bool(body.proctoringEnabled),
+            "behaviorSessionId": body.behaviorSessionId,
+            "submissionType": body.submissionType or "manual",
+            "terminationReason": body.terminationReason,
+            "questionResults": question_results,
+        },
+        "message": "Congratulations! You passed the test!" if status == "passed" else "Keep practicing!",
+    }
+
+
+# ─── Submission listing ───────────────────────────────────────
+
+@router.get("/global-test-submissions")
+async def list_global_submissions(
+    testId: Optional[str] = None,
+    studentId: Optional[str] = None,
+    mentorId: Optional[str] = None,
+):
+    pool = await get_pool()
+    query = """SELECT s.*, u.name AS student_name
+               FROM global_test_submissions s
+               JOIN users u ON s.student_id = u.id WHERE 1=1"""
+    params: list = []
+    if testId:
+        query += " AND s.test_id = %s"; params.append(testId)
+    if studentId:
+        query += " AND s.student_id = %s"; params.append(studentId)
+    if mentorId:
+        query += " AND u.mentor_id = %s"; params.append(mentorId)
+    query += " ORDER BY s.submitted_at DESC"
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(query, params)
+                rows = await cur.fetchall()
+        return [
+            {
+                "id": s["id"],
+                "testId": s["test_id"],
+                "testTitle": s["test_title"],
+                "studentId": s["student_id"],
+                "studentName": s["student_name"],
+                "aptitudeScore": s.get("aptitude_score"),
+                "verbalScore": s.get("verbal_score"),
+                "logicalScore": s.get("logical_score"),
+                "codingScore": s.get("coding_score"),
+                "sqlScore": s.get("sql_score"),
+                "totalScore": s.get("total_score"),
+                "overallPercentage": float(s.get("overall_percentage") or 0),
+                "status": s["status"],
+                "timeSpent": s.get("time_spent"),
+                "tabSwitches": s.get("tab_switches"),
+                "copyPasteAttempts": s.get("copy_paste_attempts") or 0,
+                "cameraBlockedCount": s.get("camera_blocked_count") or 0,
+                "phoneDetectionCount": s.get("phone_detection_count") or 0,
+                "faceMissingCount": s.get("face_missing_count") or 0,
+                "totalViolations": s.get("total_violations") or 0,
+                "multipleMonitorCount": s.get("multiple_monitor_count") or 0,
+                "proctoringEnabled": bool(s.get("proctoring_enabled")) if s.get("proctoring_enabled") is not None else None,
+                "behaviorSessionId": s.get("behavior_session_id"),
+                "submissionType": s.get("submission_type"),
+                "terminationReason": s.get("termination_reason"),
+                "submittedAt": str(s.get("submitted_at", "")),
+            }
+            for s in rows
+        ]
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/global-test-submissions/{submission_id}")
+async def get_global_submission(submission_id: str):
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    """SELECT s.*, u.name AS student_name
+                       FROM global_test_submissions s
+                       JOIN users u ON s.student_id = u.id WHERE s.id = %s""",
+                    (submission_id,),
+                )
+                s = await cur.fetchone()
+                if not s:
+                    raise HTTPException(404, "Submission not found")
+
+                await cur.execute("SELECT * FROM question_results WHERE submission_id = %s", (submission_id,))
+                qr = await cur.fetchall()
+                await cur.execute("SELECT * FROM section_results WHERE submission_id = %s", (submission_id,))
+                sec = await cur.fetchall()
+
+        return {
+            "id": s["id"],
+            "testId": s["test_id"],
+            "testTitle": s["test_title"],
+            "studentId": s["student_id"],
+            "studentName": s["student_name"],
+            "aptitudeScore": s.get("aptitude_score"),
+            "verbalScore": s.get("verbal_score"),
+            "logicalScore": s.get("logical_score"),
+            "codingScore": s.get("coding_score"),
+            "sqlScore": s.get("sql_score"),
+            "totalScore": s.get("total_score"),
+            "overallPercentage": float(s.get("overall_percentage") or 0),
+            "status": s["status"],
+            "timeSpent": s.get("time_spent"),
+            "tabSwitches": s.get("tab_switches"),
+            "copyPasteAttempts": s.get("copy_paste_attempts") or 0,
+            "cameraBlockedCount": s.get("camera_blocked_count") or 0,
+            "phoneDetectionCount": s.get("phone_detection_count") or 0,
+            "faceMissingCount": s.get("face_missing_count") or 0,
+            "totalViolations": s.get("total_violations") or 0,
+            "multipleMonitorCount": s.get("multiple_monitor_count") or 0,
+            "proctoringEnabled": bool(s.get("proctoring_enabled")) if s.get("proctoring_enabled") is not None else None,
+            "behaviorSessionId": s.get("behavior_session_id"),
+            "submissionType": s.get("submission_type"),
+            "terminationReason": s.get("termination_reason"),
+            "submittedAt": str(s.get("submitted_at", "")),
+            "questionResults": [
+                {
+                    "questionId": r["question_id"],
+                    "section": r["section"],
+                    "userAnswer": r["user_answer"],
+                    "correctAnswer": r["correct_answer"],
+                    "isCorrect": bool(r["is_correct"]),
+                    "explanation": r.get("explanation"),
+                }
+                for r in qr
+            ],
+            "sectionResults": [
+                {
+                    "section": r["section"],
+                    "correctCount": r["correct_count"],
+                    "totalQuestions": r["total_questions"],
+                    "score": r["score"],
+                    "percentage": float(r.get("percentage") or 0),
+                }
+                for r in sec
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))
+
+
+# ─── Personalized report ──────────────────────────────────────
+
+@router.get("/global-test-submissions/{submission_id}/report")
+async def get_submission_report(submission_id: str):
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    """SELECT s.*, u.name AS student_name, u.email AS student_email
+                       FROM global_test_submissions s
+                       JOIN users u ON s.student_id = u.id WHERE s.id = %s""",
+                    (submission_id,),
+                )
+                s = await cur.fetchone()
+                if not s:
+                    raise HTTPException(404, "Submission not found")
+
+                await cur.execute("SELECT * FROM personalized_reports WHERE submission_id = %s", (submission_id,))
+                existing = await cur.fetchall()
+                await cur.execute("SELECT * FROM section_results WHERE submission_id = %s", (submission_id,))
+                sec_rows = await cur.fetchall()
+                await cur.execute("SELECT * FROM question_results WHERE submission_id = %s", (submission_id,))
+                qr_rows = await cur.fetchall()
+
+        section_results: dict = {}
+        for r in sec_rows:
+            section_results[r["section"]] = {
+                "score": r["score"],
+                "percentage": float(r.get("percentage") or 0),
+                "correctCount": r["correct_count"],
+                "totalQuestions": r["total_questions"],
+            }
+
+        by_section: dict = {sec: [] for sec in SECTIONS}
+        for r in qr_rows:
+            if r["section"] in by_section:
+                by_section[r["section"]].append(r)
+
+        # Check cached report
+        existing_data = None
+        needs_regen = False
+        if existing:
+            existing_data = _safe_json(existing[0].get("report_data"))
+            if existing_data and (not existing_data.get("questionInsights") or "Q1" not in existing_data.get("questionInsights", {})):
+                needs_regen = True
+
+        if existing_data and not needs_regen:
+            ai_analysis = existing_data
+        else:
+            # Generate AI report
+            try:
+                perf_summary = ", ".join(
+                    f"{sec.upper()}: {section_results.get(sec, {}).get('percentage', 0)}% "
+                    f"({section_results.get(sec, {}).get('correctCount', 0)}/{section_results.get(sec, {}).get('totalQuestions', 0)})"
+                    for sec in SECTIONS
+                )
+                q_context = "\n\n".join(
+                    f"Q{i+1} [{r['section']}]: "
+                    f"{'NOT ANSWERED' if not r.get('user_answer') or r['user_answer'] == 'Not Answered' else ('CORRECT' if r['is_correct'] else 'INCORRECT')} "
+                    f"({r.get('points_earned', 0)} points). "
+                    f"Student Response: {r.get('user_answer', 'No Answer')}. "
+                    f"Correct Answer/Solution: {r.get('correct_answer', 'N/A')}"
+                    for i, r in enumerate(qr_rows)
+                )
+
+                system_prompt = f"""You are an elite educational consultant. Analyze a student's global assessment.
+Student: {s['student_name']}
+Overall: {s['overall_percentage']}%
+Sections: {perf_summary}
+
+Generate a deeply personalized JSON report:
+{{
+    "summary": "Overall interpretation",
+    "strengths": ["..."],
+    "weaknesses": ["..."],
+    "actionPlan": ["Step 1", "Step 2"],
+    "sectionAnalysis": {{"aptitude": "...", "verbal": "...", "logical": "...", "coding": "...", "sql": "..."}},
+    "focusAreas": ["Topic A"],
+    "questionInsights": {{
+        "Q1": {{"diagnosis": "...", "misstep": "...", "recommendation": "..."}},
+        "Q2": {{...}}
+    }}
+}}
+
+Provide insights for EVERY question. For NOT ANSWERED questions note they were unattempted.
+For CORRECT coding/SQL suggest optimizations. For INCORRECT diagnose the logic gap."""
+
+                ai_resp = await cerebras_chat(
+                    [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Analyze:\n\n{q_context}"},
+                    ],
+                    model=settings.GROQ_MODEL,
+                    temperature=0.7,
+                    max_tokens=4000,
+                    response_format={"type": "json_object"},
+                )
+                content = ai_resp.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                ai_analysis = json.loads(content)
+
+                # Save
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        if needs_regen:
+                            await cur.execute(
+                                "UPDATE personalized_reports SET report_data = %s WHERE submission_id = %s",
+                                (json.dumps(ai_analysis), submission_id),
+                            )
+                        else:
+                            await cur.execute(
+                                "INSERT INTO personalized_reports (id, student_id, test_id, submission_id, report_data) VALUES (%s,%s,%s,%s,%s)",
+                                (f"pr-{str(uuid.uuid4())[:12]}", s["student_id"], s["test_id"], submission_id, json.dumps(ai_analysis)),
+                            )
+                    await conn.commit()
+
+            except Exception as ai_err:
+                print(f"AI Report Error: {ai_err}")
+                strong = [sec for sec in SECTIONS if section_results.get(sec, {}).get("percentage", 0) >= 75]
+                weak = [sec for sec in SECTIONS if section_results.get(sec, {}).get("percentage", 0) < 60]
+                ai_analysis = {
+                    "summary": f"You achieved {s['overall_percentage']}%. Strong in {', '.join(strong) or 'some areas'}.",
+                    "strengths": [f"Good performance in {sec}" for sec in strong],
+                    "weaknesses": [f"Needs improvement in {sec}" for sec in weak],
+                    "actionPlan": ["Review incorrect answers", "Practice more mock tests", "Focus on time management"],
+                    "sectionAnalysis": {},
+                    "focusAreas": [],
+                    "questionInsights": {},
+                }
+
+        return {
+            "studentInfo": {"id": s["student_id"], "name": s["student_name"], "email": s.get("student_email")},
+            "testInfo": {"id": s["test_id"], "title": s["test_title"], "date": str(s.get("submitted_at", ""))},
+            "overallPerformance": {
+                "totalScore": s.get("total_score"),
+                "percentage": float(s.get("overall_percentage") or 0),
+                "status": s["status"],
+            },
+            "sectionWisePerformance": section_results,
+            "strengths": ai_analysis.get("strengths", []),
+            "weaknesses": ai_analysis.get("weaknesses", []),
+            "questionResultsBySection": {sec: [dict(r) for r in rows] for sec, rows in by_section.items()},
+            "recommendations": ai_analysis.get("actionPlan", []),
+            "personalizedAnalysis": ai_analysis,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, str(e))

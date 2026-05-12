@@ -1,0 +1,273 @@
+:root {
+    --primary: #3b82f6;
+    --primary-dark: #2563eb;
+    --primary-light: #60a5fa;
+    --primary-glow: rgba(59, 130, 246, 0.3);
+    --primary-alpha: rgba(59, 130, 246, 0.1);
+    --secondary: #8b5cf6;
+    --secondary-alpha: rgba(139, 92, 246, 0.1);
+    --success: #10b981;
+    --success-alpha: rgba(16, 185, 129, 0.1);
+    --warning: #f59e0b;
+    --warning-alpha: rgba(245, 158, 11, 0.1);
+    --danger: #ef4444;
+    --danger-alpha: rgba(239, 68, 68, 0.1);
+
+    /* Clean Light Theme */
+    --bg-primary: #f8fafc;
+    --bg-secondary: #f1f5f9;
+    --bg-tertiary: #e2e8f0;
+    --bg-card: #ffffff;
+    --bg-dark: #f1f5f9;
+
+    --text: #0f172a;
+    --text-main: #0f172a;
+    --text-primary: #1e3a8a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+
+    --border-color: #e2e8f0;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+
+    /* Table colors for light mode */
+    --table-header-bg: #f1f5f9;
+    --table-row-hover: rgba(59, 130, 246, 0.05);
+    --table-border: #e2e8f0;
+
+    /* Code block colors for light mode */
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+
+    /* Card shadow for light mode */
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+    --modal-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
+}
+
+
+
+[data-theme="dark"] {
+    --primary: #3b82f6;
+    --primary-dark: #2563eb;
+    --primary-light: #60a5fa;
+    --primary-glow: rgba(59, 130, 246, 0.5);
+    --primary-alpha: rgba(59, 130, 246, 0.2);
+    --secondary: #8b5cf6;
+    --secondary-alpha: rgba(139, 92, 246, 0.2);
+    --success: #10b981;
+    --success-alpha: rgba(16, 185, 129, 0.2);
+    --warning: #f59e0b;
+    --warning-alpha: rgba(245, 158, 11, 0.2);
+    --danger: #ef4444;
+    --danger-alpha: rgba(239, 68, 68, 0.2);
+
+    /* Rich Dark Blue Theme */
+    --bg-primary: #0f172a;
+    --bg-secondary: #020617;
+    /* Deepest Blue/Black */
+    --bg-tertiary: #1e293b;
+    --bg-card: #1e293b;
+    /* Slate 800 for better card contrast */
+    --bg-dark: #0f172a;
+    --text: #f8fafc;
+    --text-main: #f8fafc;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --border-color: #334155;
+
+    /* Table colors for dark mode */
+    --table-header-bg: #1e293b;
+    --table-row-hover: rgba(59, 130, 246, 0.1);
+    --table-border: #334155;
+
+    /* Code block colors for dark mode */
+    --code-bg: #020617;
+    --code-text: #e2e8f0;
+
+    /* Card shadow for dark mode */
+    --card-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    --modal-shadow: 0 40px 100px rgba(0, 0, 0, 0.8);
+}
+
+
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-secondary);
+    color: var(--text-main);
+    line-height: 1.5;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+button {
+    font-family: inherit;
+}
+
+.loading-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid var(--bg-tertiary);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+
+/* ==================== Global Animations ==================== */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes float {
+    0% {
+        transform: translateY(0px);
+    }
+
+    50% {
+        transform: translateY(-6px);
+    }
+
+    100% {
+        transform: translateY(0px);
+    }
+}
+
+@keyframes pulse-glow {
+    0% {
+        box-shadow: 0 0 0 0 var(--primary-glow);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+    }
+}
+
+/* Utility Classes */
+.animate-fadeIn {
+    animation: fadeIn 0.6s ease-out forwards;
+}
+
+.animate-slideUp {
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slideInRight {
+    animation: slideInRight 0.5s ease-out forwards;
+}
+
+.animate-scaleIn {
+    animation: scaleIn 0.4s ease-out forwards;
+}
+
+.animate-float {
+    animation: float 6s ease-in-out infinite;
+}
+
+/* Staggered Delays */
+.delay-100 {
+    animation-delay: 100ms;
+}
+
+.delay-200 {
+    animation-delay: 200ms;
+}
+
+.delay-300 {
+    animation-delay: 300ms;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}

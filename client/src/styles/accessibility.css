@@ -1,0 +1,214 @@
+/* ==================== FEATURE 78: ACCESSIBILITY (WCAG 2.1) ==================== */
+/* Screen reader support, keyboard navigation, focus management, reduced motion */
+
+/* ===== 1. SCREEN READER ONLY (visually hidden but accessible) ===== */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+/* Skip to main content link */
+.skip-to-content {
+    position: fixed;
+    top: -100%;
+    left: 16px;
+    z-index: 9999;
+    padding: 0.75rem 1.5rem;
+    background: var(--primary);
+    color: white;
+    border-radius: 0 0 8px 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: top 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.skip-to-content:focus {
+    top: 0;
+    outline: none;
+}
+
+/* ===== 2. FOCUS MANAGEMENT ===== */
+
+/* Clear visible focus ring for keyboard users */
+:focus-visible {
+    outline: 2px solid var(--primary, #3b82f6);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Remove outline for mouse users */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* Enhanced focus for interactive elements */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid var(--primary, #3b82f6);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+/* Focus within for composite widgets */
+[role="tablist"]:focus-within,
+[role="listbox"]:focus-within,
+[role="menu"]:focus-within {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+    border-radius: 8px;
+}
+
+/* Nav items keyboard focus */
+.nav-item:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* ===== 3. REDUCED MOTION ===== */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .loading-spinner {
+        animation: none !important;
+        border: 4px solid var(--primary);
+        opacity: 0.5;
+    }
+    .animate-fadeIn,
+    .animate-slideUp,
+    .animate-slideInRight,
+    .animate-scaleIn,
+    .animate-float {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+    }
+}
+
+/* ===== 4. HIGH CONTRAST MODE ===== */
+@media (forced-colors: active) {
+    .nav-item.active {
+        border-left: 3px solid LinkText;
+    }
+    button, .btn {
+        border: 1px solid ButtonText;
+    }
+    .dashboard-stat-card {
+        border: 2px solid CanvasText;
+    }
+    .status-dot {
+        forced-color-adjust: none;
+    }
+}
+
+/* ===== 5. TOUCH TARGET SIZES (WCAG 2.5.5 - AAA) ===== */
+button,
+[role="button"],
+a,
+input[type="checkbox"],
+input[type="radio"],
+select {
+    position: relative;
+}
+
+/* Ensure minimum 44x44 touch target */
+button::after,
+[role="button"]::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 44px;
+    min-height: 44px;
+}
+
+/* ===== 6. TEXT SPACING (WCAG 1.4.12) ===== */
+/* Support user text spacing overrides */
+body {
+    word-spacing: normal;
+    letter-spacing: normal;
+}
+
+/* ===== 7. CONTENT REFLOW (WCAG 1.4.10) ===== */
+/* Already handled by responsive CSS, but ensure no horizontal scroll at 320px */
+@media (max-width: 320px) {
+    body {
+        overflow-x: hidden;
+    }
+    .content-body {
+        padding: 0.5rem !important;
+        word-break: break-word;
+    }
+}
+
+/* ===== 8. STATUS INDICATORS (not color-alone) ===== */
+/* Ensure status is conveyed with more than just color */
+.status-dot::after {
+    content: attr(data-status);
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+}
+
+/* ===== 9. LINK DISTINGUISHABILITY ===== */
+a:not(.nav-item):not([role="button"]) {
+    text-decoration-skip-ink: auto;
+}
+a:not(.nav-item):not([role="button"]):hover {
+    text-decoration: underline;
+}
+
+/* ===== 10. ARIA LIVE REGION STYLING ===== */
+[aria-live="polite"],
+[aria-live="assertive"],
+[role="alert"],
+[role="status"] {
+    /* Ensure live regions are not visually disruptive unless intended */
+}
+
+/* Toast/notification aria-live */
+.toast-notification {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 9999;
+    padding: 1rem 1.5rem;
+    border-radius: 12px;
+    font-weight: 500;
+    animation: slideUp 0.3s ease-out;
+    max-width: 400px;
+}
+
+/* ===== 11. CURSOR INDICATORS ===== */
+[aria-disabled="true"],
+button:disabled,
+input:disabled,
+select:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+[role="button"],
+[tabindex="0"] {
+    cursor: pointer;
+}

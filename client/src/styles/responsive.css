@@ -1,0 +1,199 @@
+/* ==================== FEATURE 74: MOBILE-RESPONSIVE UI ==================== */
+/* Comprehensive responsive styles for phones (320px+), tablets (768px+), laptops (1024px+), desktops (1440px+) */
+
+/* ===== BASE: Touch-friendly defaults ===== */
+@media (pointer: coarse) {
+    button, .nav-item, a, select, input, textarea {
+        min-height: 44px;
+        min-width: 44px;
+    }
+    .nav-item { padding: 0.85rem 1rem; }
+}
+
+/* ===== SMALL PHONES (320px - 479px) ===== */
+@media (max-width: 479px) {
+    .content-body { padding: 0.75rem !important; }
+    .content-header { padding: 0 0.75rem !important; height: 56px !important; }
+    .page-title h1 { font-size: 1.1rem !important; }
+    .page-title p { font-size: 0.75rem !important; display: none; }
+
+    /* Stats grids stack */
+    .dashboard-stats-grid,
+    .admin-stats-grid-6,
+    .stats-grid { grid-template-columns: 1fr !important; gap: 0.5rem !important; }
+
+    .dashboard-stat-card { padding: 1rem !important; border-radius: 12px !important; }
+    .stat-value { font-size: 1.5rem !important; }
+
+    /* Main grids stack */
+    .dashboard-main-grid,
+    .mentor-bottom-grid,
+    .admin-charts-grid,
+    .admin-bottom-grid,
+    .charts-container,
+    .dashboard-footer-grid { grid-template-columns: 1fr !important; }
+
+    /* Tables horizontal scroll */
+    .table-container, table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Modals full screen on small devices */
+    .modal-content, [class*="modal"] > div {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* Cards */
+    .dashboard-panel { padding: 1rem !important; border-radius: 12px !important; }
+
+    /* Tabs scroll */
+    .tab-list, [role="tablist"] {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap !important;
+        gap: 0.25rem !important;
+    }
+    .tab-list::-webkit-scrollbar { display: none; }
+
+    /* Hide verbose labels on small screens */
+    .mentor-badge-nav { display: none !important; }
+    .search-bar { display: none !important; }
+    .header-right .notification-btn span { display: none; }
+}
+
+/* ===== PHONES (480px - 767px) ===== */
+@media (min-width: 480px) and (max-width: 767px) {
+    .content-body { padding: 1rem !important; }
+    .content-header { padding: 0 1rem !important; }
+    .page-title h1 { font-size: 1.25rem !important; }
+
+    .dashboard-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .admin-stats-grid-6 { grid-template-columns: repeat(2, 1fr) !important; }
+
+    .dashboard-main-grid,
+    .mentor-bottom-grid { grid-template-columns: 1fr !important; }
+
+    .mentor-badge-nav { display: none !important; }
+    .search-bar { display: none !important; }
+}
+
+/* ===== TABLETS (768px - 1023px) ===== */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .content-body { padding: 1.5rem !important; }
+
+    .dashboard-stats-grid { grid-template-columns: repeat(3, 1fr) !important; }
+    .admin-stats-grid-6 { grid-template-columns: repeat(3, 1fr) !important; }
+
+    .dashboard-main-grid { grid-template-columns: 1fr 1fr !important; }
+    .mentor-bottom-grid { grid-template-columns: 1fr 1fr !important; }
+
+    .mentor-badge-nav .mentor-label-nav { display: none; }
+
+    .sidebar { width: 220px !important; }
+    .sidebar .nav-item span { font-size: 0.85rem; }
+}
+
+/* ===== SMALL LAPTOPS (1024px - 1279px) ===== */
+@media (min-width: 1024px) and (max-width: 1279px) {
+    .sidebar { width: 240px !important; }
+    .dashboard-stats-grid { grid-template-columns: repeat(4, 1fr) !important; }
+    .admin-stats-grid-6 { grid-template-columns: repeat(3, 1fr) !important; }
+}
+
+/* ===== LiveMonitoring Responsive ===== */
+@media (max-width: 900px) {
+    .live-monitoring-container {
+        padding: 1rem !important;
+    }
+    .live-monitoring-container .flex {
+        flex-direction: column !important;
+    }
+    .live-monitoring-container .max-w-lg,
+    .live-monitoring-container .max-w-md {
+        max-width: 100% !important;
+    }
+    .status-bar {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 0.75rem !important;
+    }
+}
+@media (max-width: 480px) {
+    .status-bar {
+        grid-template-columns: 1fr !important;
+    }
+    .status-item {
+        padding: 0.75rem 1rem !important;
+        font-size: 0.85rem;
+    }
+}
+
+/* ===== Login Page Responsive ===== */
+@media (max-width: 900px) {
+    .login-content {
+        flex-direction: column !important;
+        padding: 5rem 1.5rem 2rem !important;
+        gap: 2rem;
+        justify-content: flex-start !important;
+    }
+    .hero-section { max-width: 100% !important; text-align: center; }
+    .hero-section h1 { font-size: 2rem !important; }
+    .hero-section p { font-size: 0.95rem !important; }
+    .login-container { max-width: 100% !important; width: 100%; }
+    .feature-stats { display: none !important; }
+    .login-nav { padding: 1rem 1.5rem !important; }
+}
+@media (max-width: 480px) {
+    .hero-section { display: none !important; }
+    .login-content { padding: 4rem 1rem 1rem !important; justify-content: center !important; }
+    .login-container { padding: 1.5rem !important; }
+}
+
+/* ===== AdminOperations Tabs Responsive ===== */
+@media (max-width: 768px) {
+    [style*="gap: 0.5rem"][style*="flex-wrap: wrap"] {
+        overflow-x: auto;
+        flex-wrap: nowrap !important;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 0.25rem;
+    }
+}
+
+/* ===== Aptitude / Test Interface Responsive ===== */
+@media (max-width: 768px) {
+    .test-layout, .aptitude-layout { flex-direction: column !important; }
+    .test-sidebar, .aptitude-sidebar { width: 100% !important; max-height: 200px; overflow-y: auto; }
+    .test-main, .aptitude-main { width: 100% !important; }
+}
+
+/* ===== Code Editor Responsive ===== */
+@media (max-width: 768px) {
+    .editor-container { min-height: 300px !important; }
+    .code-output-preview { max-height: 250px !important; }
+}
+
+/* ===== Safe Area for notched phones ===== */
+@supports (padding: env(safe-area-inset-bottom)) {
+    .sidebar-footer { padding-bottom: calc(1rem + env(safe-area-inset-bottom)); }
+    .content-body { padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+}
+
+/* ===== Print Styles ===== */
+@media print {
+    .sidebar, .content-header, .menu-toggle, .theme-btn, .logout-btn, .notification-btn { display: none !important; }
+    .main-content { margin: 0; padding: 0; }
+    .content-body { padding: 0 !important; overflow: visible !important; }
+    .dashboard-layout { display: block !important; }
+    * { color: #000 !important; background: #fff !important; box-shadow: none !important; }
+}
+
+/* ===== Landscape phone special handling ===== */
+@media (max-height: 500px) and (orientation: landscape) {
+    .sidebar { overflow-y: auto; }
+    .sidebar-footer { padding: 0.5rem; }
+    .sidebar-header { height: auto; padding: 0.5rem 1rem; }
+    .content-header { height: 48px !important; }
+}
