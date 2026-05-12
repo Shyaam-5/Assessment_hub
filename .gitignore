@@ -1,0 +1,24 @@
+.env
+.venv
+backend/.env
+server.js
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Frontend dependencies & build output
+client/node_modules/
+client/dist/
+
+# Legacy communication module sandbox (not part of app)
+coms/
+
+# Local DB artifacts
+*.db
+backend/logs/
+
+# Test / tooling artifacts
+.pytest_cache/
+backend/ui_shots/
+backend/backend/
