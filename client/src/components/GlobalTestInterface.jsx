@@ -11,7 +11,7 @@ import SQLDebugger from '@/components/SQLDebugger'
 import socketService from '@/services/socketService'
 import proctoringSocketAdapter from '@/services/proctoringSocketAdapter'
 
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api'
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 
 
 

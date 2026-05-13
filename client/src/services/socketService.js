@@ -20,17 +20,17 @@ class SocketService {
         });
 
         this.socket.on('connect', () => {
-            console.log('🔌 Connected to WebSocket');
+            console.log('Connected to WebSocket');
             this.isConnected = true;
         });
 
         this.socket.on('disconnect', () => {
-            console.log('❌ Disconnected from WebSocket');
+            console.log('Disconnected from WebSocket');
             this.isConnected = false;
         });
 
         this.socket.on('connect_error', (error) => {
-            console.error('❌ WebSocket connection error:', error);
+            console.error('WebSocket connection error:', error);
         });
 
         return this.socket;
@@ -163,3 +163,4 @@ class SocketService {
 }
 
 export default new SocketService();
+
