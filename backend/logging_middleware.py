@@ -10,7 +10,7 @@ from typing import Callable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from audit_logger import get_audit_logger, AuditEventType
-from database import get_pool
+from database import get_primary_pool
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -161,7 +161,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         )
 
         try:
-            pool = await get_pool()
+            pool = await get_primary_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(

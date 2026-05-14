@@ -26,6 +26,8 @@ function MentorPortal() {
     const location = useLocation()
     const [title, setTitle] = useState('')
     const [subtitle, setSubtitle] = useState('')
+    const perms = Array.isArray(user?.permissions) ? user.permissions : []
+    const can = (perm) => user?.role === 'admin' || user?.role === 'organization_admin' || perms.includes(perm)
 
 
     useEffect(() => {
@@ -69,21 +71,21 @@ function MentorPortal() {
             icon: <FileCode size={20} />,
             defaultExpanded: false,
             children: [
-
-                { path: '/mentor/upload-problems', label: t('upload_problems'), icon: <FileCode size={20} /> }
-            ]
+                can('tests.create') && { path: '/mentor/upload-problems', label: t('upload_problems'), icon: <FileCode size={20} /> }
+            ].filter(Boolean)
         },
         {
             label: 'Monitoring',
             icon: <Activity size={20} />,
             defaultExpanded: false,
             children: [
-                { path: '/mentor/leaderboard', label: t('leaderboard'), icon: <Trophy size={20} /> },
-                { path: '/mentor/all-submissions', label: t('all_submissions'), icon: <List size={20} /> },
-                { path: '/mentor/analytics', label: t('analytics'), icon: <TrendingUp size={20} /> },
-                { path: '/mentor/live-monitoring', label: t('live_monitoring'), icon: <Activity size={20} /> }
-            ]
+                can('tests.view') && { path: '/mentor/leaderboard', label: t('leaderboard'), icon: <Trophy size={20} /> },
+                can('tests.view') && { path: '/mentor/all-submissions', label: t('all_submissions'), icon: <List size={20} /> },
+                can('analytics.view') && { path: '/mentor/analytics', label: t('analytics'), icon: <TrendingUp size={20} /> },
+                can('proctoring.view') && { path: '/mentor/live-monitoring', label: t('live_monitoring'), icon: <Activity size={20} /> }
+            ].filter(Boolean)
         }]
+        .filter((item) => !item.children || item.children.length > 0)
 
     return (
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>

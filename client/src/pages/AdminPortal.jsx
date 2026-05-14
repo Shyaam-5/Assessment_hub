@@ -10,7 +10,7 @@ import TestCasesManager from '../components/TestCasesManager'
 import LocalTestCasesManager from '../components/LocalTestCasesManager'
 import AdminLiveMonitoring from '../components/AdminLiveMonitoring'
 import AdminOperations from '../components/AdminOperations'
-import UserManagement from '../components/UserManagement'
+import TenantRBACManager from '../components/TenantRBACManager'
 
 import FileUpload from '../components/FileUpload'
 import SkillTestManager from '../components/SkillTestManager'
@@ -36,6 +36,8 @@ function AdminPortal() {
     const location = useLocation()
     const [title, setTitle] = useState('')
     const [subtitle, setSubtitle] = useState('')
+    const perms = Array.isArray(user?.permissions) ? user.permissions : []
+    const can = (perm) => user?.role === 'admin' || perms.includes(perm)
 
 
     useEffect(() => {
@@ -120,11 +122,11 @@ function AdminPortal() {
             icon: <FileCode size={20} />,
             defaultExpanded: false,
             children: [
-                { path: '/admin/aptitude-tests', label: t('aptitude_tests'), icon: <Target size={20} /> },
-                { path: '/admin/global-tests', label: t('global_complete_tests'), icon: <ClipboardList size={20} /> },
-                { path: '/admin/skill-tests', label: 'Skill Tests', icon: <Brain size={20} /> },
-                { path: '/admin/communication-tests', label: 'Communication Tests', icon: <MessageSquare size={20} /> }
-            ]
+                can('aptitude.create') && { path: '/admin/aptitude-tests', label: t('aptitude_tests'), icon: <Target size={20} /> },
+                can('tests.create') && { path: '/admin/global-tests', label: t('global_complete_tests'), icon: <ClipboardList size={20} /> },
+                can('coding.create') && { path: '/admin/skill-tests', label: 'Skill Tests', icon: <Brain size={20} /> },
+                can('communication.create') && { path: '/admin/communication-tests', label: 'Communication Tests', icon: <MessageSquare size={20} /> }
+            ].filter(Boolean)
         },
 
         {
@@ -132,23 +134,24 @@ function AdminPortal() {
             icon: <Activity size={20} />,
             defaultExpanded: false,
             children: [
-                { path: '/admin/all-submissions', label: t('all_submissions'), icon: <List size={20} /> },
-                { path: '/admin/skill-submissions', label: 'Skill Submissions', icon: <Brain size={20} /> },
-                { path: '/admin/live-monitoring', label: t('live_monitoring'), icon: <Activity size={20} /> },
-                { path: '/admin/proctor-agent', label: 'Proctoring Agent', icon: <Shield size={20} /> },
-                { path: '/admin/behavior-analysis', label: 'Behavior Analysis', icon: <Shield size={20} /> },
-                { path: '/admin/analytics', label: t('analytics'), icon: <TrendingUp size={20} /> }
-            ]
+                can('tests.view') && { path: '/admin/all-submissions', label: t('all_submissions'), icon: <List size={20} /> },
+                can('tests.view') && { path: '/admin/skill-submissions', label: 'Skill Submissions', icon: <Brain size={20} /> },
+                can('proctoring.view') && { path: '/admin/live-monitoring', label: t('live_monitoring'), icon: <Activity size={20} /> },
+                can('proctoring.view') && { path: '/admin/proctor-agent', label: 'Proctoring Agent', icon: <Shield size={20} /> },
+                can('proctoring.view') && { path: '/admin/behavior-analysis', label: 'Behavior Analysis', icon: <Shield size={20} /> },
+                can('analytics.view') && { path: '/admin/analytics', label: t('analytics'), icon: <TrendingUp size={20} /> }
+            ].filter(Boolean)
         },
         {
             label: 'System',
             icon: <Settings size={20} />,
             defaultExpanded: false,
             children: [
-                { path: '/admin/user-management', label: 'User Management', icon: <Shield size={20} /> },
-            ]
+                can('users.view') && { path: '/admin/user-management', label: 'User Management', icon: <Shield size={20} /> },
+            ].filter(Boolean)
         }
     ]
+        .filter((item) => !item.children || item.children.length > 0)
 
     return (
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>
@@ -167,7 +170,7 @@ function AdminPortal() {
                 <Route path="/analytics" element={<AdminAnalyticsDashboard />} />
                 <Route path="/proctor-agent" element={<ProctorAgentDashboard />} />
                 <Route path="/behavior-analysis" element={<BehaviorAnalysisDashboard />} />
-                <Route path="/user-management" element={<UserManagement />} />
+                <Route path="/user-management" element={<TenantRBACManager user={user} />} />
             </Routes>
         </DashboardLayout>
     )

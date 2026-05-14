@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, Component } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import Login from './pages/Login'
 import StudentPortal from './pages/StudentPortal'
 import MentorPortal from './pages/MentorPortal'
@@ -45,7 +46,11 @@ function ProtectedRoute({ children, allowedRoles }) {
     }
 
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-        return <Navigate to={`/${user.role}`} replace />
+        if (user.role === 'admin' || user.role === 'organization_admin') return <Navigate to="/admin" replace />
+        if (Array.isArray(user.permissions) && user.permissions.some(p => p.endsWith('.create'))) {
+            return <Navigate to="/mentor" replace />
+        }
+        return <Navigate to="/student" replace />
     }
 
     return children
@@ -75,6 +80,22 @@ function App() {
     })
     const [loading, setLoading] = useState(true)
     const navigate = useNavigate()
+    const authHeaders = (extra = {}) => {
+        const h = { 'Content-Type': 'application/json', ...extra }
+        if (user?.id) h['x-user-id'] = user.id
+        if (user?.organizationId) h['x-org-id'] = user.organizationId
+        return h
+    }
+
+    const getHomePath = (u) => {
+        if (!u) return '/login'
+        if (u.role === 'admin' || u.role === 'organization_admin') return '/admin'
+        const perms = Array.isArray(u.permissions) ? u.permissions : []
+        if (perms.includes('tests.create') || perms.includes('coding.create') || perms.includes('aptitude.create')) {
+            return '/mentor'
+        }
+        return '/student'
+    }
 
     useEffect(() => {
         // Check for saved user session and verify with backend
@@ -87,7 +108,7 @@ function App() {
                     // Verify with backend
                     const response = await fetch(`${API_BASE}/auth/verify`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: authHeaders(),
                         body: JSON.stringify({ userId: parsedUser.id })
                     })
 
@@ -118,15 +139,30 @@ function App() {
         localStorage.setItem('theme', theme)
     }, [theme])
 
+    useEffect(() => {
+        const uid = user?.id || ''
+        const orgId = user?.organizationId || ''
+        if (uid) {
+            axios.defaults.headers.common['x-user-id'] = uid
+        } else {
+            delete axios.defaults.headers.common['x-user-id']
+        }
+        if (orgId) {
+            axios.defaults.headers.common['x-org-id'] = orgId
+        } else {
+            delete axios.defaults.headers.common['x-org-id']
+        }
+    }, [user])
+
     const login = async (email, password) => {
         try {
             const response = await fetch(`${API_BASE}/auth/login`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ email, password })
             })
 
-            const data = await response.json()
+            const data = await response.json().catch(() => ({}))
 
             if (!response.ok) {
                 const detail = readApiError(data) || 'Login failed'
@@ -149,7 +185,7 @@ function App() {
 
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            navigate(`/${data.user.role}`)
+            navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
             return { success: false, error: error.message }
@@ -163,7 +199,7 @@ function App() {
         try {
             const response = await fetch(`${API_BASE}/auth/google`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ credential }),
             })
             const data = await response.json().catch(() => ({}))
@@ -186,7 +222,7 @@ function App() {
 
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            navigate(`/${data.user.role}`)
+            navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
             return { success: false, error: error.message }
@@ -197,7 +233,7 @@ function App() {
         try {
             const response = await fetch(`${API_BASE}/auth/verify-otp`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ challengeId, otp }),
             })
             const data = await response.json().catch(() => ({}))
@@ -218,7 +254,7 @@ function App() {
             }
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            navigate(`/${data.user.role}`)
+            navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
             return { success: false, error: error.message }
@@ -229,7 +265,7 @@ function App() {
         try {
             const response = await fetch(`${API_BASE}/auth/complete-first-login`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ setupToken, newPassword }),
             })
             const data = await response.json().catch(() => ({}))
@@ -242,7 +278,7 @@ function App() {
             }
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            navigate(`/${data.user.role}`)
+            navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
             return { success: false, error: error.message }
@@ -279,7 +315,7 @@ function App() {
                 <ErrorBoundary>
                 <Routes>
                     <Route path="/login" element={
-                        user && !user.mustChangePassword ? <Navigate to={`/${user.role}`} replace /> : <Login />
+                        user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <Login />
                     } />
 
                     <Route path="/student/*" element={
@@ -289,13 +325,13 @@ function App() {
                     } />
 
                     <Route path="/mentor/*" element={
-                        <ProtectedRoute allowedRoles={['mentor']}>
+                        <ProtectedRoute allowedRoles={['mentor', 'org_user']}>
                             <MentorPortal />
                         </ProtectedRoute>
                     } />
 
                     <Route path="/admin/*" element={
-                        <ProtectedRoute allowedRoles={['admin']}>
+                        <ProtectedRoute allowedRoles={['admin', 'organization_admin']}>
                             <AdminPortal />
                         </ProtectedRoute>
                     } />
@@ -309,7 +345,7 @@ function App() {
                     } />
 
                     <Route path="/" element={
-                        user && !user.mustChangePassword ? <Navigate to={`/${user.role}`} replace /> : <Navigate to="/login" replace />
+                        user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <Navigate to="/login" replace />
                     } />
 
                     <Route path="*" element={<Navigate to="/" replace />} />

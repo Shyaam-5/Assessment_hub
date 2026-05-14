@@ -1,4 +1,4 @@
-"""Authentication and user management routes."""
+﻿"""Authentication and user management routes."""
 
 import asyncio
 import logging
@@ -15,7 +15,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from config import settings
-from database import get_pool
+from database import get_primary_pool
 from services.otp_delivery import send_login_otp_email
 from audit_logger import get_audit_logger, AuditEventType
 
@@ -37,7 +37,7 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
     Returns False (instead of raising) when either input is missing/malformed,
     so a corrupted row or a missing password can't be bypassed by sending the
-    raw hash as the plaintext password — which the previous fallback allowed.
+    raw hash as the plaintext password â€” which the previous fallback allowed.
     """
     if not plain or not hashed:
         return False
@@ -68,7 +68,7 @@ async def _start_otp_challenge(user_id: str, email: str, auth_method: str) -> di
     challenge_id = str(uuid.uuid4())
     plain = _generate_otp_plain()
     otp_hash = _hash_password(plain)
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
@@ -149,7 +149,43 @@ def _clean_user(row: dict) -> dict:
         u["mustChangePassword"] = False
     else:
         u["mustChangePassword"] = bool(int(mc)) if str(mc).isdigit() else bool(mc)
+    u["organizationId"] = u.pop("organization_id", None)
     return u
+
+
+async def _attach_rbac_context(user: dict) -> dict:
+    """Attach primary role and permission list for dynamic UI authorization."""
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT ura.organization_id, r.id AS role_id, r.name AS role_name, r.slug AS role_slug
+                FROM user_role_assignments ura
+                JOIN roles r ON r.id = ura.role_id
+                WHERE ura.user_id = %s
+                ORDER BY ura.is_primary DESC, ura.id ASC
+                LIMIT 1
+                """,
+                (user.get("id"),),
+            )
+            primary = await cur.fetchone()
+
+            permissions: list[str] = []
+            if primary:
+                await cur.execute(
+                    "SELECT permission_key FROM role_permissions WHERE role_id = %s ORDER BY permission_key",
+                    (primary["role_id"],),
+                )
+                permissions = [r["permission_key"] for r in (await cur.fetchall() or [])]
+
+    user["permissions"] = permissions
+    user["roleId"] = primary.get("role_id") if primary else None
+    user["roleName"] = primary.get("role_name") if primary else None
+    user["roleSlug"] = primary.get("role_slug") if primary else None
+    if primary and primary.get("organization_id"):
+        user["organizationId"] = primary.get("organization_id")
+    return user
 
 
 # ---------- Routes ----------
@@ -157,7 +193,7 @@ def _clean_user(row: dict) -> dict:
 @router.post("/auth/login")
 async def login(body: LoginRequest, request: Request):
     """Validate password, then require email OTP before returning a session."""
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
@@ -201,6 +237,15 @@ async def login(body: LoginRequest, request: Request):
             auth_method="password",
         )
         raise HTTPException(status_code=403, detail="Your account is not active. Contact your administrator.")
+
+    org_id = row.get("organization_id")
+    if org_id:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT is_active FROM organizations WHERE id = %s", (org_id,))
+                org = await cur.fetchone()
+        if not org or int(org.get("is_active") or 0) != 1:
+            raise HTTPException(status_code=403, detail="Organization is inactive. Contact the super admin.")
 
     meta = await _start_otp_challenge(row["id"], row["email"], "password")
     audit_logger.log_authentication(
@@ -250,7 +295,7 @@ async def login_with_google(body: GoogleLoginRequest, request: Request):
             detail="Google email is not verified. Use a verified Google account or sign in with email and password.",
         )
 
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
@@ -285,6 +330,15 @@ async def login_with_google(body: GoogleLoginRequest, request: Request):
         )
         raise HTTPException(status_code=403, detail="Your account is not active. Contact your administrator.")
 
+    org_id = row.get("organization_id")
+    if org_id:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT is_active FROM organizations WHERE id = %s", (org_id,))
+                org = await cur.fetchone()
+        if not org or int(org.get("is_active") or 0) != 1:
+            raise HTTPException(status_code=403, detail="Organization is inactive. Contact the super admin.")
+
     meta = await _start_otp_challenge(row["id"], row["email"], "google")
     audit_logger.log_authentication(
         event_type=AuditEventType.AUTH_GOOGLE_SIGNIN,
@@ -303,7 +357,7 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
     if not code:
         raise HTTPException(status_code=400, detail="Please enter the verification code")
 
-    pool = await get_pool()
+    pool = await get_primary_pool()
     client_ip = _client_ip_from_request(request)
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -367,7 +421,7 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
     if not row:
         raise HTTPException(status_code=500, detail="User missing after verification")
 
-    user = _clean_user(row)
+    user = await _attach_rbac_context(_clean_user(row))
     audit_logger.log_event(
         event_type=AuditEventType.AUTH_OTP_VERIFIED,
         user_id=row.get("id"),
@@ -414,7 +468,7 @@ async def complete_first_login(body: CompleteFirstLoginBody, request: Request):
             detail=f"Password must be at least {settings.FIRST_LOGIN_PASSWORD_MIN_LEN} characters",
         )
 
-    pool = await get_pool()
+    pool = await get_primary_pool()
     client_ip = _client_ip_from_request(request)
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -467,12 +521,12 @@ async def complete_first_login(body: CompleteFirstLoginBody, request: Request):
         action="Completed first login password change",
         status="SUCCESS",
     )
-    return {"success": True, "user": _clean_user(row)}
+    return {"success": True, "user": await _attach_rbac_context(_clean_user(row))}
 
 
 @router.post("/auth/verify")
 async def verify_login(body: VerifyRequest):
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT * FROM users WHERE id = %s", (body.userId,))
@@ -481,7 +535,14 @@ async def verify_login(body: VerifyRequest):
     if not row:
         raise HTTPException(status_code=401, detail="User not found or invalid session")
 
-    user = _clean_user(row)
+    user = await _attach_rbac_context(_clean_user(row))
+    if user.get("organizationId"):
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT is_active FROM organizations WHERE id = %s", (user["organizationId"],))
+                org = await cur.fetchone()
+        if not org or int(org.get("is_active") or 0) != 1:
+            raise HTTPException(status_code=403, detail="Organization is inactive. Contact the super admin.")
     if user.get("mustChangePassword"):
         raise HTTPException(
             status_code=401,
@@ -493,7 +554,7 @@ async def verify_login(body: VerifyRequest):
 
 @router.get("/users/{user_id}")
 async def get_user(user_id: str):
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
@@ -502,12 +563,12 @@ async def get_user(user_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return _clean_user(row)
+    return await _attach_rbac_context(_clean_user(row))
 
 
 @router.get("/users")
 async def list_users(role: str | None = None):
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             if role:
@@ -536,7 +597,7 @@ async def list_users(role: str | None = None):
 
     users = []
     for r in rows:
-        u = _clean_user(r)
+        u = await _attach_rbac_context(_clean_user(r))
         alloc = r.get("allocated_students")
         if role == "mentor" and alloc:
             u["allocatedStudents"] = [s for s in alloc.split(",") if s]
@@ -547,7 +608,7 @@ async def list_users(role: str | None = None):
 
 @router.get("/mentors/{mentor_id}/students")
 async def get_mentor_students(mentor_id: str):
-    pool = await get_pool()
+    pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(

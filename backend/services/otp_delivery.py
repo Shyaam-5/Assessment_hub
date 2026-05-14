@@ -65,3 +65,33 @@ def send_login_otp_email(to_email: str, code: str, expires_minutes: int) -> None
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD or "")
         server.sendmail(settings.SMTP_FROM, [to_email], payload)
 
+
+def send_notification_email(to_email: str, subject: str, body: str) -> None:
+    """Send a plain-text notification email using shared SMTP config."""
+    if not settings.SMTP_HOST or not settings.SMTP_FROM:
+        logger.warning("[MAIL] SMTP not configured - cannot send notification to %s | %s", to_email, subject)
+        return
+
+    msg = MIMEMultipart()
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = to_email
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    payload = msg.as_string()
+
+    if settings.SMTP_PORT == 465:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30, context=context) as server:
+            if settings.SMTP_USER:
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD or "")
+            server.sendmail(settings.SMTP_FROM, [to_email], payload)
+        return
+
+    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
+        if settings.SMTP_USE_TLS:
+            context = ssl.create_default_context()
+            server.starttls(context=context)
+        if settings.SMTP_USER:
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD or "")
+        server.sendmail(settings.SMTP_FROM, [to_email], payload)
+

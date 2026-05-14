@@ -19,15 +19,22 @@ import asyncio
 import os
 import ssl as _ssl
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from pathlib import Path
+from urllib.parse import urlparse
 
 import pymysql
 import pymysql.cursors
+import bcrypt
+from dotenv import dotenv_values
 
 from config import settings
 
 # â"€â"€â"€ Global pool â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _pool: "PyMySQLPool | None" = None
+_tenant_pools: dict[str, "PyMySQLPool"] = {}
+_active_request_pool: ContextVar["PyMySQLPool | None"] = ContextVar("active_request_pool", default=None)
 
 
 class _AsyncCursorWrapper:
@@ -187,10 +194,84 @@ class PyMySQLPool:
 # â"€â"€â"€ Public helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async def get_pool() -> PyMySQLPool:
-    """Return the pool or raise if not initialised."""
+    """Return request-scoped tenant pool when set; otherwise primary pool."""
+    req_pool = _active_request_pool.get()
+    if req_pool is not None:
+        return req_pool
     if _pool is None:
         raise RuntimeError("Database pool not initialised - call init_db() first.")
     return _pool
+
+
+async def get_primary_pool() -> PyMySQLPool:
+    """Return the primary platform DB pool regardless of request scope."""
+    if _pool is None:
+        raise RuntimeError("Primary database pool not initialised - call init_db() first.")
+    return _pool
+
+
+def set_request_pool(pool: "PyMySQLPool | None") -> None:
+    """Set request-scoped active pool; pass None to clear fallback to primary."""
+    _active_request_pool.set(pool)
+
+
+def clear_request_pool() -> None:
+    _active_request_pool.set(None)
+
+
+def _build_connect_kwargs_from_url(db_url: str) -> dict:
+    parsed = urlparse(db_url)
+    ssl_ctx = _ssl.create_default_context()
+    if os.getenv("VERIFY_DB_SSL", "").strip() in ("1", "true", "yes"):
+        ca_path = os.getenv("DB_SSL_CA", "")
+        if ca_path:
+            ssl_ctx.load_verify_locations(ca_path)
+    else:
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+
+    return dict(
+        host=parsed.hostname or "localhost",
+        port=int(parsed.port or 3306),
+        user=parsed.username or "root",
+        password=parsed.password or "",
+        database=(parsed.path or "/test").lstrip("/"),
+        ssl=ssl_ctx,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=15,
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
+async def get_tenant_pool_by_db_url(db_url: str) -> "PyMySQLPool":
+    key = (db_url or "").strip()
+    if not key:
+        raise RuntimeError("Missing tenant DB URL")
+    existing = _tenant_pools.get(key)
+    if existing is not None:
+        return existing
+
+    connect_kwargs = _build_connect_kwargs_from_url(key)
+    test_conn = await asyncio.to_thread(pymysql.connect, **connect_kwargs)
+    test_conn.close()
+    pool = PyMySQLPool(connect_kwargs, maxsize=10)
+    _tenant_pools[key] = pool
+    return pool
+
+
+async def get_tenant_pool_by_org_id(org_id: str | None) -> "PyMySQLPool | None":
+    if not org_id:
+        return None
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT db_url FROM organizations WHERE id = %s AND is_active = 1", (org_id,))
+            row = await cur.fetchone()
+    db_url = (row or {}).get("db_url")
+    if not db_url:
+        return None
+    return await get_tenant_pool_by_db_url(db_url)
 
 
 async def init_db() -> None:
@@ -209,12 +290,46 @@ async def init_db() -> None:
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = _ssl.CERT_NONE
 
+    # Resolve DB settings from backend/.env at runtime to avoid stale shell/process env drift.
+    env_path = Path(__file__).resolve().parent / ".env"
+    env_file = dotenv_values(env_path) if env_path.exists() else {}
+    runtime_db_url = (env_file.get("DATABASE_URL") or os.getenv("DATABASE_URL") or settings.DATABASE_URL or "").strip()
+    parsed = urlparse(runtime_db_url)
+    db_host = parsed.hostname or settings.DB_HOST
+    db_port = int(parsed.port or settings.DB_PORT)
+    db_user = parsed.username or settings.DB_USER
+    db_password = parsed.password or settings.DB_PASSWORD
+    db_name = (parsed.path or f"/{settings.DB_NAME or 'test'}").lstrip("/")
+    if db_name.lower() in {"sys", "mysql", "information_schema", "performance_schema"}:
+        fallback_db = (os.getenv("APP_DB_NAME", "mentor_hub") or "mentor_hub").strip()
+        # Ensure fallback app DB exists before creating the pool.
+        admin_kwargs = dict(
+            host=db_host,
+            port=db_port,
+            user=db_user,
+            password=db_password,
+            ssl=ssl_ctx,
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=15,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        admin_conn = await asyncio.to_thread(pymysql.connect, **admin_kwargs)
+        try:
+            with admin_conn.cursor() as cur:
+                cur.execute(f"CREATE DATABASE IF NOT EXISTS `{fallback_db}`")
+            settings.DB_NAME = fallback_db
+            db_name = fallback_db
+            print(f"[WARNING] System DB '{(settings.DB_NAME or '').strip()}' detected. Using app DB '{fallback_db}'.")
+        finally:
+            admin_conn.close()
+
     connect_kwargs = dict(
-        host=settings.DB_HOST,
-        port=settings.DB_PORT,
-        user=settings.DB_USER,
-        password=settings.DB_PASSWORD,
-        database=settings.DB_NAME,
+        host=db_host,
+        port=db_port,
+        user=db_user,
+        password=db_password,
+        database=db_name,
         ssl=ssl_ctx,
         charset="utf8mb4",
         autocommit=True,
@@ -227,7 +342,12 @@ async def init_db() -> None:
     test_conn.close()
 
     _pool = PyMySQLPool(connect_kwargs, maxsize=10)
-    print(f"[OK] Database pool created - {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
+    settings.DB_HOST = db_host
+    settings.DB_PORT = db_port
+    settings.DB_USER = db_user
+    settings.DB_PASSWORD = db_password
+    settings.DB_NAME = db_name
+    print(f"[OK] Database pool created - {db_host}:{db_port}/{db_name}")
 
 
 async def close_db() -> None:
@@ -237,6 +357,12 @@ async def close_db() -> None:
         _pool.close()
         _pool = None
         print("[OK] Database pool closed.")
+    for tp in list(_tenant_pools.values()):
+        try:
+            tp.close()
+        except Exception:
+            pass
+    _tenant_pools.clear()
 
 
 # â"€â"€â"€ Prescan table DDL â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -332,6 +458,48 @@ _PRESCAN_SEED_EXAMS = [
 ]
 
 
+async def ensure_core_users_table() -> None:
+    """Ensure core users table exists on fresh databases."""
+    if _pool is None:
+        print("[WARNING] Cannot ensure users table - pool not initialised.")
+        return
+
+    try:
+        async with _pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        id VARCHAR(50) NOT NULL PRIMARY KEY,
+                        email VARCHAR(255) NULL,
+                        password VARCHAR(255) NULL,
+                        role VARCHAR(20) NULL DEFAULT 'student',
+                        name VARCHAR(255) NULL,
+                        avatar VARCHAR(255) NULL,
+                        specialization VARCHAR(255) NULL,
+                        mentor_id VARCHAR(50) NULL,
+                        batch VARCHAR(20) NULL,
+                        created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+                        phone VARCHAR(20) NULL,
+                        status ENUM('active','inactive','suspended') NULL DEFAULT 'active',
+                        tier VARCHAR(50) NULL DEFAULT 'beginner',
+                        theme_preference VARCHAR(50) NULL DEFAULT 'system',
+                        ide_theme VARCHAR(50) NULL DEFAULT 'vs-dark',
+                        keyboard_shortcuts_enabled TINYINT(1) NULL DEFAULT 1,
+                        tier_start_date TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                        tier_expiry_date TIMESTAMP NULL DEFAULT NULL,
+                        must_change_password TINYINT(1) NOT NULL DEFAULT 0,
+                        UNIQUE KEY uq_users_email (email),
+                        KEY idx_users_role (role),
+                        KEY idx_users_mentor (mentor_id)
+                    )
+                    """
+                )
+        print("[OK] Core users table verified.")
+    except Exception as exc:
+        print(f"[WARNING] Core users table migration (non-fatal): {exc}")
+
+
 async def _drop_foreign_keys_for_column(cur, table_name: str, column_name: str) -> None:
     await cur.execute(
         """
@@ -396,6 +564,20 @@ async def _ensure_prescan_identity_columns() -> None:
                     print(f"[WARNING] Prescan identity-column migration {table_name}.{column_name} failed: {exc}")
 
             # Best-effort data backfill: convert legacy numeric prescan user ids to main users.id (by email).
+            await cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'prescan_users'
+                LIMIT 1
+                """,
+                (settings.DB_NAME,),
+            )
+            has_prescan_users = bool(await cur.fetchone())
+            if not has_prescan_users:
+                print("[INFO] Legacy prescan_users table not found; skipping prescan id backfill.")
+                return
+
             try:
                 await cur.execute(
                     """
@@ -465,6 +647,7 @@ async def ensure_auth_login_schema() -> None:
         return
 
     try:
+        await ensure_core_users_table()
         async with _pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -510,4 +693,141 @@ async def ensure_auth_login_schema() -> None:
         print("[OK] Auth login / OTP schema verified.")
     except Exception as exc:
         print(f"[WARNING] Auth schema migration (non-fatal): {exc}")
+
+
+async def ensure_rbac_schema() -> None:
+    """Create multi-tenant RBAC schema for organizations, roles, and permissions."""
+    if _pool is None:
+        print("[WARNING] Cannot run RBAC schema migration - pool not initialised.")
+        return
+
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS organizations (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            code VARCHAR(64) NOT NULL UNIQUE,
+            type ENUM('institutional','corporate') NOT NULL DEFAULT 'institutional',
+            db_url TEXT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            created_by VARCHAR(64) NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS roles (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            organization_id CHAR(36) NOT NULL,
+            name VARCHAR(128) NOT NULL,
+            slug VARCHAR(128) NOT NULL,
+            description TEXT NULL,
+            is_system TINYINT(1) NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_org_role_slug (organization_id, slug),
+            CONSTRAINT fk_roles_org FOREIGN KEY (organization_id) REFERENCES organizations(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS role_permissions (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            role_id CHAR(36) NOT NULL,
+            permission_key VARCHAR(128) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_role_permission (role_id, permission_key),
+            CONSTRAINT fk_role_permissions_role FOREIGN KEY (role_id) REFERENCES roles(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_role_assignments (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(64) NOT NULL,
+            organization_id CHAR(36) NOT NULL,
+            role_id CHAR(36) NOT NULL,
+            is_primary TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_user_org (user_id, organization_id),
+            CONSTRAINT fk_user_role_assignments_org FOREIGN KEY (organization_id) REFERENCES organizations(id),
+            CONSTRAINT fk_user_role_assignments_role FOREIGN KEY (role_id) REFERENCES roles(id)
+        )
+        """,
+    ]
+
+    try:
+        await ensure_core_users_table()
+        async with _pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                for sql in ddl:
+                    await cur.execute(sql)
+                await cur.execute(
+                    """
+                    SELECT 1 FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'users' AND COLUMN_NAME = 'organization_id'
+                    """,
+                    (settings.DB_NAME,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute("ALTER TABLE users ADD COLUMN organization_id CHAR(36) NULL")
+        print("[OK] RBAC schema verified.")
+    except Exception as exc:
+        print(f"[WARNING] RBAC schema migration (non-fatal): {exc}")
+
+
+async def ensure_default_super_admins() -> None:
+    """Seed platform super-admin users if they do not exist."""
+    if _pool is None:
+        print("[WARNING] Cannot seed default super admins - pool not initialised.")
+        return
+    if not settings.SUPER_ADMIN_SEED_ENABLED:
+        print("[INFO] Default super-admin seeding is disabled (SUPER_ADMIN_SEED_ENABLED=false).")
+        return
+
+    defaults = [
+        (
+            settings.SUPER_ADMIN_1_ID,
+            settings.SUPER_ADMIN_1_NAME,
+            settings.SUPER_ADMIN_1_EMAIL,
+            settings.SUPER_ADMIN_1_PASSWORD,
+        ),
+        (
+            settings.SUPER_ADMIN_2_ID,
+            settings.SUPER_ADMIN_2_NAME,
+            settings.SUPER_ADMIN_2_EMAIL,
+            settings.SUPER_ADMIN_2_PASSWORD,
+        ),
+    ]
+
+    try:
+        await ensure_core_users_table()
+        async with _pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                for user_id, name, email, plain_password in defaults:
+                    if not email:
+                        continue
+                    if not plain_password:
+                        print(f"[WARNING] Missing password env for super-admin {email}; skipping seed/update.")
+                        continue
+                    pw_hash = bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                    await cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+                    exists = await cur.fetchone()
+                    if exists:
+                        if settings.SUPER_ADMIN_ROTATE_PASSWORDS_ON_STARTUP:
+                            await cur.execute(
+                                """
+                                UPDATE users
+                                SET password = %s, role = 'admin', status = 'active', must_change_password = 0
+                                WHERE email = %s
+                                """,
+                                (pw_hash, email),
+                            )
+                        continue
+                    await cur.execute(
+                        """
+                        INSERT INTO users (id, name, email, password, role, status, must_change_password, created_at)
+                        VALUES (%s, %s, %s, %s, 'admin', 'active', 0, NOW())
+                        """,
+                        (user_id, name, email, pw_hash),
+                    )
+        print("[OK] Default super-admin users ensured.")
+    except Exception as exc:
+        print(f"[WARNING] Default super-admin seed failed: {exc}")
 

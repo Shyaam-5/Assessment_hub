@@ -1,6 +1,7 @@
 """Admin routes – user management CRUD (mirrors the legacy server.js endpoints)."""
 
 import uuid
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
@@ -8,6 +9,7 @@ from database import get_pool
 from routes.auth import _hash_password
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
+from services.otp_delivery import send_notification_email
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 audit_logger = get_audit_logger()
@@ -189,6 +191,21 @@ async def create_user(body: CreateUserBody, request: Request):
         resource_type="user",
         changes={"role": body.role, "mentorId": body.mentorId, "batch": body.batch},
     )
+    try:
+        await asyncio.to_thread(
+            send_notification_email,
+            body.email,
+            "Your Account Has Been Created",
+            (
+                f"Hello {body.name},\n\n"
+                "Your account has been created.\n"
+                f"Login Email: {body.email}\n"
+                f"Temporary Password: {body.password}\n\n"
+                "Please login and change your password.\n"
+            ),
+        )
+    except Exception:
+        pass
     return {"success": True, "user": {"id": user_id, "name": body.name, "email": body.email,
                                        "role": body.role, "mentorId": body.mentorId,
                                        "batch": body.batch, "phone": body.phone, "status": "active",

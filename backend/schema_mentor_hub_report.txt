@@ -1,0 +1,2210 @@
+DB: mentor_hub
+TABLE_COUNT: 173
+
+TABLES:
+- admin_actions
+- admin_session_logs
+- ai_code_review_comments
+- ai_code_reviews
+- ai_generated_testcases
+- alumni_connections
+- alumni_messages
+- alumni_post_comments
+- alumni_post_likes
+- alumni_posts
+- alumni_profiles
+- api_request_audit
+- aptitude_question_results
+- aptitude_questions
+- aptitude_submissions
+- aptitude_test_attempts
+- aptitude_tests
+- audit_events
+- audit_log_analytics
+- audit_log_categories
+- audit_log_exports
+- audit_logs
+- auth_audit
+- auth_login_challenges
+- auth_password_setup_tokens
+- badges
+- behavior_analyses
+- behavior_events
+- behavioral_events
+- behavioral_profiles
+- certificates
+- certifications
+- code_execution_logs
+- code_feedback
+- code_reviews
+- coding_activity
+- comm_performance
+- comm_proctoring_logs
+- comm_test_attempts
+- comm_tests
+- comment_replies
+- company_interview_attempts
+- company_interviews
+- company_roadmaps
+- concept_mastery
+- conversation_metadata
+- conversations
+- crt_answers
+- crt_attempts
+- crt_questions
+- crt_tests
+- custom_reports
+- daily_progress
+- data_access_audit
+- direct_messages
+- export_reports
+- file_attachments
+- global_proctoring_logs
+- global_test_submissions
+- global_tests
+- ide_theme_preferences
+- ide_themes_catalog
+- keyboard_shortcuts_config
+- language_leaderboards
+- leaderboard_periods
+- leaderboard_scores
+- leaderboard_stats
+- learning_analytics
+- learning_profiles
+- learning_recommendations
+- link_assignments
+- mcq_assignments
+- mcq_submissions
+- mcq_tests
+- mentor_expertise
+- mentor_profiles
+- mentor_ratings
+- mentor_requests
+- mentor_slots
+- mentor_student_allocations
+- message_reactions
+- messages
+- notification_digests
+- notification_preferences
+- notification_subscribers
+- notifications
+- personalized_reports
+- plagiarism_analysis
+- plagiarism_matches
+- plagiarism_reports
+- plagiarism_settings
+- points_history
+- prescan_exam_sessions
+- prescan_exams
+- prescan_room_scans
+- prescan_scan_audit_log
+- prescan_scan_frames
+- prescan_scan_overrides
+- prescan_users
+- problem_attempts
+- problem_completions
+- problem_recommendations
+- problem_set_template_items
+- problem_set_templates
+- problem_student_allocations
+- problems
+- proctor_agent_analyses
+- proctor_integrity_reports
+- proctoring_events
+- proctoring_face_events
+- proctoring_reports
+- proctoring_sessions
+- proctoring_violations
+- question_results
+- rate_limit_usage
+- report_delivery_logs
+- report_generations
+- report_templates
+- resource_links
+- review_comments
+- saved_searches
+- scheduled_backups
+- scheduled_reports
+- search_history
+- section_results
+- security_alerts
+- skill_badges
+- skill_proctoring_logs
+- skill_test_attempts
+- skill_tests
+- st330001_departments
+- st330001_employees
+- st330001_orders
+- st330001_projects
+- st360001_departments
+- st360001_employees
+- st360001_orders
+- st360001_projects
+- st360002_departments
+- st360002_employees
+- st360002_orders
+- st360002_projects
+- st360003_departments
+- st360003_employees
+- st360003_orders
+- st360003_projects
+- streak_tracking
+- student_analytics
+- student_badges
+- student_completed_aptitude
+- student_gamification
+- submissions
+- supported_languages
+- system_health_metrics
+- task_completions
+- tasks
+- team_leaderboards
+- test_case_results
+- test_cases
+- test_questions
+- test_student_allocations
+- test_violation_config
+- testcase_feedback
+- tier_history
+- tier_limits
+- user_availability
+- user_badges
+- user_streaks
+- users
+- violation_rules
+- violation_scoring_decisions
+- webhook_deliveries
+- webhooks
+
+COLUMNS:
+
+[admin_actions]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - admin_id | varchar(255) | null=NO | key=MUL | extra=
+  - admin_email | varchar(255) | null=YES | key= | extra=
+  - action_type | varchar(100) | null=NO | key=MUL | extra=
+  - resource_type | varchar(100) | null=YES | key=MUL | extra=
+  - resource_id | varchar(255) | null=YES | key= | extra=
+  - old_values | json | null=YES | key= | extra=
+  - new_values | json | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - description | longtext | null=YES | key= | extra=
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[admin_session_logs]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - admin_id | varchar(100) | null=NO | key=MUL | extra=
+  - login_time | timestamp | null=YES | key=MUL | extra=
+  - logout_time | timestamp | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - user_agent | text | null=YES | key= | extra=
+  - actions_performed | int | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key=MUL | extra=
+
+[ai_code_review_comments]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - review_id | varchar(36) | null=NO | key=MUL | extra=
+  - submission_id | varchar(100) | null=YES | key=MUL | extra=
+  - test_submission_id | varchar(100) | null=YES | key= | extra=
+  - line_number | int | null=YES | key=MUL | extra=
+  - end_line | int | null=YES | key= | extra=
+  - comment_type | varchar(50) | null=YES | key= | extra=
+  - severity | varchar(20) | null=YES | key= | extra=
+  - message | text | null=YES | key= | extra=
+  - suggestion | text | null=YES | key= | extra=
+  - code_snippet | text | null=YES | key= | extra=
+  - is_resolved | tinyint(1) | null=YES | key= | extra=
+  - resolved_by | varchar(100) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[ai_code_reviews]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_id | varchar(100) | null=YES | key=MUL | extra=
+  - test_submission_id | varchar(100) | null=YES | key= | extra=
+  - test_type | varchar(50) | null=YES | key= | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - problem_id | varchar(100) | null=YES | key= | extra=
+  - language | varchar(50) | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key=MUL | extra=
+  - overall_quality | varchar(50) | null=YES | key= | extra=
+  - overall_feedback | text | null=YES | key= | extra=
+  - total_issues | int | null=YES | key= | extra=
+  - bug_count | int | null=YES | key= | extra=
+  - performance_count | int | null=YES | key= | extra=
+  - style_count | int | null=YES | key= | extra=
+  - security_count | int | null=YES | key= | extra=
+  - ai_score | decimal(5,2) | null=YES | key= | extra=
+  - mentor_approved | tinyint(1) | null=YES | key= | extra=
+  - mentor_id | varchar(100) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+  - completed_at | timestamp | null=YES | key= | extra=
+  - retry_count | int | null=YES | key= | extra=
+  - error_message | text | null=YES | key= | extra=
+
+[ai_generated_testcases]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - problem_id | varchar(50) | null=NO | key=MUL | extra=
+  - generated_by_user_id | varchar(50) | null=YES | key= | extra=
+  - input_data | json | null=NO | key= | extra=
+  - expected_output | json | null=NO | key= | extra=
+  - explanation | text | null=YES | key= | extra=
+  - complexity | varchar(20) | null=YES | key=MUL | extra=
+  - ai_model_used | varchar(100) | null=YES | key= | extra=
+  - generation_timestamp | timestamp | null=YES | key= | extra=
+  - rating | int | null=YES | key= | extra=
+  - is_approved | tinyint(1) | null=YES | key=MUL | extra=
+  - approval_by_user_id | varchar(50) | null=YES | key= | extra=
+  - approved_at | timestamp | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[alumni_connections]
+  - id | varchar(36) | null=NO | key=PRI | extra=DEFAULT_GENERATED
+  - requester_id | varchar(36) | null=NO | key=MUL | extra=
+  - target_id | varchar(36) | null=NO | key= | extra=
+  - status | enum('pending','accepted','declined') | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[alumni_messages]
+  - id | varchar(36) | null=NO | key=PRI | extra=DEFAULT_GENERATED
+  - sender_id | varchar(36) | null=NO | key=MUL | extra=
+  - receiver_id | varchar(36) | null=NO | key= | extra=
+  - text | text | null=NO | key= | extra=
+  - is_read | tinyint(1) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[alumni_post_comments]
+  - id | varchar(36) | null=NO | key=PRI | extra=DEFAULT_GENERATED
+  - post_id | varchar(36) | null=NO | key= | extra=
+  - user_id | varchar(36) | null=NO | key= | extra=
+  - text | text | null=NO | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[alumni_post_likes]
+  - id | varchar(36) | null=NO | key=PRI | extra=DEFAULT_GENERATED
+  - post_id | varchar(36) | null=NO | key=MUL | extra=
+  - user_id | varchar(36) | null=NO | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[alumni_posts]
+  - id | varchar(36) | null=NO | key=PRI | extra=DEFAULT_GENERATED
+  - author_id | varchar(36) | null=NO | key= | extra=
+  - content | text | null=NO | key= | extra=
+  - type | enum('update','job','insight') | null=YES | key= | extra=
+  - tags_json | text | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - image_url | varchar(500) | null=YES | key= | extra=
+
+[alumni_profiles]
+  - id | varchar(36) | null=NO | key=PRI | extra=DEFAULT_GENERATED
+  - user_id | varchar(36) | null=NO | key=UNI | extra=
+  - company | varchar(255) | null=YES | key= | extra=
+  - job_title | varchar(255) | null=YES | key= | extra=
+  - location | varchar(255) | null=YES | key= | extra=
+  - batch_year | int | null=YES | key= | extra=
+  - skills_json | text | null=YES | key= | extra=
+  - bio | text | null=YES | key= | extra=
+  - avatar_url | varchar(500) | null=YES | key= | extra=
+  - linkedin_url | varchar(500) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - updated_at | datetime | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[api_request_audit]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - request_id | varchar(255) | null=YES | key=UNI | extra=
+  - user_id | varchar(255) | null=YES | key=MUL | extra=
+  - method | varchar(10) | null=YES | key= | extra=
+  - endpoint | varchar(500) | null=YES | key=MUL | extra=
+  - query_string | longtext | null=YES | key= | extra=
+  - request_body | longtext | null=YES | key= | extra=
+  - response_status | int | null=YES | key=MUL | extra=
+  - response_time_ms | int | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - user_agent | longtext | null=YES | key= | extra=
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[aptitude_question_results]
+  - submission_id | varchar(50) | null=YES | key=MUL | extra=
+  - question_id | varchar(50) | null=YES | key= | extra=
+  - question | text | null=YES | key= | extra=
+  - user_answer | text | null=YES | key= | extra=
+  - correct_answer | text | null=YES | key= | extra=
+  - is_correct | varchar(10) | null=YES | key= | extra=
+  - explanation | text | null=YES | key= | extra=
+  - category | varchar(100) | null=YES | key= | extra=
+
+[aptitude_questions]
+  - test_id | varchar(50) | null=NO | key=PRI | extra=
+  - question_id | varchar(50) | null=NO | key=PRI | extra=
+  - question | text | null=YES | key= | extra=
+  - option_1 | text | null=YES | key= | extra=
+  - option_2 | text | null=YES | key= | extra=
+  - option_3 | text | null=YES | key= | extra=
+  - option_4 | text | null=YES | key= | extra=
+  - correct_answer | text | null=YES | key= | extra=
+  - explanation | text | null=YES | key= | extra=
+  - category | varchar(100) | null=YES | key= | extra=
+
+[aptitude_submissions]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - test_id | varchar(50) | null=YES | key=MUL | extra=
+  - test_title | varchar(255) | null=YES | key= | extra=
+  - student_id | varchar(50) | null=YES | key=MUL | extra=
+  - correct_count | int | null=YES | key= | extra=
+  - total_questions | int | null=YES | key= | extra=
+  - score | int | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - time_spent | int | null=YES | key= | extra=
+  - tab_switches | int | null=YES | key= | extra=
+  - submitted_at | datetime | null=YES | key= | extra=
+
+[aptitude_test_attempts]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - student_id | varchar(255) | null=NO | key=MUL | extra=
+  - test_id | varchar(255) | null=NO | key=MUL | extra=
+  - start_time | datetime | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key=MUL | extra=
+
+[aptitude_tests]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - title | varchar(255) | null=YES | key= | extra=
+  - type | varchar(50) | null=YES | key= | extra=
+  - difficulty | varchar(20) | null=YES | key= | extra=
+  - duration | int | null=YES | key= | extra=
+  - total_questions | int | null=YES | key= | extra=
+  - start_time | datetime | null=YES | key= | extra=
+  - passing_score | int | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - created_by | varchar(50) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key=MUL | extra=
+  - max_tab_switches | int | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+  - deadline | datetime | null=YES | key= | extra=
+  - description | text | null=YES | key= | extra=
+
+[audit_events]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - event_type | varchar(50) | null=NO | key=MUL | extra=
+  - user_id | varchar(255) | null=YES | key=MUL | extra=
+  - ip_address | varchar(45) | null=YES | key=MUL | extra=
+  - resource_id | varchar(255) | null=YES | key= | extra=
+  - resource_type | varchar(100) | null=YES | key= | extra=
+  - action | varchar(500) | null=YES | key= | extra=
+  - status | varchar(20) | null=NO | key=MUL | extra=
+  - error_message | longtext | null=YES | key= | extra=
+  - details | json | null=YES | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[audit_log_analytics]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - date_key | date | null=NO | key=MUL | extra=
+  - action_type | varchar(100) | null=YES | key=MUL | extra=
+  - action_count | int | null=YES | key= | extra=
+  - affected_users | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[audit_log_categories]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - category | varchar(100) | null=NO | key=UNI | extra=
+  - description | text | null=YES | key= | extra=
+  - icon | varchar(50) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[audit_log_exports]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - admin_id | varchar(100) | null=NO | key=MUL | extra=
+  - exported_at | timestamp | null=YES | key=MUL | extra=
+  - format | varchar(50) | null=YES | key= | extra=
+  - filter_keys | json | null=YES | key= | extra=
+  - total_records | int | null=YES | key= | extra=
+  - file_url | varchar(500) | null=YES | key= | extra=
+
+[audit_logs]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(36) | null=YES | key=MUL | extra=
+  - user_name | varchar(255) | null=YES | key= | extra=
+  - user_role | varchar(50) | null=YES | key= | extra=
+  - action | varchar(100) | null=NO | key=MUL | extra=
+  - resource_type | varchar(100) | null=YES | key=MUL | extra=
+  - resource_id | varchar(36) | null=YES | key= | extra=
+  - details | json | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - timestamp | datetime | null=YES | key=MUL | extra=
+
+[auth_audit]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - user_id | varchar(255) | null=YES | key=MUL | extra=
+  - email | varchar(255) | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=NO | key=MUL | extra=
+  - auth_method | varchar(50) | null=YES | key= | extra=
+  - success | tinyint(1) | null=NO | key=MUL | extra=
+  - failure_reason | varchar(255) | null=YES | key= | extra=
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - user_agent | longtext | null=YES | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[auth_login_challenges]
+  - id | char(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(64) | null=NO | key=MUL | extra=
+  - otp_hash | varchar(128) | null=NO | key= | extra=
+  - expires_at | datetime | null=NO | key= | extra=
+  - consumed | tinyint(1) | null=NO | key= | extra=
+  - failed_attempts | int | null=NO | key= | extra=
+  - auth_method | varchar(16) | null=NO | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[auth_password_setup_tokens]
+  - token | char(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(64) | null=NO | key=MUL | extra=
+  - expires_at | datetime | null=NO | key= | extra=
+  - consumed | tinyint(1) | null=NO | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[badges]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - badge_name | varchar(100) | null=NO | key=UNI | extra=
+  - description | text | null=YES | key= | extra=
+  - icon_url | varchar(255) | null=YES | key= | extra=
+  - criteria | json | null=YES | key= | extra=
+  - reward_points | int | null=YES | key= | extra=
+  - category | varchar(50) | null=YES | key=MUL | extra=
+  - tier | varchar(20) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[behavior_analyses]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - session_id | varchar(100) | null=NO | key=MUL | extra=
+  - user_id | varchar(50) | null=YES | key=MUL | extra=
+  - exam_title | varchar(200) | null=YES | key= | extra=
+  - trust_score | float | null=YES | key= | extra=
+  - trust_level | varchar(30) | null=YES | key=MUL | extra=
+  - typing_json | json | null=YES | key= | extra=
+  - progression_json | json | null=YES | key= | extra=
+  - engagement_json | json | null=YES | key= | extra=
+  - anomalies_json | json | null=YES | key= | extra=
+  - ai_insights_json | json | null=YES | key= | extra=
+  - full_result_json | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[behavior_events]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - session_id | varchar(100) | null=NO | key=MUL | extra=
+  - user_id | varchar(50) | null=YES | key=MUL | extra=
+  - event_type | varchar(30) | null=NO | key=MUL | extra=
+  - event_data | json | null=YES | key= | extra=
+  - timestamp | timestamp(3) | null=YES | key= | extra=
+
+[behavioral_events]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - attempt_id | varchar(36) | null=YES | key= | extra=
+  - event_type | varchar(50) | null=YES | key= | extra=
+  - event_data | json | null=YES | key= | extra=
+  - suspicion_score | decimal(5,2) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[behavioral_profiles]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=UNI | extra=
+  - baseline_typing_speed | decimal(5,2) | null=YES | key= | extra=
+  - baseline_pause_interval | decimal(5,2) | null=YES | key= | extra=
+  - baseline_mouse_movement | int | null=YES | key= | extra=
+  - normal_submission_time | int | null=YES | key= | extra=
+  - keystroke_pattern | json | null=YES | key= | extra=
+  - mouse_pattern | json | null=YES | key= | extra=
+  - behavioral_flags | json | null=YES | key= | extra=
+  - anomaly_detected | tinyint(1) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[certificates]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - student_name | varchar(255) | null=NO | key= | extra=
+  - mentor_name | varchar(255) | null=YES | key= | extra=
+  - certificate_type | enum('skill_test','aptitude_test','global_test','skill_path') | null=NO | key= | extra=
+  - source_id | varchar(100) | null=NO | key=MUL | extra=
+  - source_title | varchar(500) | null=NO | key= | extra=
+  - score | decimal(5,2) | null=YES | key= | extra=
+  - passing_score | decimal(5,2) | null=YES | key= | extra=
+  - issued_at | timestamp | null=YES | key=MUL | extra=
+  - pdf_path | varchar(500) | null=YES | key= | extra=
+  - verification_code | varchar(64) | null=NO | key=UNI | extra=
+  - is_valid | tinyint(1) | null=YES | key= | extra=
+
+[certifications]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - name | varchar(150) | null=NO | key= | extra=
+  - issuer | varchar(100) | null=YES | key= | extra=
+  - issue_date | date | null=YES | key=MUL | extra=
+  - expiry_date | date | null=YES | key= | extra=
+  - credential_url | varchar(255) | null=YES | key= | extra=
+  - credential_id | varchar(100) | null=YES | key= | extra=
+  - verified | tinyint(1) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[code_execution_logs]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - problem_id | varchar(50) | null=YES | key=MUL | extra=
+  - language | varchar(50) | null=NO | key=MUL | extra=
+  - submitted_code | longtext | null=NO | key= | extra=
+  - execution_result | varchar(20) | null=YES | key= | extra=
+  - output | longtext | null=YES | key= | extra=
+  - error_message | longtext | null=YES | key= | extra=
+  - execution_time_ms | int | null=YES | key= | extra=
+  - memory_used_mb | int | null=YES | key= | extra=
+  - compiler_output | longtext | null=YES | key= | extra=
+  - test_cases_passed | int | null=YES | key= | extra=
+  - test_cases_total | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[code_feedback]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_id | varchar(36) | null=NO | key=MUL | extra=
+  - mentor_id | varchar(100) | null=NO | key=MUL | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - line_number | int | null=NO | key= | extra=
+  - end_line | int | null=YES | key= | extra=
+  - comment | text | null=NO | key= | extra=
+  - feedback_type | enum('suggestion','issue','praise','question') | null=YES | key= | extra=
+  - is_resolved | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[code_reviews]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_id | varchar(36) | null=NO | key=MUL | extra=
+  - author_id | varchar(36) | null=NO | key=MUL | extra=
+  - line_number | int | null=NO | key= | extra=
+  - comment | text | null=NO | key= | extra=
+  - code_snippet | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[coding_activity]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(36) | null=NO | key=MUL | extra=
+  - activity_date | date | null=NO | key= | extra=
+  - problems_solved | int | null=YES | key= | extra=
+  - submissions_count | int | null=YES | key= | extra=
+  - tasks_completed | int | null=YES | key= | extra=
+  - aptitude_completed | int | null=YES | key= | extra=
+  - total_points | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[comm_performance]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - user_id | varchar(50) | null=NO | key= | extra=
+  - session_id | varchar(100) | null=NO | key= | extra=
+  - module | varchar(60) | null=NO | key= | extra=
+  - question_number | int | null=YES | key= | extra=
+  - score | float | null=YES | key= | extra=
+  - max_score | float | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[comm_proctoring_logs]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - user_id | varchar(50) | null=NO | key= | extra=
+  - session_id | varchar(100) | null=NO | key= | extra=
+  - event_type | varchar(60) | null=NO | key= | extra=
+  - severity | varchar(20) | null=YES | key= | extra=
+  - details | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[comm_test_attempts]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - test_id | int | null=NO | key= | extra=
+  - student_id | varchar(50) | null=NO | key= | extra=
+  - student_name | varchar(100) | null=YES | key= | extra=
+  - attempt_number | int | null=YES | key= | extra=
+  - module_a_data | json | null=YES | key= | extra=
+  - module_b_data | json | null=YES | key= | extra=
+  - module_c_data | json | null=YES | key= | extra=
+  - module_d_data | json | null=YES | key= | extra=
+  - module_a_score | float | null=YES | key= | extra=
+  - module_b_score | float | null=YES | key= | extra=
+  - module_c_score | float | null=YES | key= | extra=
+  - module_d_score | float | null=YES | key= | extra=
+  - overall_score | float | null=YES | key= | extra=
+  - current_module | varchar(20) | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - proctoring_violations | int | null=YES | key= | extra=
+  - violation_details | json | null=YES | key= | extra=
+  - auto_terminated | tinyint | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - completed_at | timestamp | null=YES | key= | extra=
+
+[comm_tests]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - title | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - module_a_sentences | json | null=YES | key= | extra=
+  - module_b_sentences | json | null=YES | key= | extra=
+  - module_c_topics | json | null=YES | key= | extra=
+  - module_d_questions | json | null=YES | key= | extra=
+  - module_a_count | int | null=YES | key= | extra=
+  - module_b_count | int | null=YES | key= | extra=
+  - module_c_count | int | null=YES | key= | extra=
+  - module_d_count | int | null=YES | key= | extra=
+  - duration_minutes | int | null=YES | key= | extra=
+  - proctoring_enabled | tinyint(1) | null=YES | key= | extra=
+  - proctoring_config | json | null=YES | key= | extra=
+  - attempt_limit | int | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[comment_replies]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - comment_id | varchar(50) | null=NO | key=MUL | extra=
+  - author_id | varchar(50) | null=NO | key=MUL | extra=
+  - reply_text | text | null=NO | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[company_interview_attempts]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - test_id | int | null=YES | key= | extra=
+  - student_id | varchar(50) | null=YES | key= | extra=
+  - student_name | varchar(255) | null=YES | key= | extra=
+  - current_stage | varchar(50) | null=YES | key= | extra=
+  - chat_history | longtext | null=YES | key= | extra=
+  - coding_submissions | json | null=YES | key= | extra=
+  - sql_submissions | json | null=YES | key= | extra=
+  - overall_score | decimal(5,2) | null=YES | key= | extra=
+  - evaluation_report | json | null=YES | key= | extra=
+  - status | enum('in_progress','completed','failed') | null=YES | key= | extra=
+  - started_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+  - interview_progress | int | null=YES | key= | extra=
+
+[company_interviews]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - company_name | varchar(255) | null=NO | key= | extra=
+  - title | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - duration_minutes | int | null=YES | key= | extra=
+  - difficulty | enum('easy','medium','hard') | null=YES | key= | extra=
+  - skills_covered | json | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key= | extra=
+  - created_by | varchar(50) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+  - assigned_students | json | null=YES | key= | extra=
+
+[company_roadmaps]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - company_name | varchar(100) | null=NO | key=UNI | extra=
+  - roadmap_json | longtext | null=NO | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[concept_mastery]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - concept_name | varchar(100) | null=NO | key= | extra=
+  - mastery_level | decimal(5,2) | null=YES | key=MUL | extra=
+  - attempts | int | null=YES | key= | extra=
+  - successes | int | null=YES | key= | extra=
+  - last_attempt_date | timestamp | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[conversation_metadata]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user1_id | varchar(36) | null=NO | key=MUL | extra=
+  - user2_id | varchar(36) | null=NO | key=MUL | extra=
+  - last_message_id | varchar(36) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[conversations]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - participant_1_id | varchar(50) | null=NO | key=MUL | extra=
+  - participant_2_id | varchar(50) | null=NO | key=MUL | extra=
+  - last_message_id | varchar(50) | null=YES | key= | extra=
+  - last_message_at | timestamp | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key=MUL | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[crt_answers]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - attempt_id | int | null=NO | key=MUL | extra=
+  - question_id | int | null=NO | key=MUL | extra=
+  - section | varchar(50) | null=YES | key= | extra=
+  - student_answer | text | null=YES | key= | extra=
+  - is_correct | tinyint(1) | null=YES | key= | extra=
+  - score | float | null=YES | key= | extra=
+  - execution_result | text | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[crt_attempts]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - test_id | int | null=NO | key=MUL | extra=
+  - student_id | varchar(255) | null=NO | key=MUL | extra=
+  - student_name | varchar(255) | null=YES | key= | extra=
+  - status | enum('in_progress','completed','expired') | null=YES | key= | extra=
+  - overall_score | float | null=YES | key= | extra=
+  - section_scores | text | null=YES | key= | extra=
+  - proctoring_violations | text | null=YES | key= | extra=
+  - started_at | datetime | null=YES | key= | extra=
+  - completed_at | datetime | null=YES | key= | extra=
+
+[crt_questions]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - test_id | int | null=NO | key=MUL | extra=
+  - section | varchar(50) | null=NO | key=MUL | extra=
+  - question_type | enum('mcq','code','sql') | null=YES | key= | extra=
+  - question | text | null=NO | key= | extra=
+  - options | text | null=YES | key= | extra=
+  - correct_answer | varchar(10) | null=YES | key= | extra=
+  - explanation | text | null=YES | key= | extra=
+  - code_snippet | text | null=YES | key= | extra=
+  - starter_code | text | null=YES | key= | extra=
+  - test_cases | text | null=YES | key= | extra=
+  - language | varchar(50) | null=YES | key= | extra=
+  - sql_schema | text | null=YES | key= | extra=
+  - expected_output | text | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[crt_tests]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - company_name | varchar(255) | null=NO | key= | extra=
+  - title | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - sections | text | null=NO | key= | extra=
+  - difficulty | enum('easy','medium','hard') | null=YES | key= | extra=
+  - duration_minutes | int | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+  - pass_percentage | int | null=YES | key= | extra=
+  - assigned_students | text | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key= | extra=
+  - proctoring_config | text | null=YES | key= | extra=
+  - section_time_limits | text | null=YES | key= | extra=
+  - created_by | int | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - updated_at | datetime | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[custom_reports]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(100) | null=NO | key=MUL | extra=
+  - name | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - metrics | json | null=YES | key= | extra=
+  - filters | json | null=YES | key= | extra=
+  - date_range_type | varchar(50) | null=YES | key= | extra=
+  - date_from | date | null=YES | key= | extra=
+  - date_to | date | null=YES | key= | extra=
+  - include_charts | tinyint(1) | null=YES | key= | extra=
+  - include_summary | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+  - last_used | timestamp | null=YES | key= | extra=
+  - usage_count | int | null=YES | key= | extra=
+
+[daily_progress]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - date | date | null=NO | key=MUL | extra=
+  - problems_attempted | int | null=YES | key= | extra=
+  - problems_solved | int | null=YES | key= | extra=
+  - time_spent_minutes | int | null=YES | key= | extra=
+  - new_concepts_learned | int | null=YES | key= | extra=
+  - submitted_at | timestamp | null=YES | key= | extra=
+
+[data_access_audit]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - user_id | varchar(255) | null=YES | key=MUL | extra=
+  - data_type | varchar(100) | null=YES | key=MUL | extra=
+  - query_type | varchar(50) | null=YES | key= | extra=
+  - filters | json | null=YES | key= | extra=
+  - record_count | int | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[direct_messages]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - sender_id | varchar(100) | null=NO | key=MUL | extra=
+  - receiver_id | varchar(100) | null=NO | key=MUL | extra=
+  - message | text | null=NO | key= | extra=
+  - message_type | enum('text','code','file') | null=YES | key= | extra=
+  - file_url | varchar(500) | null=YES | key= | extra=
+  - is_read | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[export_reports]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(36) | null=NO | key= | extra=
+  - report_data | longtext | null=YES | key= | extra=
+  - format | varchar(10) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[file_attachments]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - entity_type | enum('task','problem','aptitude','global_test') | null=NO | key=MUL | extra=
+  - entity_id | varchar(36) | null=NO | key= | extra=
+  - file_name | varchar(255) | null=NO | key= | extra=
+  - original_name | varchar(255) | null=NO | key= | extra=
+  - file_type | varchar(100) | null=NO | key= | extra=
+  - file_size | int | null=NO | key= | extra=
+  - file_url | varchar(500) | null=NO | key= | extra=
+  - uploaded_by | varchar(100) | null=NO | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[global_proctoring_logs]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - session_id | varchar(100) | null=NO | key=MUL | extra=
+  - user_id | varchar(50) | null=YES | key=MUL | extra=
+  - test_id | varchar(100) | null=YES | key=MUL | extra=
+  - event_type | varchar(50) | null=NO | key= | extra=
+  - severity | varchar(20) | null=YES | key= | extra=
+  - details | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[global_test_submissions]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - test_id | varchar(50) | null=YES | key=MUL | extra=
+  - test_title | varchar(255) | null=YES | key= | extra=
+  - student_id | varchar(50) | null=YES | key=MUL | extra=
+  - aptitude_score | int | null=YES | key= | extra=
+  - verbal_score | int | null=YES | key= | extra=
+  - logical_score | int | null=YES | key= | extra=
+  - coding_score | int | null=YES | key= | extra=
+  - sql_score | int | null=YES | key= | extra=
+  - total_score | int | null=YES | key= | extra=
+  - overall_percentage | decimal(5,2) | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - time_spent | int | null=YES | key= | extra=
+  - tab_switches | int | null=YES | key= | extra=
+  - submitted_at | datetime | null=YES | key= | extra=
+
+[global_tests]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - title | varchar(255) | null=NO | key= | extra=
+  - type | enum('aptitude','verbal','logical','coding','sql','comprehensive') | null=NO | key= | extra=
+  - difficulty | varchar(20) | null=YES | key= | extra=
+  - duration | int | null=YES | key= | extra=
+  - total_questions | int | null=YES | key= | extra=
+  - passing_score | int | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - created_by | varchar(50) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - start_time | datetime | null=YES | key= | extra=
+  - deadline | datetime | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+  - max_tab_switches | int | null=YES | key= | extra=
+  - section_config | json | null=YES | key= | extra=
+  - proctoring_config | json | null=YES | key= | extra=
+
+[ide_theme_preferences]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=UNI | extra=
+  - theme_name | varchar(50) | null=NO | key= | extra=
+  - font_family | varchar(100) | null=YES | key= | extra=
+  - font_size | int | null=YES | key= | extra=
+  - line_height | decimal(2,1) | null=YES | key= | extra=
+  - tab_size | int | null=YES | key= | extra=
+  - insert_spaces | tinyint(1) | null=YES | key= | extra=
+  - word_wrap | varchar(20) | null=YES | key= | extra=
+  - minimap_enabled | tinyint(1) | null=YES | key= | extra=
+  - bracket_guide_enabled | tinyint(1) | null=YES | key= | extra=
+  - render_whitespace | varchar(20) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[ide_themes_catalog]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=NO | key=UNI | extra=
+  - description | text | null=YES | key= | extra=
+  - colors | json | null=YES | key= | extra=
+  - preview_url | varchar(255) | null=YES | key= | extra=
+  - is_builtin | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[keyboard_shortcuts_config]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=YES | key=MUL | extra=
+  - action_name | varchar(100) | null=NO | key=MUL | extra=
+  - keys_combination | varchar(50) | null=NO | key= | extra=
+  - is_global | tinyint(1) | null=YES | key= | extra=
+  - scope | enum('portal','editor','global') | null=YES | key=MUL | extra=
+  - description | varchar(255) | null=YES | key= | extra=
+  - category | enum('navigation','editing','submission','search','misc') | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[language_leaderboards]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - language | varchar(50) | null=NO | key=MUL | extra=
+  - problems_solved_in_language | int | null=YES | key= | extra=
+  - average_score_in_language | decimal(5,2) | null=YES | key= | extra=
+  - rank_position_in_language | int | null=YES | key=MUL | extra=
+
+[leaderboard_periods]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - period | varchar(50) | null=YES | key=MUL | extra=
+  - period_start | date | null=YES | key= | extra=
+  - period_end | date | null=YES | key= | extra=
+  - points_earned | int | null=YES | key= | extra=
+  - problems_solved | int | null=YES | key= | extra=
+  - rank_position | int | null=YES | key=MUL | extra=
+
+[leaderboard_scores]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=UNI | extra=
+  - total_points | int | null=YES | key=MUL | extra=
+  - problems_solved | int | null=YES | key= | extra=
+  - problems_attempted | int | null=YES | key= | extra=
+  - success_rate | decimal(5,2) | null=YES | key= | extra=
+  - average_submission_time | int | null=YES | key= | extra=
+  - streak_days | int | null=YES | key=MUL | extra=
+  - streak_updated_at | timestamp | null=YES | key= | extra=
+  - rank_overall | int | null=YES | key=MUL | extra=
+  - rank_batch | int | null=YES | key=MUL | extra=
+  - rank_language | varchar(50) | null=YES | key= | extra=
+  - language_preference | varchar(50) | null=YES | key= | extra=
+  - batch_id | varchar(100) | null=YES | key=MUL | extra=
+  - last_updated | timestamp | null=YES | key=MUL | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[leaderboard_stats]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - user_id | varchar(100) | null=YES | key=UNI | extra=
+  - problems_solved | int | null=YES | key= | extra=
+  - total_points | int | null=YES | key= | extra=
+  - current_streak | int | null=YES | key= | extra=
+  - success_rate | decimal(5,2) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[learning_analytics]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=UNI | extra=
+  - total_problems_attempted | int | null=YES | key= | extra=
+  - total_problems_solved | int | null=YES | key= | extra=
+  - success_rate | decimal(5,2) | null=YES | key=MUL | extra=
+  - average_time_per_problem | int | null=YES | key= | extra=
+  - weak_concepts | json | null=YES | key= | extra=
+  - strong_concepts | json | null=YES | key= | extra=
+  - recommended_next_problems | json | null=YES | key= | extra=
+  - learning_velocity | decimal(3,2) | null=YES | key= | extra=
+  - last_activity | timestamp | null=YES | key= | extra=
+  - streak_days | int | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[learning_profiles]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=UNI | extra=
+  - skill_level | int | null=YES | key=MUL | extra=
+  - learning_pace | enum('slow','moderate','fast') | null=YES | key=MUL | extra=
+  - preferred_language | varchar(50) | null=YES | key= | extra=
+  - preferred_topics | json | null=YES | key= | extra=
+  - learning_goals | json | null=YES | key= | extra=
+  - career_path | varchar(100) | null=YES | key= | extra=
+  - learning_style | varchar(50) | null=YES | key= | extra=
+  - study_hours_per_week | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[learning_recommendations]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - recommended_problem_id | varchar(36) | null=YES | key= | extra=
+  - recommendation_type | varchar(50) | null=YES | key= | extra=
+  - confidence_score | decimal(5,2) | null=YES | key= | extra=
+  - reason | text | null=YES | key= | extra=
+  - is_acted_upon | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[link_assignments]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - link_id | varchar(50) | null=NO | key=MUL | extra=
+  - student_id | varchar(50) | null=NO | key= | extra=
+  - assigned_by | varchar(50) | null=YES | key= | extra=
+  - assigned_at | datetime | null=YES | key= | extra=
+
+[mcq_assignments]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - mcq_id | varchar(50) | null=NO | key=MUL | extra=
+  - student_id | varchar(50) | null=NO | key= | extra=
+  - assigned_by | varchar(50) | null=YES | key= | extra=
+  - assigned_at | datetime | null=YES | key= | extra=
+
+[mcq_submissions]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - mcq_id | varchar(50) | null=NO | key= | extra=
+  - mcq_title | varchar(255) | null=YES | key= | extra=
+  - student_id | varchar(50) | null=NO | key= | extra=
+  - student_name | varchar(255) | null=YES | key= | extra=
+  - student_email | varchar(255) | null=YES | key= | extra=
+  - answers | longtext | null=YES | key= | extra=
+  - score | decimal(5,2) | null=YES | key= | extra=
+  - total_questions | int | null=YES | key= | extra=
+  - correct_answers | int | null=YES | key= | extra=
+  - ai_report | longtext | null=YES | key= | extra=
+  - time_taken | int | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key= | extra=
+  - submitted_at | datetime | null=YES | key= | extra=
+
+[mcq_tests]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - title | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - category | varchar(50) | null=YES | key= | extra=
+  - difficulty | varchar(20) | null=YES | key= | extra=
+  - questions | longtext | null=NO | key= | extra=
+  - time_limit | int | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key= | extra=
+  - created_by | varchar(50) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - deadline | datetime | null=YES | key= | extra=
+  - proctoring_config | longtext | null=YES | key= | extra=
+  - categories | longtext | null=YES | key= | extra=
+  - pass_mark | int | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+
+[mentor_expertise]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - mentor_id | varchar(36) | null=NO | key=MUL | extra=
+  - expertise_area | varchar(100) | null=NO | key= | extra=
+  - proficiency_level | varchar(50) | null=YES | key= | extra=
+
+[mentor_profiles]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - mentor_id | varchar(36) | null=NO | key= | extra=
+  - expertise | text | null=YES | key= | extra=
+  - bio | text | null=YES | key= | extra=
+  - rating | decimal(3,2) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[mentor_ratings]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - mentor_id | varchar(36) | null=NO | key=MUL | extra=
+  - student_id | varchar(36) | null=NO | key= | extra=
+  - rating | decimal(2,1) | null=NO | key= | extra=
+  - review | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[mentor_requests]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - mentor_id | varchar(36) | null=NO | key=MUL | extra=
+  - message | text | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - responded_at | timestamp | null=YES | key= | extra=
+
+[mentor_slots]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - mentor_id | varchar(36) | null=NO | key=MUL | extra=
+  - date_time | datetime | null=NO | key=MUL | extra=
+  - duration_minutes | int | null=YES | key= | extra=
+  - is_booked | tinyint(1) | null=YES | key= | extra=
+  - booked_by | varchar(36) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[mentor_student_allocations]
+  - mentor_id | varchar(50) | null=NO | key=PRI | extra=
+  - student_id | varchar(50) | null=NO | key=PRI | extra=
+
+[message_reactions]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - message_id | varchar(50) | null=NO | key=MUL | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - reaction_emoji | varchar(10) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[messages]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - sender_id | varchar(36) | null=NO | key=MUL | extra=
+  - receiver_id | varchar(36) | null=NO | key=MUL | extra=
+  - content | text | null=NO | key= | extra=
+  - is_read | tinyint(1) | null=YES | key= | extra=
+  - read_at | timestamp | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[notification_digests]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(36) | null=NO | key=MUL | extra=
+  - digest_type | varchar(50) | null=YES | key= | extra=
+  - notifications_count | int | null=YES | key= | extra=
+  - sent_at | timestamp | null=YES | key= | extra=
+
+[notification_preferences]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(100) | null=NO | key=UNI | extra=
+  - submission_notifications | tinyint(1) | null=YES | key= | extra=
+  - message_notifications | tinyint(1) | null=YES | key= | extra=
+  - test_allocated_notifications | tinyint(1) | null=YES | key= | extra=
+  - achievement_notifications | tinyint(1) | null=YES | key= | extra=
+  - mentor_assignment_notifications | tinyint(1) | null=YES | key= | extra=
+  - deadline_notifications | tinyint(1) | null=YES | key= | extra=
+  - email_digest_enabled | tinyint(1) | null=YES | key= | extra=
+  - email_digest_frequency | enum('daily','weekly','never') | null=YES | key= | extra=
+  - sound_enabled | tinyint(1) | null=YES | key= | extra=
+  - desktop_notifications | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[notification_subscribers]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - notification_id | varchar(36) | null=NO | key=MUL | extra=
+  - subscriber_id | varchar(100) | null=NO | key=MUL | extra=
+  - is_read | tinyint(1) | null=YES | key=MUL | extra=
+  - read_at | timestamp | null=YES | key= | extra=
+
+[notifications]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(36) | null=NO | key= | extra=
+  - type | varchar(50) | null=YES | key= | extra=
+  - title | varchar(255) | null=YES | key= | extra=
+  - message | text | null=YES | key= | extra=
+  - read_status | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - archived_at | timestamp | null=YES | key= | extra=
+
+[personalized_reports]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - student_id | varchar(50) | null=YES | key= | extra=
+  - test_id | varchar(50) | null=YES | key= | extra=
+  - submission_id | varchar(50) | null=YES | key= | extra=
+  - report_data | json | null=YES | key= | extra=
+  - generated_at | datetime | null=YES | key= | extra=
+
+[plagiarism_analysis]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_id | varchar(36) | null=NO | key=MUL | extra=
+  - problem_id | varchar(36) | null=NO | key= | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - mentor_id | varchar(36) | null=YES | key= | extra=
+  - code_hash | varchar(255) | null=YES | key= | extra=
+  - lexical_similarity | decimal(5,2) | null=YES | key= | extra=
+  - structural_similarity | decimal(5,2) | null=YES | key= | extra=
+  - temporal_suspicion | decimal(5,2) | null=YES | key= | extra=
+  - overall_score | decimal(5,2) | null=YES | key=MUL | extra=
+  - flagged | tinyint(1) | null=YES | key=MUL | extra=
+  - severity | enum('low','medium','high','critical') | null=YES | key=MUL | extra=
+  - matched_submissions | json | null=YES | key= | extra=
+  - behavioral_flags | json | null=YES | key= | extra=
+  - analysis_details | json | null=YES | key= | extra=
+  - reviewed_by | varchar(36) | null=YES | key= | extra=
+  - review_status | enum('pending','approved','rejected','appealed') | null=YES | key= | extra=
+  - review_notes | text | null=YES | key= | extra=
+  - appeal_status | varchar(50) | null=YES | key= | extra=
+  - appeal_reason | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[plagiarism_matches]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_1_id | varchar(36) | null=NO | key= | extra=
+  - submission_2_id | varchar(36) | null=NO | key= | extra=
+  - student_1_id | varchar(36) | null=NO | key= | extra=
+  - student_2_id | varchar(36) | null=NO | key= | extra=
+  - similarity_score | decimal(5,2) | null=YES | key=MUL | extra=
+  - matching_lines | int | null=YES | key= | extra=
+  - matching_percentage | decimal(5,2) | null=YES | key= | extra=
+  - match_type | enum('lexical','structural','both') | null=YES | key= | extra=
+  - reviewed | tinyint(1) | null=YES | key= | extra=
+  - action | enum('flagged','approved','pending') | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[plagiarism_reports]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_id | varchar(36) | null=YES | key= | extra=
+  - student_id | varchar(36) | null=YES | key= | extra=
+  - problem_id | varchar(36) | null=YES | key= | extra=
+  - suspicion_score | float | null=YES | key= | extra=
+  - intensity_level | varchar(20) | null=YES | key= | extra=
+  - similarity_details | text | null=YES | key= | extra=
+  - recommendation | text | null=YES | key= | extra=
+  - review_status | varchar(20) | null=YES | key= | extra=
+  - reviewed_by | varchar(36) | null=YES | key= | extra=
+  - review_notes | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[plagiarism_settings]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - problem_id | varchar(50) | null=YES | key=UNI | extra=
+  - similarity_threshold | int | null=YES | key= | extra=
+  - enable_plagiarism_check | tinyint(1) | null=YES | key=MUL | extra=
+  - enable_moss_integration | tinyint(1) | null=YES | key= | extra=
+  - enable_codechef_integration | tinyint(1) | null=YES | key= | extra=
+  - auto_flag_threshold | int | null=YES | key= | extra=
+  - compare_across_batches | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[points_history]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - points_earned | int | null=YES | key= | extra=
+  - source | varchar(100) | null=YES | key= | extra=
+  - source_id | varchar(36) | null=YES | key= | extra=
+  - multiplier | decimal(3,2) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[prescan_exam_sessions]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - candidate_id | varchar(50) | null=NO | key=MUL | extra=
+  - exam_id | bigint | null=NO | key= | extra=
+  - session_token | varchar(128) | null=NO | key=UNI | extra=
+  - status | enum('pending','scanning','approved','rejected','incomplete','in_progress','completed') | null=NO | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+  - updated_at | datetime | null=NO | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[prescan_exams]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - title | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - duration_minutes | int | null=NO | key= | extra=
+  - is_active | tinyint(1) | null=NO | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[prescan_room_scans]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - exam_session_id | bigint | null=NO | key= | extra=
+  - mobile_socket_id | varchar(128) | null=YES | key= | extra=
+  - scan_start_time | datetime | null=YES | key= | extra=
+  - scan_end_time | datetime | null=YES | key= | extra=
+  - final_verdict | enum('approved','rejected','incomplete') | null=YES | key= | extra=
+  - verdict_reason | text | null=YES | key= | extra=
+  - total_frames | int | null=YES | key= | extra=
+  - flagged_frames | int | null=YES | key= | extra=
+  - angles_covered | json | null=YES | key= | extra=
+  - raw_summary | json | null=YES | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[prescan_scan_audit_log]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - room_scan_id | bigint | null=NO | key= | extra=
+  - event_type | varchar(64) | null=NO | key= | extra=
+  - actor | varchar(32) | null=NO | key= | extra=
+  - payload | json | null=YES | key= | extra=
+  - created_at | datetime(3) | null=NO | key= | extra=
+
+[prescan_scan_frames]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - room_scan_id | bigint | null=NO | key=MUL | extra=
+  - frame_index | int | null=NO | key= | extra=
+  - captured_at | datetime(3) | null=NO | key= | extra=
+  - angle_label | varchar(32) | null=YES | key= | extra=
+  - device_orientation | json | null=YES | key= | extra=
+  - detections | json | null=NO | key= | extra=
+  - is_flagged | tinyint(1) | null=NO | key= | extra=
+  - flag_reasons | json | null=YES | key= | extra=
+  - processing_ms | int | null=YES | key= | extra=
+  - groq_raw_response | text | null=YES | key= | extra=
+
+[prescan_scan_overrides]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - room_scan_id | bigint | null=NO | key=UNI | extra=
+  - proctor_id | varchar(50) | null=NO | key= | extra=
+  - original_verdict | enum('approved','rejected','incomplete') | null=NO | key= | extra=
+  - override_verdict | enum('approved','rejected') | null=NO | key= | extra=
+  - reason | text | null=NO | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[prescan_users]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - email | varchar(255) | null=NO | key=UNI | extra=
+  - hashed_password | varchar(255) | null=NO | key= | extra=
+  - full_name | varchar(255) | null=NO | key= | extra=
+  - role | enum('candidate','proctor','admin') | null=NO | key= | extra=
+  - is_active | tinyint(1) | null=NO | key= | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[problem_attempts]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(100) | null=NO | key=MUL | extra=
+  - problem_id | varchar(100) | null=NO | key=MUL | extra=
+  - attempt_number | int | null=YES | key= | extra=
+  - status | enum('attempted','passed','failed','mastered') | null=YES | key=MUL | extra=
+  - time_spent_minutes | int | null=YES | key= | extra=
+  - test_pass_rate | decimal(5,2) | null=YES | key= | extra=
+  - first_attempt_at | timestamp | null=YES | key= | extra=
+  - last_attempt_at | timestamp | null=YES | key=MUL | extra=
+  - correct_approach_count | int | null=YES | key= | extra=
+
+[problem_completions]
+  - problem_id | varchar(50) | null=NO | key=PRI | extra=
+  - student_id | varchar(50) | null=NO | key=PRI | extra=
+
+[problem_recommendations]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - problem_id | varchar(50) | null=NO | key= | extra=
+  - recommendation_score | decimal(5,2) | null=YES | key=MUL | extra=
+  - reason | varchar(255) | null=YES | key= | extra=
+  - estimated_time_minutes | int | null=YES | key= | extra=
+  - expected_success_rate | decimal(5,2) | null=YES | key= | extra=
+  - recommendation_type | enum('practice','review','challenge','next-step') | null=YES | key=MUL | extra=
+  - recommendation_rank | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - expires_at | timestamp | null=NO | key=MUL | extra=
+  - clicked | tinyint(1) | null=YES | key= | extra=
+  - solved | tinyint(1) | null=YES | key=MUL | extra=
+
+[problem_set_template_items]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - template_id | varchar(36) | null=NO | key=MUL | extra=
+  - problem_id | varchar(36) | null=NO | key=MUL | extra=
+  - sort_order | int | null=YES | key= | extra=
+
+[problem_set_templates]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - name | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - difficulty | varchar(50) | null=YES | key= | extra=
+  - tags | json | null=YES | key= | extra=
+  - created_by | varchar(36) | null=YES | key=MUL | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - updated_at | datetime | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[problem_student_allocations]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - problem_id | varchar(36) | null=NO | key=MUL | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[problems]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - title | varchar(255) | null=YES | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - expected_output | text | null=YES | key= | extra=
+  - sample_input | text | null=YES | key= | extra=
+  - difficulty | varchar(20) | null=YES | key= | extra=
+  - type | varchar(50) | null=YES | key= | extra=
+  - language | varchar(50) | null=YES | key= | extra=
+  - mentor_id | varchar(50) | null=YES | key=MUL | extra=
+  - status | varchar(20) | null=YES | key=MUL | extra=
+  - created_at | datetime | null=YES | key=MUL | extra=
+  - live_coding | varchar(10) | null=YES | key= | extra=
+  - enable_proctoring | varchar(10) | null=YES | key= | extra=
+  - enable_video_audio | varchar(10) | null=YES | key= | extra=
+  - disable_copy_paste | varchar(10) | null=YES | key= | extra=
+  - track_tab_switches | varchar(10) | null=YES | key= | extra=
+  - max_tab_switches | int | null=YES | key= | extra=
+  - sql_schema | text | null=YES | key= | extra=
+  - expected_query_result | text | null=YES | key= | extra=
+  - enable_face_detection | varchar(10) | null=YES | key= | extra=
+  - detect_multiple_faces | varchar(10) | null=YES | key= | extra=
+  - track_face_lookaway | varchar(10) | null=YES | key= | extra=
+  - attempt_limit | int | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+  - deadline | datetime | null=YES | key= | extra=
+
+[proctor_agent_analyses]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - session_id | varchar(100) | null=NO | key=MUL | extra=
+  - source | varchar(20) | null=YES | key= | extra=
+  - user_id | varchar(50) | null=YES | key=MUL | extra=
+  - exam_title | varchar(200) | null=YES | key= | extra=
+  - fraud_score | float | null=YES | key= | extra=
+  - risk_level | varchar(30) | null=YES | key=MUL | extra=
+  - recommended_action | varchar(30) | null=YES | key= | extra=
+  - patterns_json | json | null=YES | key= | extra=
+  - ai_analysis_json | json | null=YES | key= | extra=
+  - full_result_json | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[proctor_integrity_reports]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - session_id | varchar(100) | null=NO | key=MUL | extra=
+  - source | varchar(20) | null=YES | key= | extra=
+  - user_id | varchar(50) | null=YES | key=MUL | extra=
+  - candidate_name | varchar(100) | null=YES | key= | extra=
+  - exam_title | varchar(200) | null=YES | key= | extra=
+  - fraud_score | float | null=YES | key= | extra=
+  - risk_level | varchar(30) | null=YES | key= | extra=
+  - report_json | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[proctoring_events]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - session_id | varchar(255) | null=NO | key=MUL | extra=
+  - student_id | varchar(255) | null=NO | key=MUL | extra=
+  - event_type | varchar(100) | null=NO | key=MUL | extra=
+  - violation_type | varchar(100) | null=YES | key= | extra=
+  - severity | varchar(20) | null=YES | key=MUL | extra=
+  - details | json | null=YES | key= | extra=
+  - action_taken | varchar(255) | null=YES | key= | extra=
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[proctoring_face_events]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - session_id | varchar(36) | null=NO | key=MUL | extra=
+  - event_type | enum('FACE_DETECTED','FACE_LOST','MULTIPLE_FACES','FACE_BLUR','FACE_SIDE','FACE_ROTATION','EYE_CLOSED','MOUTH_OPEN','EXPRESSION_CHANGE') | null=NO | key=MUL | extra=
+  - face_count | int | null=YES | key= | extra=
+  - confidence | float | null=YES | key= | extra=
+  - landmarks | json | null=YES | key= | extra=
+  - timestamp | timestamp | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[proctoring_reports]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - session_id | varchar(36) | null=NO | key=UNI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - exam_id | varchar(36) | null=YES | key= | extra=
+  - violation_summary | json | null=YES | key= | extra=
+  - risk_level | enum('CLEAN','LOW','MEDIUM','HIGH','CRITICAL') | null=YES | key=MUL | extra=
+  - recommendation | enum('ACCEPT','REVIEW','REJECT','ESCALATE') | null=YES | key= | extra=
+  - forensic_report | longtext | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[proctoring_sessions]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - exam_id | varchar(36) | null=NO | key=MUL | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - mentor_id | varchar(36) | null=YES | key= | extra=
+  - problem_id | varchar(36) | null=YES | key= | extra=
+  - start_time | timestamp | null=YES | key= | extra=
+  - end_time | timestamp | null=YES | key= | extra=
+  - duration_minutes | int | null=YES | key= | extra=
+  - status | enum('ACTIVE','PAUSED','COMPLETED','CANCELLED','FLAGGED') | null=YES | key=MUL | extra=
+  - violation_score | int | null=YES | key= | extra=
+  - total_violations | int | null=YES | key= | extra=
+  - critical_violations | int | null=YES | key= | extra=
+  - high_violations | int | null=YES | key= | extra=
+  - device_fingerprint | json | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - user_agent | text | null=YES | key= | extra=
+  - is_flagged | tinyint(1) | null=YES | key= | extra=
+  - flag_reason | varchar(500) | null=YES | key= | extra=
+  - requires_review | tinyint(1) | null=YES | key= | extra=
+  - reviewed_by | varchar(36) | null=YES | key= | extra=
+  - review_notes | longtext | null=YES | key= | extra=
+  - reviewed_at | timestamp | null=YES | key= | extra=
+  - violations | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[proctoring_violations]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - session_id | varchar(36) | null=NO | key=MUL | extra=
+  - violation_type | enum('TAB_SWITCH','COPY_PASTE','RIGHT_CLICK','FULLSCREEN_EXIT','URL_BLOCKED','KEYSTROKE_PATTERN','MULTIPLE_FACES','PHONE_DETECTED','FACE_LOOKAWAY','FACE_NOT_DETECTED','INTEGRITY_VIOLATION','PLAGIARISM') | null=NO | key=MUL | extra=
+  - severity | enum('LOW','MEDIUM','HIGH','CRITICAL') | null=YES | key=MUL | extra=
+  - points | int | null=YES | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - evidence | json | null=YES | key= | extra=
+  - timestamp | timestamp | null=YES | key= | extra=
+  - action_taken | enum('NONE','WARNING','PAUSE','HALT','AUTO_HALT') | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[question_results]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - submission_id | varchar(50) | null=YES | key= | extra=
+  - question_id | varchar(50) | null=YES | key= | extra=
+  - section | varchar(50) | null=YES | key= | extra=
+  - user_answer | text | null=YES | key= | extra=
+  - correct_answer | text | null=YES | key= | extra=
+  - is_correct | tinyint(1) | null=YES | key= | extra=
+  - points_earned | int | null=YES | key= | extra=
+  - time_taken | int | null=YES | key= | extra=
+  - explanation | text | null=YES | key= | extra=
+
+[rate_limit_usage]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(100) | null=NO | key=MUL | extra=
+  - tier | varchar(50) | null=YES | key= | extra=
+  - endpoint | varchar(255) | null=YES | key= | extra=
+  - api_calls | int | null=YES | key= | extra=
+  - code_executions | int | null=YES | key= | extra=
+  - submissions | int | null=YES | key= | extra=
+  - usage_date | date | null=YES | key= | extra=
+  - reset_at | timestamp | null=YES | key=MUL | extra=
+
+[report_delivery_logs]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - scheduled_report_id | varchar(36) | null=YES | key=MUL | extra=
+  - report_generation_id | varchar(36) | null=YES | key= | extra=
+  - email | varchar(255) | null=YES | key= | extra=
+  - sent_at | timestamp | null=YES | key=MUL | extra=
+  - delivery_status | enum('queued','sent','failed','bounced') | null=YES | key=MUL | extra=
+  - error_message | text | null=YES | key= | extra=
+  - retry_count | int | null=YES | key= | extra=
+
+[report_generations]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - template_id | varchar(36) | null=YES | key=MUL | extra=
+  - user_id | varchar(100) | null=NO | key=MUL | extra=
+  - report_type | varchar(50) | null=YES | key=MUL | extra=
+  - format | varchar(50) | null=YES | key= | extra=
+  - file_name | varchar(255) | null=YES | key= | extra=
+  - file_path | varchar(500) | null=YES | key= | extra=
+  - file_size_kb | int | null=YES | key= | extra=
+  - generated_at | timestamp | null=YES | key=MUL | extra=
+  - downloaded_at | timestamp | null=YES | key= | extra=
+  - download_count | int | null=YES | key= | extra=
+  - filters_applied | json | null=YES | key= | extra=
+  - export_status | enum('pending','processing','completed','failed') | null=YES | key=MUL | extra=
+  - error_message | text | null=YES | key= | extra=
+
+[report_templates]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - name | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - report_type | enum('STUDENT_PROGRESS','BATCH_ANALYTICS','SUBMISSION_HISTORY','CERTIFICATE','CUSTOM') | null=YES | key=MUL | extra=
+  - format | enum('PDF','EXCEL','CSV','JSON') | null=YES | key=MUL | extra=
+  - sections | json | null=YES | key= | extra=
+  - created_by | varchar(100) | null=YES | key= | extra=
+  - is_default | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[resource_links]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - title | varchar(255) | null=NO | key= | extra=
+  - url | text | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - category | varchar(100) | null=YES | key= | extra=
+  - created_by | varchar(50) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+
+[review_comments]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - review_id | varchar(50) | null=NO | key=MUL | extra=
+  - line_number | int | null=YES | key=MUL | extra=
+  - code_snippet | varchar(1000) | null=YES | key= | extra=
+  - comment | text | null=NO | key= | extra=
+  - severity | enum('minor','moderate','major','critical') | null=YES | key=MUL | extra=
+  - suggestion | varchar(2000) | null=YES | key= | extra=
+  - is_resolved | tinyint(1) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - resolved_at | timestamp | null=YES | key= | extra=
+
+[saved_searches]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - search_name | varchar(100) | null=YES | key= | extra=
+  - search_query | varchar(500) | null=YES | key= | extra=
+  - search_filters | json | null=YES | key= | extra=
+  - search_type | enum('problem','user','task','submission') | null=YES | key= | extra=
+  - result_count | int | null=YES | key= | extra=
+  - is_pinned | tinyint(1) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[scheduled_backups]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - backup_type | varchar(50) | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key=MUL | extra=
+  - file_path | varchar(500) | null=YES | key= | extra=
+  - file_size | bigint | null=YES | key= | extra=
+  - tables_backed_up | json | null=YES | key= | extra=
+  - started_at | datetime | null=YES | key= | extra=
+  - completed_at | datetime | null=YES | key= | extra=
+  - created_by | varchar(36) | null=YES | key= | extra=
+  - error_message | text | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key=MUL | extra=
+
+[scheduled_reports]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(100) | null=NO | key=MUL | extra=
+  - template_id | varchar(36) | null=YES | key= | extra=
+  - frequency | enum('daily','weekly','monthly','quarterly') | null=YES | key=MUL | extra=
+  - next_scheduled_at | timestamp | null=YES | key=MUL | extra=
+  - last_generated_at | timestamp | null=YES | key= | extra=
+  - delivery_email | varchar(255) | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[search_history]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - search_query | varchar(255) | null=YES | key=MUL | extra=
+  - search_type | enum('problem','user','task','submission') | null=YES | key=MUL | extra=
+  - result_count | int | null=YES | key= | extra=
+  - clicked_result_id | varchar(36) | null=YES | key= | extra=
+  - search_time_ms | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[section_results]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - submission_id | varchar(50) | null=YES | key= | extra=
+  - section | enum('aptitude','verbal','logical','coding','sql') | null=NO | key= | extra=
+  - correct_count | int | null=YES | key= | extra=
+  - total_questions | int | null=YES | key= | extra=
+  - score | int | null=YES | key= | extra=
+  - percentage | decimal(5,2) | null=YES | key= | extra=
+  - time_spent | int | null=YES | key= | extra=
+
+[security_alerts]
+  - id | bigint | null=NO | key=PRI | extra=auto_increment
+  - alert_type | varchar(100) | null=NO | key= | extra=
+  - severity | varchar(20) | null=NO | key=MUL | extra=
+  - user_id | varchar(255) | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - description | longtext | null=YES | key= | extra=
+  - alert_details | json | null=YES | key= | extra=
+  - resolved | tinyint(1) | null=YES | key=MUL | extra=
+  - resolved_by | varchar(255) | null=YES | key= | extra=
+  - resolved_at | datetime | null=YES | key= | extra=
+  - timestamp | datetime | null=NO | key=MUL | extra=
+  - created_at | datetime | null=NO | key= | extra=
+
+[skill_badges]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=NO | key=UNI | extra=
+  - description | text | null=YES | key= | extra=
+  - icon_url | varchar(255) | null=YES | key= | extra=
+  - requirement | text | null=NO | key= | extra=
+  - tier | varchar(20) | null=YES | key=MUL | extra=
+  - points | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[skill_proctoring_logs]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - attempt_id | int | null=NO | key=MUL | extra=
+  - test_stage | varchar(50) | null=NO | key= | extra=
+  - event_type | varchar(50) | null=NO | key= | extra=
+  - details | text | null=YES | key= | extra=
+  - severity | varchar(20) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[skill_test_attempts]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - test_id | int | null=NO | key=MUL | extra=
+  - student_id | varchar(100) | null=NO | key= | extra=
+  - student_name | varchar(255) | null=YES | key= | extra=
+  - attempt_number | int | null=YES | key= | extra=
+  - current_stage | varchar(50) | null=YES | key= | extra=
+  - overall_status | varchar(50) | null=YES | key=MUL | extra=
+  - mcq_questions | json | null=YES | key= | extra=
+  - mcq_answers | json | null=YES | key= | extra=
+  - mcq_score | decimal(5,2) | null=YES | key= | extra=
+  - mcq_status | varchar(20) | null=YES | key= | extra=
+  - mcq_start_time | timestamp | null=YES | key= | extra=
+  - mcq_end_time | timestamp | null=YES | key= | extra=
+  - mcq_violations | int | null=YES | key= | extra=
+  - coding_problems | json | null=YES | key= | extra=
+  - coding_submissions | json | null=YES | key= | extra=
+  - coding_score | decimal(5,2) | null=YES | key= | extra=
+  - coding_status | varchar(20) | null=YES | key= | extra=
+  - sql_problems | json | null=YES | key= | extra=
+  - sql_submissions | json | null=YES | key= | extra=
+  - sql_score | decimal(5,2) | null=YES | key= | extra=
+  - sql_status | varchar(20) | null=YES | key= | extra=
+  - interview_qa | json | null=YES | key= | extra=
+  - interview_current_index | int | null=YES | key= | extra=
+  - interview_score | decimal(5,2) | null=YES | key= | extra=
+  - interview_status | varchar(20) | null=YES | key= | extra=
+  - interview_violations | int | null=YES | key= | extra=
+  - report | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[skill_tests]
+  - id | int | null=NO | key=PRI | extra=auto_increment
+  - title | varchar(255) | null=NO | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - skills | json | null=NO | key= | extra=
+  - mcq_count | int | null=YES | key= | extra=
+  - coding_count | int | null=YES | key= | extra=
+  - sql_count | int | null=YES | key= | extra=
+  - interview_count | int | null=YES | key= | extra=
+  - attempt_limit | int | null=YES | key= | extra=
+  - mcq_duration_minutes | int | null=YES | key= | extra=
+  - mcq_passing_score | int | null=YES | key= | extra=
+  - coding_passing_score | int | null=YES | key= | extra=
+  - sql_passing_score | int | null=YES | key= | extra=
+  - interview_passing_score | int | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key= | extra=
+  - created_by | varchar(100) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+  - difficulty_level | varchar(20) | null=YES | key= | extra=
+  - proctoring_enabled | tinyint(1) | null=YES | key= | extra=
+  - proctoring_config | json | null=YES | key= | extra=
+  - coding_duration_minutes | int | null=YES | key= | extra=
+  - sql_duration_minutes | int | null=YES | key= | extra=
+  - interview_duration_minutes | int | null=YES | key= | extra=
+  - company_name | varchar(100) | null=YES | key= | extra=
+  - is_company_test | tinyint(1) | null=YES | key= | extra=
+  - target_company | varchar(100) | null=YES | key= | extra=
+
+[st330001_departments]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - budget | decimal(12,2) | null=YES | key= | extra=
+  - location | varchar(100) | null=YES | key= | extra=
+
+[st330001_employees]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department | varchar(100) | null=YES | key= | extra=
+  - salary | decimal(10,2) | null=YES | key= | extra=
+  - hire_date | date | null=YES | key= | extra=
+  - manager_id | int | null=YES | key= | extra=
+
+[st330001_orders]
+  - id | int | null=NO | key=PRI | extra=
+  - customer_name | varchar(100) | null=YES | key= | extra=
+  - product | varchar(100) | null=YES | key= | extra=
+  - quantity | int | null=YES | key= | extra=
+  - price | decimal(10,2) | null=YES | key= | extra=
+  - order_date | date | null=YES | key= | extra=
+
+[st330001_projects]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department_id | int | null=YES | key= | extra=
+  - start_date | date | null=YES | key= | extra=
+  - end_date | date | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key= | extra=
+
+[st360001_departments]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - budget | decimal(12,2) | null=YES | key= | extra=
+  - location | varchar(100) | null=YES | key= | extra=
+
+[st360001_employees]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department | varchar(100) | null=YES | key= | extra=
+  - salary | decimal(10,2) | null=YES | key= | extra=
+  - hire_date | date | null=YES | key= | extra=
+  - manager_id | int | null=YES | key= | extra=
+
+[st360001_orders]
+  - id | int | null=NO | key=PRI | extra=
+  - customer_name | varchar(100) | null=YES | key= | extra=
+  - product | varchar(100) | null=YES | key= | extra=
+  - quantity | int | null=YES | key= | extra=
+  - price | decimal(10,2) | null=YES | key= | extra=
+  - order_date | date | null=YES | key= | extra=
+
+[st360001_projects]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department_id | int | null=YES | key= | extra=
+  - start_date | date | null=YES | key= | extra=
+  - end_date | date | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key= | extra=
+
+[st360002_departments]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - budget | decimal(12,2) | null=YES | key= | extra=
+  - location | varchar(100) | null=YES | key= | extra=
+
+[st360002_employees]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department | varchar(100) | null=YES | key= | extra=
+  - salary | decimal(10,2) | null=YES | key= | extra=
+  - hire_date | date | null=YES | key= | extra=
+  - manager_id | int | null=YES | key= | extra=
+
+[st360002_orders]
+  - id | int | null=NO | key=PRI | extra=
+  - customer_name | varchar(100) | null=YES | key= | extra=
+  - product | varchar(100) | null=YES | key= | extra=
+  - quantity | int | null=YES | key= | extra=
+  - price | decimal(10,2) | null=YES | key= | extra=
+  - order_date | date | null=YES | key= | extra=
+
+[st360002_projects]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department_id | int | null=YES | key= | extra=
+  - start_date | date | null=YES | key= | extra=
+  - end_date | date | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key= | extra=
+
+[st360003_departments]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - budget | decimal(12,2) | null=YES | key= | extra=
+  - location | varchar(100) | null=YES | key= | extra=
+
+[st360003_employees]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department | varchar(100) | null=YES | key= | extra=
+  - salary | decimal(10,2) | null=YES | key= | extra=
+  - hire_date | date | null=YES | key= | extra=
+  - manager_id | int | null=YES | key= | extra=
+
+[st360003_orders]
+  - id | int | null=NO | key=PRI | extra=
+  - customer_name | varchar(100) | null=YES | key= | extra=
+  - product | varchar(100) | null=YES | key= | extra=
+  - quantity | int | null=YES | key= | extra=
+  - price | decimal(10,2) | null=YES | key= | extra=
+  - order_date | date | null=YES | key= | extra=
+
+[st360003_projects]
+  - id | int | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=YES | key= | extra=
+  - department_id | int | null=YES | key= | extra=
+  - start_date | date | null=YES | key= | extra=
+  - end_date | date | null=YES | key= | extra=
+  - status | varchar(50) | null=YES | key= | extra=
+
+[streak_tracking]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=UNI | extra=
+  - streak_type | varchar(50) | null=YES | key= | extra=
+  - current_streak | int | null=YES | key= | extra=
+  - longest_streak | int | null=YES | key= | extra=
+  - last_activity_date | date | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[student_analytics]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=UNI | extra=
+  - total_tests | int | null=YES | key= | extra=
+  - total_problems | int | null=YES | key= | extra=
+  - average_test_score | decimal(5,2) | null=YES | key= | extra=
+  - average_problem_score | decimal(5,2) | null=YES | key= | extra=
+  - problem_completion_rate | decimal(5,2) | null=YES | key= | extra=
+  - test_completion_rate | decimal(5,2) | null=YES | key= | extra=
+  - weak_concepts | json | null=YES | key= | extra=
+  - strong_concepts | json | null=YES | key= | extra=
+  - learning_curve_trend | json | null=YES | key= | extra=
+  - time_series_data | json | null=YES | key= | extra=
+  - risk_score | decimal(5,2) | null=YES | key=MUL | extra=
+  - at_risk | tinyint(1) | null=YES | key=MUL | extra=
+  - prediction_confidence | decimal(5,2) | null=YES | key= | extra=
+  - last_analysis_date | timestamp | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[student_badges]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=MUL | extra=
+  - badge_id | varchar(36) | null=NO | key= | extra=
+  - earned_at | timestamp | null=YES | key=MUL | extra=
+
+[student_completed_aptitude]
+  - student_id | varchar(50) | null=NO | key=PRI | extra=
+  - aptitude_test_id | varchar(50) | null=NO | key=PRI | extra=
+
+[student_gamification]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - student_id | varchar(36) | null=NO | key=UNI | extra=
+  - total_points | int | null=YES | key=MUL | extra=
+  - level | int | null=YES | key=MUL | extra=
+  - current_xp | int | null=YES | key= | extra=
+  - next_level_xp | int | null=YES | key= | extra=
+  - current_streak | int | null=YES | key= | extra=
+  - longest_streak | int | null=YES | key= | extra=
+  - badges | json | null=YES | key= | extra=
+  - achievements | json | null=YES | key= | extra=
+  - leaderboard_rank | int | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[submissions]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - student_id | varchar(50) | null=YES | key=MUL | extra=
+  - problem_id | varchar(50) | null=YES | key=MUL | extra=
+  - task_id | varchar(50) | null=YES | key= | extra=
+  - code | mediumtext | null=YES | key= | extra=
+  - submission_type | varchar(20) | null=YES | key= | extra=
+  - file_name | varchar(255) | null=YES | key= | extra=
+  - language | varchar(50) | null=YES | key= | extra=
+  - score | int | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - feedback | text | null=YES | key= | extra=
+  - ai_explanation | text | null=YES | key= | extra=
+  - analysis_correctness | varchar(255) | null=YES | key= | extra=
+  - analysis_efficiency | varchar(255) | null=YES | key= | extra=
+  - analysis_code_style | varchar(255) | null=YES | key= | extra=
+  - analysis_best_practices | varchar(255) | null=YES | key= | extra=
+  - plagiarism_detected | varchar(10) | null=YES | key= | extra=
+  - copied_from | varchar(50) | null=YES | key= | extra=
+  - copied_from_name | varchar(255) | null=YES | key= | extra=
+  - tab_switches | int | null=YES | key= | extra=
+  - integrity_violation | varchar(10) | null=YES | key= | extra=
+  - submitted_at | datetime | null=YES | key= | extra=
+  - proctoring_video | varchar(255) | null=YES | key= | extra=
+  - phone_detection_count | int | null=YES | key= | extra=
+  - camera_blocked_count | int | null=YES | key= | extra=
+  - copy_paste_attempts | int | null=YES | key= | extra=
+  - face_not_detected_count | int | null=YES | key= | extra=
+  - multiple_faces_count | int | null=YES | key= | extra=
+  - face_lookaway_count | int | null=YES | key= | extra=
+  - attempt_number | int | null=YES | key= | extra=
+  - plagiarism_score | decimal(5,2) | null=YES | key=MUL | extra=
+  - flagged_submission | tinyint(1) | null=YES | key=MUL | extra=
+  - plagiarism_intensity | enum('CRITICAL','HIGH','MEDIUM','LOW') | null=YES | key= | extra=
+  - plagiarism_review_status | enum('pending','reviewed','appealed','resolved') | null=YES | key= | extra=
+  - code_hash | varchar(16) | null=YES | key= | extra=
+
+[supported_languages]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - name | varchar(100) | null=NO | key=UNI | extra=
+  - code | varchar(50) | null=YES | key=UNI | extra=
+  - version | varchar(50) | null=YES | key= | extra=
+  - compiler_version | varchar(100) | null=YES | key= | extra=
+  - timeout_seconds | int | null=YES | key= | extra=
+  - memory_limit_mb | int | null=YES | key= | extra=
+  - is_active | tinyint(1) | null=YES | key=MUL | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[system_health_metrics]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - timestamp | timestamp | null=YES | key=MUL | extra=
+  - cpu_usage | decimal(5,2) | null=YES | key= | extra=
+  - memory_usage | decimal(5,2) | null=YES | key= | extra=
+  - active_users | int | null=YES | key= | extra=
+  - api_requests | int | null=YES | key= | extra=
+  - error_count | int | null=YES | key= | extra=
+  - average_response_time_ms | int | null=YES | key= | extra=
+  - database_size_mb | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[task_completions]
+  - task_id | varchar(50) | null=NO | key=PRI | extra=
+  - student_id | varchar(50) | null=NO | key=PRI | extra=
+
+[tasks]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - mentor_id | varchar(50) | null=YES | key=MUL | extra=
+  - title | varchar(255) | null=YES | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - requirements | text | null=YES | key= | extra=
+  - difficulty | varchar(20) | null=YES | key= | extra=
+  - type | varchar(50) | null=YES | key= | extra=
+  - status | varchar(20) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - attempt_limit | int | null=YES | key= | extra=
+  - max_attempts | int | null=YES | key= | extra=
+
+[team_leaderboards]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - team_id | varchar(100) | null=YES | key=MUL | extra=
+  - team_name | varchar(255) | null=YES | key= | extra=
+  - mentor_id | varchar(100) | null=YES | key=MUL | extra=
+  - total_mentees_score | int | null=YES | key= | extra=
+  - top_performer_name | varchar(255) | null=YES | key= | extra=
+  - average_mentee_score | decimal(8,2) | null=YES | key= | extra=
+  - rank_position | int | null=YES | key=MUL | extra=
+  - last_updated | timestamp | null=YES | key= | extra=
+
+[test_case_results]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - submission_id | varchar(36) | null=NO | key= | extra=
+  - test_case_id | varchar(36) | null=NO | key= | extra=
+  - passed | tinyint(1) | null=YES | key= | extra=
+  - actual_output | text | null=YES | key= | extra=
+  - execution_time_ms | int | null=YES | key= | extra=
+  - memory_used_kb | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[test_cases]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - problem_id | varchar(36) | null=NO | key= | extra=
+  - input | text | null=NO | key= | extra=
+  - expected_output | text | null=NO | key= | extra=
+  - is_hidden | tinyint(1) | null=YES | key= | extra=
+  - points | int | null=YES | key= | extra=
+  - description | varchar(255) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[test_questions]
+  - question_id | varchar(50) | null=NO | key=PRI | extra=
+  - test_id | varchar(50) | null=YES | key= | extra=
+  - section | enum('aptitude','verbal','logical','coding','sql') | null=NO | key= | extra=
+  - question_type | enum('mcq','coding','sql','true_false','pattern') | null=YES | key= | extra=
+  - question | text | null=NO | key= | extra=
+  - option_1 | text | null=YES | key= | extra=
+  - option_2 | text | null=YES | key= | extra=
+  - option_3 | text | null=YES | key= | extra=
+  - option_4 | text | null=YES | key= | extra=
+  - correct_answer | text | null=YES | key= | extra=
+  - test_cases | json | null=YES | key= | extra=
+  - starter_code | text | null=YES | key= | extra=
+  - solution_code | text | null=YES | key= | extra=
+  - explanation | text | null=YES | key= | extra=
+  - category | varchar(100) | null=YES | key= | extra=
+  - difficulty | varchar(20) | null=YES | key= | extra=
+  - points | int | null=YES | key= | extra=
+  - time_limit | int | null=YES | key= | extra=
+
+[test_student_allocations]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - test_id | varchar(50) | null=NO | key=MUL | extra=
+  - student_id | varchar(50) | null=NO | key=MUL | extra=
+  - assigned_at | datetime | null=YES | key= | extra=
+
+[test_violation_config]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - test_id | varchar(36) | null=NO | key=MUL | extra=
+  - violation_rule_id | varchar(36) | null=NO | key= | extra=
+  - severity_override | int | null=YES | key= | extra=
+  - enabled | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+
+[testcase_feedback]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - testcase_id | varchar(50) | null=NO | key=MUL | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - feedback_type | varchar(50) | null=YES | key= | extra=
+  - rating | int | null=YES | key= | extra=
+  - comment | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key=MUL | extra=
+
+[tier_history]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(100) | null=NO | key=MUL | extra=
+  - old_tier | varchar(50) | null=YES | key= | extra=
+  - new_tier | varchar(50) | null=NO | key= | extra=
+  - reason | varchar(255) | null=YES | key= | extra=
+  - changed_by | varchar(100) | null=YES | key= | extra=
+  - changed_at | timestamp | null=YES | key=MUL | extra=
+
+[tier_limits]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - tier | varchar(50) | null=NO | key=UNI | extra=
+  - daily_api_limit | int | null=YES | key= | extra=
+  - code_execution_limit | int | null=YES | key= | extra=
+  - submissions_per_day | int | null=YES | key= | extra=
+  - concurrent_connections | int | null=YES | key= | extra=
+  - file_upload_limit_mb | int | null=YES | key= | extra=
+  - max_problem_attempts | int | null=YES | key= | extra=
+  - ai_chat_limit_daily | int | null=YES | key= | extra=
+  - export_limit_monthly | int | null=YES | key= | extra=
+  - priority_support | tinyint(1) | null=YES | key= | extra=
+  - features | json | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[user_availability]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - user_id | varchar(36) | null=NO | key=UNI | extra=
+  - slots_json | json | null=YES | key= | extra=
+  - timezone | varchar(50) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[user_badges]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - user_id | varchar(50) | null=NO | key=MUL | extra=
+  - badge_id | varchar(50) | null=NO | key= | extra=
+  - earned_at | timestamp | null=YES | key=MUL | extra=
+  - share_publicly | tinyint(1) | null=YES | key= | extra=
+
+[user_streaks]
+  - user_id | varchar(36) | null=NO | key=PRI | extra=
+  - current_streak | int | null=YES | key= | extra=
+  - longest_streak | int | null=YES | key= | extra=
+  - last_activity_date | date | null=YES | key= | extra=
+  - total_active_days | int | null=YES | key= | extra=
+  - weekly_goal | int | null=YES | key= | extra=
+  - weekly_progress | int | null=YES | key= | extra=
+  - week_start_date | date | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[users]
+  - id | varchar(50) | null=NO | key=PRI | extra=
+  - email | varchar(255) | null=YES | key=MUL | extra=
+  - password | varchar(255) | null=YES | key= | extra=
+  - role | varchar(20) | null=YES | key=MUL | extra=
+  - name | varchar(255) | null=YES | key= | extra=
+  - avatar | varchar(255) | null=YES | key= | extra=
+  - specialization | varchar(255) | null=YES | key= | extra=
+  - mentor_id | varchar(50) | null=YES | key=MUL | extra=
+  - batch | varchar(20) | null=YES | key= | extra=
+  - created_at | datetime | null=YES | key= | extra=
+  - phone | varchar(20) | null=YES | key= | extra=
+  - status | enum('active','inactive','suspended') | null=YES | key= | extra=
+  - tier | varchar(50) | null=YES | key= | extra=
+  - theme_preference | varchar(50) | null=YES | key= | extra=
+  - ide_theme | varchar(50) | null=YES | key= | extra=
+  - keyboard_shortcuts_enabled | tinyint(1) | null=YES | key= | extra=
+  - tier_start_date | timestamp | null=YES | key= | extra=
+  - tier_expiry_date | timestamp | null=YES | key= | extra=
+  - must_change_password | tinyint(1) | null=NO | key= | extra=
+
+[v_auth_failures]
+  - id | bigint | null=YES | key= | extra=
+  - user_id | varchar(255) | null=YES | key= | extra=
+  - email | varchar(255) | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - failure_reason | varchar(255) | null=YES | key= | extra=
+  - timestamp | datetime | null=YES | key= | extra=
+  - failures_last_hour | bigint | null=YES | key= | extra=
+
+[v_recent_admin_actions]
+  - id | bigint | null=YES | key= | extra=
+  - admin_id | varchar(255) | null=YES | key= | extra=
+  - action_type | varchar(100) | null=YES | key= | extra=
+  - resource_type | varchar(100) | null=YES | key= | extra=
+  - resource_id | varchar(255) | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - description | longtext | null=YES | key= | extra=
+  - timestamp | datetime | null=YES | key= | extra=
+
+[v_suspicious_activity]
+  - activity_type | varchar(19) | null=YES | key= | extra=
+  - ip_address | varchar(45) | null=YES | key= | extra=
+  - count | bigint | null=YES | key= | extra=
+  - last_seen | datetime | null=YES | key= | extra=
+
+[violation_rules]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - violation_type | varchar(100) | null=NO | key=UNI | extra=
+  - base_severity | int | null=YES | key= | extra=
+  - is_auto_disqualify | tinyint(1) | null=YES | key= | extra=
+  - accumulation_type | enum('additive','multiplicative') | null=YES | key= | extra=
+  - time_window_minutes | int | null=YES | key= | extra=
+  - max_occurrences_allowed | int | null=YES | key= | extra=
+  - description | text | null=YES | key= | extra=
+  - enabled | tinyint(1) | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[violation_scoring_decisions]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - attempt_id | varchar(36) | null=NO | key=MUL | extra=
+  - test_id | varchar(36) | null=NO | key= | extra=
+  - student_id | varchar(36) | null=NO | key= | extra=
+  - total_violation_score | int | null=YES | key= | extra=
+  - violation_breakdown | json | null=YES | key= | extra=
+  - auto_disqualified | tinyint(1) | null=YES | key=MUL | extra=
+  - disqualification_reason | varchar(255) | null=YES | key= | extra=
+  - manual_review_needed | tinyint(1) | null=YES | key=MUL | extra=
+  - reviewed_by | varchar(36) | null=YES | key= | extra=
+  - review_decision | varchar(50) | null=YES | key= | extra=
+  - review_notes | text | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+[webhook_deliveries]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - webhook_id | varchar(36) | null=NO | key=MUL | extra=
+  - event_type | varchar(100) | null=NO | key=MUL | extra=
+  - payload | json | null=NO | key= | extra=
+  - response_status | int | null=YES | key= | extra=
+  - response_body | text | null=YES | key= | extra=
+  - duration_ms | int | null=YES | key= | extra=
+  - success | tinyint(1) | null=YES | key=MUL | extra=
+  - retry_count | int | null=YES | key= | extra=
+  - delivered_at | timestamp | null=YES | key=MUL | extra=
+
+[webhooks]
+  - id | varchar(36) | null=NO | key=PRI | extra=
+  - admin_id | varchar(100) | null=NO | key=MUL | extra=
+  - name | varchar(255) | null=NO | key= | extra=
+  - url | varchar(1000) | null=NO | key= | extra=
+  - secret | varchar(255) | null=NO | key= | extra=
+  - events | json | null=NO | key= | extra=
+  - is_active | tinyint(1) | null=YES | key=MUL | extra=
+  - failure_count | int | null=YES | key= | extra=
+  - last_triggered_at | timestamp | null=YES | key= | extra=
+  - last_status | int | null=YES | key= | extra=
+  - created_at | timestamp | null=YES | key= | extra=
+  - updated_at | timestamp | null=YES | key= | extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP

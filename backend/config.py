@@ -5,10 +5,13 @@ logger = LogConfig.get_logger(__name__)
 """Application configuration loaded from environment variables."""
 
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
-load_dotenv()
+# Always load backend/.env (this file's directory), then override stale shell-level vars.
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
 
 class Settings:
@@ -16,7 +19,7 @@ class Settings:
 
     def __init__(self):
         # --- Database ---
-        self.DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+        self.DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
         db = urlparse(self.DATABASE_URL)
         self.DB_HOST: str = db.hostname or "localhost"
         self.DB_PORT: int = int(db.port or 4000)
@@ -74,6 +77,24 @@ class Settings:
             "true",
             "yes",
         )
+
+        # --- Default super-admin seed (env-driven; no weak hardcoded passwords) ---
+        self.SUPER_ADMIN_SEED_ENABLED: bool = os.getenv("SUPER_ADMIN_SEED_ENABLED", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.SUPER_ADMIN_ROTATE_PASSWORDS_ON_STARTUP: bool = os.getenv(
+            "SUPER_ADMIN_ROTATE_PASSWORDS_ON_STARTUP", "true"
+        ).strip().lower() in ("1", "true", "yes")
+        self.SUPER_ADMIN_1_ID: str = os.getenv("SUPER_ADMIN_1_ID", "admin-srikanth").strip()
+        self.SUPER_ADMIN_1_NAME: str = os.getenv("SUPER_ADMIN_1_NAME", "Srikanth V").strip()
+        self.SUPER_ADMIN_1_EMAIL: str = os.getenv("SUPER_ADMIN_1_EMAIL", "srikanthvoffl@gmail.com").strip()
+        self.SUPER_ADMIN_1_PASSWORD: str = os.getenv("SUPER_ADMIN_1_PASSWORD", "").strip()
+        self.SUPER_ADMIN_2_ID: str = os.getenv("SUPER_ADMIN_2_ID", "admin-shyaam").strip()
+        self.SUPER_ADMIN_2_NAME: str = os.getenv("SUPER_ADMIN_2_NAME", "Shyaam Kumar").strip()
+        self.SUPER_ADMIN_2_EMAIL: str = os.getenv("SUPER_ADMIN_2_EMAIL", "shyaamkumar3105@gmail.com").strip()
+        self.SUPER_ADMIN_2_PASSWORD: str = os.getenv("SUPER_ADMIN_2_PASSWORD", "").strip()
 
         # --- Environment Scan (prescan) settings ---
         self.PRESCAN_SECRET_KEY: str = os.getenv("PRESCAN_SECRET_KEY", os.getenv("SECRET_KEY", "change-me-prescan-secret-key"))

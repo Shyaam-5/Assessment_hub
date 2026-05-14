@@ -40,6 +40,8 @@ function StudentPortal() {
     const location = useLocation()
     const [title, setTitle] = useState('')
     const [subtitle, setSubtitle] = useState('')
+    const perms = Array.isArray(user?.permissions) ? user.permissions : []
+    const can = (perm) => user?.role === 'admin' || user?.role === 'organization_admin' || perms.includes(perm)
 
 
 
@@ -93,23 +95,23 @@ function StudentPortal() {
             icon: <ClipboardList size={20} />,
             defaultExpanded: false,
             children: [
-                { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
-                { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
-                { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
-                { path: '/student/communication', label: 'Communication', icon: <MessageSquare size={20} /> }
-            ]
+                can('aptitude.assign') && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
+                can('tests.assign') && { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
+                can('coding.assign') && { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
+                can('communication.assign') && { path: '/student/communication', label: 'Communication', icon: <MessageSquare size={20} /> }
+            ].filter(Boolean)
         },
         {
             label: 'Progress',
             icon: <TrendingUp size={20} />,
             defaultExpanded: false,
             children: [
-                { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
-                { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
-                { path: '/student/analytics', label: t('my_analytics'), icon: <TrendingUp size={20} /> }
-            ]
+                can('tests.view') && { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
+                can('tests.view') && { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
+                can('analytics.view') && { path: '/student/analytics', label: t('my_analytics'), icon: <TrendingUp size={20} /> }
+            ].filter(Boolean)
         },
-    ]
+    ].filter((item) => !item.children || item.children.length > 0)
 
     return (
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>
@@ -3314,4 +3316,3 @@ function StudentAnalytics({ user }) {
 }
 
 export default StudentPortal
-

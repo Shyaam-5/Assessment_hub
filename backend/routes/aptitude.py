@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+import asyncio
 from logging_config import LogConfig
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 import pymysql.cursors
 from database import get_pool
 from audit_logger import get_audit_logger, AuditEventType
+from services.otp_delivery import send_notification_email
 
 router = APIRouter(prefix="/api", tags=["aptitude"])
 logger = LogConfig.get_logger(__name__)
@@ -520,8 +522,14 @@ async def allocate_students(test_id: str, body: AllocateStudents):
 
     pool = await get_pool()
 
+    test_title = "Aptitude Test"
+    emails: list[tuple[str, str]] = []
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute("SELECT title FROM aptitude_tests WHERE id = %s", (test_id,))
+            trow = await cur.fetchone()
+            if trow and trow.get("title"):
+                test_title = trow["title"]
             await cur.execute("DELETE FROM test_student_allocations WHERE test_id = %s", (test_id,))
 
             for sid in body.studentIds:
@@ -529,8 +537,27 @@ async def allocate_students(test_id: str, body: AllocateStudents):
                     "INSERT INTO test_student_allocations (id, test_id, student_id) VALUES (%s,%s,%s)",
                     (str(uuid.uuid4()), test_id, sid),
                 )
+            placeholders = ",".join(["%s"] * len(body.studentIds))
+            await cur.execute(f"SELECT name, email FROM users WHERE id IN ({placeholders})", body.studentIds)
+            rows = await cur.fetchall()
+            emails = [(r.get("name") or "User", r.get("email") or "") for r in (rows or []) if (r.get("email") or "").strip()]
 
         await conn.commit()
+
+    for name, email in emails:
+        try:
+            await asyncio.to_thread(
+                send_notification_email,
+                email,
+                f"New Test Assigned: {test_title}",
+                (
+                    f"Hello {name},\n\n"
+                    f"A new aptitude test has been assigned to you: {test_title}\n"
+                    "Please login to your portal and complete it before deadline.\n"
+                ),
+            )
+        except Exception:
+            pass
 
     return {"success": True, "allocatedCount": len(body.studentIds)}
 
