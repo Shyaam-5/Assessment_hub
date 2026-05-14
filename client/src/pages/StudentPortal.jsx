@@ -95,10 +95,10 @@ function StudentPortal() {
             icon: <ClipboardList size={20} />,
             defaultExpanded: false,
             children: [
-                can('aptitude.assign') && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
-                can('tests.assign') && { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
-                can('coding.assign') && { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
-                can('communication.assign') && { path: '/student/communication', label: 'Communication', icon: <MessageSquare size={20} /> }
+                (can('aptitude.attempt') || can('aptitude.assign')) && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
+                (can('tests.attempt') || can('tests.assign')) && { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
+                (can('coding.attempt') || can('coding.assign')) && { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
+                (can('communication.attempt') || can('communication.assign')) && { path: '/student/communication', label: 'Communication', icon: <MessageSquare size={20} /> }
             ].filter(Boolean)
         },
         {
@@ -106,8 +106,8 @@ function StudentPortal() {
             icon: <TrendingUp size={20} />,
             defaultExpanded: false,
             children: [
-                can('tests.view') && { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
-                can('tests.view') && { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
+                (can('results.view_own') || can('tests.view')) && { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
+                (can('results.view_own') || can('tests.view')) && { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
                 can('analytics.view') && { path: '/student/analytics', label: t('my_analytics'), icon: <TrendingUp size={20} /> }
             ].filter(Boolean)
         },
@@ -1747,7 +1747,7 @@ function GlobalTests({ user }) {
     useEffect(() => {
         const fetchTests = async () => {
             try {
-                const res = await axios.get(`${API_BASE}/global-tests?status=live`)
+                const res = await axios.get(`${API_BASE}/global-tests?status=live&studentId=${encodeURIComponent(user.id)}`)
                 setTests(Array.isArray(res.data) ? res.data : [])
             } catch (e) {
                 if (e.response?.status === 503) setTests([])

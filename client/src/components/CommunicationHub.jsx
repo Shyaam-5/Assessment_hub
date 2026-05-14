@@ -85,6 +85,17 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             await axios.post(`${API_BASE}/proctoring/log`, {
                 userId, sessionId, eventType, severity, details
             })
+            await axios.post(`${BACKEND_BASE}/api/behavior/log-events`, {
+                session_id: `beh_${sessionId}`,
+                user_id: userId,
+                events: [{
+                    type: 'proctor_violation',
+                    eventType,
+                    severity,
+                    details,
+                    timestamp: new Date().toISOString(),
+                }],
+            })
         } catch { /* silent */ }
     }, [userId, sessionId, addViolation])
 

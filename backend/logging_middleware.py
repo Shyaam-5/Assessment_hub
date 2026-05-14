@@ -30,11 +30,17 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         request_id = request.headers.get("x-request-id") or str(uuid4())
         user_id = request.headers.get("x-user-id", "anonymous")
+        organization_id = (
+            request.headers.get("x-org-id")
+            or getattr(request.state, "organization_id", None)
+            or ""
+        ).strip() or None
         client_ip = self._get_client_ip(request)
         req_body = await self._safe_request_body(request)
         
         # Store in request state for later use
         request.state.user_id = user_id
+        request.state.organization_id = organization_id
         request.state.client_ip = client_ip
         request.state.request_id = request_id
         
@@ -62,6 +68,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 process_time=process_time,
                 ip_address=client_ip,
                 request_body=req_body,
+                organization_id=organization_id,
             )
             self._track_sensitive_endpoint(
                 request.method, request.url.path, response.status_code, user_id, client_ip
@@ -94,6 +101,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 process_time=process_time,
                 ip_address=client_ip,
                 request_body=req_body,
+                organization_id=organization_id,
             )
             raise
 
@@ -139,6 +147,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         process_time: float,
         ip_address: str,
         request_body: str,
+        organization_id: str | None,
     ) -> None:
         details = {
             "request_id": request_id,
@@ -152,6 +161,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         self.audit_logger.log_event(
             event_type=AuditEventType.RESOURCE_ACCESSED,
             user_id=user_id if user_id != "anonymous" else None,
+            organization_id=organization_id,
             ip_address=ip_address,
             resource_id=request_id,
             resource_type="API",
@@ -167,14 +177,15 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     await cur.execute(
                         """
                         INSERT INTO api_request_audit (
-                            request_id, user_id, method, endpoint, query_string, request_body,
+                            request_id, user_id, organization_id, method, endpoint, query_string, request_body,
                             response_status, response_time_ms, ip_address, user_agent
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             request_id,
                             user_id if user_id != "anonymous" else None,
+                            organization_id,
                             request.method,
                             request.url.path,
                             request.url.query,

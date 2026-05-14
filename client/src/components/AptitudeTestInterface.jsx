@@ -79,6 +79,9 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
 
     // ── Session ID for proctoring log ──
     const proctoringSessionId = useRef(`apt_${user.id}_${test.id}_${Date.now()}`)
+    const behaviorSessionId = useRef(`beh_${user.id}_${test.id}_${Date.now()}`)
+    const behaviorEventsBuffer = useRef([])
+    const behaviorSendInterval = useRef(null)
 
     // ── Camera & Phone Detection (shared hooks) ──
     const camera = useCamera(true)
@@ -152,9 +155,17 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
         totalViolationsRef.current += 1
         const count = totalViolationsRef.current
         setTotalViolations(count)
-        axios.post(`${API_BASE}/communication/proctoring/log`, {
+        behaviorEventsBuffer.current.push({
+            type: 'proctor_violation',
+            eventType,
+            severity,
+            count,
+            timestamp: new Date().toISOString(),
+        })
+        axios.post(`${API_BASE}/aptitude/proctoring/log`, {
             userId: user.id,
             sessionId: proctoringSessionId.current,
+            testId: test.id,
             eventType,
             severity,
             details: `Violation ${count}/${MAX_VIOLATIONS}`
@@ -162,7 +173,24 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
         if (count >= MAX_VIOLATIONS) {
             autoTerminateTest(`Maximum proctoring violations reached (${count}/${MAX_VIOLATIONS}). Your test has been automatically terminated.`)
         }
-    }, [autoTerminateTest, user.id])
+    }, [autoTerminateTest, user.id, test.id])
+
+    const flushBehaviorEvents = useCallback(async () => {
+        if (behaviorEventsBuffer.current.length === 0) return
+        const events = [...behaviorEventsBuffer.current]
+        behaviorEventsBuffer.current = []
+        try {
+            await axios.post(`${API_BASE}/behavior/log-events`, {
+                session_id: behaviorSessionId.current,
+                user_id: user.id,
+                events,
+            })
+        } catch {
+            if (behaviorEventsBuffer.current.length < 500) {
+                behaviorEventsBuffer.current = [...events, ...behaviorEventsBuffer.current]
+            }
+        }
+    }, [user.id])
 
     // Enter fullscreen on mount + re-enforce + Socket.IO init
     useEffect(() => {
@@ -192,15 +220,18 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
         if (test && user) {
             socketService.emitSubmissionStarted(user.id, user.name || user.email, test.id, test.title, null, true)
         }
+        behaviorSendInterval.current = setInterval(flushBehaviorEvents, 15000)
 
         return () => {
             document.removeEventListener('fullscreenchange', handleFullscreenChange)
             if (document.fullscreenElement && !submittedRef.current) {
                 document.exitFullscreen().catch(() => {})
             }
+            if (behaviorSendInterval.current) clearInterval(behaviorSendInterval.current)
+            flushBehaviorEvents()
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [flushBehaviorEvents])
 
     // Timer countdown
     useEffect(() => {

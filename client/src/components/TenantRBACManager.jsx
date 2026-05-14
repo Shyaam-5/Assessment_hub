@@ -7,7 +7,7 @@ const card = { background: 'var(--bg-card)', border: '1px solid var(--border-col
 const input = { width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text)' }
 const btn = { padding: '10px 14px', border: 'none', borderRadius: 8, cursor: 'pointer', background: '#2563eb', color: '#fff', fontWeight: 600 }
 
-export default function TenantRBACManager({ user }) {
+export default function TenantRBACManager({ user, superAdminOnly = false, orgAdminOnly = false }) {
     const [orgs, setOrgs] = useState([])
     const [selectedOrg, setSelectedOrg] = useState('')
     const [permissionCatalog, setPermissionCatalog] = useState({})
@@ -35,8 +35,10 @@ export default function TenantRBACManager({ user }) {
 
     const fetchOrgs = async () => {
         const res = await axios.get(`${API_BASE}/platform/organizations`, { headers })
-        setOrgs(res.data || [])
-        if (!selectedOrg && res.data?.length) setSelectedOrg(res.data[0].id)
+        const allOrgs = res.data || []
+        const scoped = orgAdminOnly ? allOrgs.filter((o) => o.id === user?.organizationId) : allOrgs
+        setOrgs(scoped)
+        if (!selectedOrg && scoped.length) setSelectedOrg(scoped[0].id)
     }
 
     const toggleOrgStatus = async (org) => {
@@ -129,6 +131,7 @@ export default function TenantRBACManager({ user }) {
         <div style={{ display: 'grid', gap: 16 }}>
             {message && <div style={{ ...card, borderColor: '#334155' }}>{message}</div>}
 
+            {!orgAdminOnly && (
             <div style={card}>
                 <h3 style={{ marginTop: 0 }}>1. Create Organization (Tenant)</h3>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
@@ -147,6 +150,7 @@ export default function TenantRBACManager({ user }) {
                     <button style={btn} onClick={createOrganization}>Create Organization</button>
                 </div>
             </div>
+            )}
 
             <div style={card}>
                 <h3 style={{ marginTop: 0 }}>2. Select Organization</h3>
@@ -161,17 +165,20 @@ export default function TenantRBACManager({ user }) {
                                 <div style={{ fontWeight: 600 }}>{o.name} ({o.code})</div>
                                 <div style={{ fontSize: 12, opacity: 0.8 }}>{o.type} - {o.is_active ? 'Active' : 'Inactive'}</div>
                             </div>
-                            <button
-                                style={{ ...btn, background: o.is_active ? '#dc2626' : '#16a34a' }}
-                                onClick={() => toggleOrgStatus(o)}
-                            >
-                                {o.is_active ? 'Deactivate' : 'Activate'}
-                            </button>
+                            {!orgAdminOnly && (
+                                <button
+                                    style={{ ...btn, background: o.is_active ? '#dc2626' : '#16a34a' }}
+                                    onClick={() => toggleOrgStatus(o)}
+                                >
+                                    {o.is_active ? 'Deactivate' : 'Activate'}
+                                </button>
+                            )}
                         </div>
                     ))}
                 </div>
             </div>
 
+            {!superAdminOnly && (
             <div style={card}>
                 <h3 style={{ marginTop: 0 }}>3. Create Role with Checkbox Permissions</h3>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
@@ -190,7 +197,9 @@ export default function TenantRBACManager({ user }) {
                     <button style={btn} onClick={createRole} disabled={!selectedOrg}>Create Role</button>
                 </div>
             </div>
+            )}
 
+            {!superAdminOnly && (
             <div style={card}>
                 <h3 style={{ marginTop: 0 }}>4. Create User and Assign Role</h3>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
@@ -208,6 +217,7 @@ export default function TenantRBACManager({ user }) {
                     <button style={btn} onClick={createUser} disabled={!selectedOrg}>Create User</button>
                 </div>
             </div>
+            )}
         </div>
     )
 }

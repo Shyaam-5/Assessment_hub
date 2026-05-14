@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional
 from enum import Enum
-from database import get_pool
+from database import get_pool, get_primary_pool
 
 
 class AuditEventType(Enum):
@@ -84,6 +84,7 @@ class AuditLogger:
         self,
         event_type: AuditEventType,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
         ip_address: Optional[str] = None,
         resource_id: Optional[str] = None,
         resource_type: Optional[str] = None,
@@ -113,6 +114,7 @@ class AuditLogger:
             "timestamp": timestamp,
             "event_type": event_type.value,
             "user_id": user_id or "SYSTEM",
+            "organization_id": organization_id,
             "ip_address": ip_address or "UNKNOWN",
             "resource_id": resource_id,
             "resource_type": resource_type,
@@ -125,6 +127,7 @@ class AuditLogger:
         # Log to file with special context
         log_context = {
             "user_id": user_id or "SYSTEM",
+            "organization_id": organization_id or "",
             "action": event_type.value,
             "details": json.dumps(audit_record),
         }
@@ -146,26 +149,46 @@ class AuditLogger:
             loop = asyncio.get_running_loop()
             loop.create_task(self._store_audit_event_db(audit_record))
         except RuntimeError:
-            self.logger.warning("No running event loop; skipped async audit DB write.")
+            self.logger.warning(
+                "No running event loop; skipped async audit DB write.",
+                extra={"user_id": "SYSTEM", "organization_id": "", "action": "AUDIT_ASYNC_SKIP", "details": "{}"},
+            )
     
     async def _store_audit_event_db(self, audit_record: Dict[str, Any]) -> None:
         """Store audit event in database for long-term retention."""
         try:
+            organization_id = audit_record.get("organization_id")
+            user_id = audit_record.get("user_id")
+            if not organization_id and user_id and user_id != "SYSTEM":
+                try:
+                    primary = await get_primary_pool()
+                    async with primary.acquire() as pconn:
+                        async with pconn.cursor() as pcur:
+                            await pcur.execute("SELECT organization_id FROM users WHERE id = %s", (user_id,))
+                            row = await pcur.fetchone()
+                            if isinstance(row, dict):
+                                organization_id = row.get("organization_id")
+                            elif row:
+                                organization_id = row[0]
+                except Exception:
+                    organization_id = None
+
             pool = await get_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
                         INSERT INTO audit_events (
-                            timestamp, event_type, user_id, ip_address, resource_id,
+                            timestamp, event_type, user_id, organization_id, ip_address, resource_id,
                             resource_type, action, status, error_message, details
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             audit_record["timestamp"].replace("T", " "),
                             audit_record["event_type"],
                             audit_record["user_id"],
+                            organization_id,
                             audit_record["ip_address"],
                             audit_record["resource_id"],
                             audit_record["resource_type"],
@@ -176,7 +199,16 @@ class AuditLogger:
                         ),
                     )
         except Exception as exc:
-            self.logger.error("Failed to store audit event in database: %s", exc)
+            self.logger.error(
+                "Failed to store audit event in database: %s",
+                exc,
+                extra={
+                    "user_id": audit_record.get("user_id") or "SYSTEM",
+                    "organization_id": audit_record.get("organization_id") or "",
+                    "action": "AUDIT_DB_WRITE_FAILED",
+                    "details": json.dumps({"error": str(exc)}, ensure_ascii=True),
+                },
+            )
     
     def log_authentication(
         self,
@@ -191,6 +223,7 @@ class AuditLogger:
         self.log_event(
             event_type=event_type,
             user_id=user_id,
+            organization_id=None,
             ip_address=ip_address,
             resource_type="AUTH",
             action=f"Authentication: {auth_method or 'PASSWORD'}",
@@ -214,6 +247,7 @@ class AuditLogger:
         self.log_event(
             event_type=AuditEventType.ACCESS_DENIED,
             user_id=user_id,
+            organization_id=None,
             ip_address=ip_address,
             resource_id=resource_id,
             resource_type=resource_type,
@@ -235,6 +269,7 @@ class AuditLogger:
         self.log_event(
             event_type=event_type,
             user_id=admin_id,
+            organization_id=None,
             ip_address=ip_address,
             resource_id=resource_id,
             resource_type=resource_type,
@@ -252,11 +287,13 @@ class AuditLogger:
         resource_type: str,
         query_params: Optional[Dict[str, Any]] = None,
         record_count: Optional[int] = None,
+        organization_id: Optional[str] = None,
     ) -> None:
         """Log data access event."""
         self.log_event(
             event_type=AuditEventType.DATA_EXPORT,
             user_id=user_id,
+            organization_id=organization_id,
             ip_address=ip_address,
             resource_type=resource_type,
             action=f"Accessed {resource_type}",
@@ -279,6 +316,7 @@ class AuditLogger:
         self.log_event(
             event_type=event_type,
             user_id=student_id,
+            organization_id=None,
             ip_address=ip_address or "UNKNOWN",
             resource_id=session_id,
             resource_type="PROCTORING",
@@ -300,6 +338,7 @@ class AuditLogger:
         self.log_event(
             event_type=AuditEventType.SYSTEM_ERROR,
             user_id=user_id,
+            organization_id=None,
             ip_address=ip_address,
             action="System error occurred",
             details={
@@ -314,6 +353,7 @@ class AuditLogger:
         event_name: str,
         sid: str,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
         ip_address: Optional[str] = None,
         payload: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -321,6 +361,7 @@ class AuditLogger:
         self.log_event(
             event_type=AuditEventType.SOCKET_EVENT,
             user_id=user_id,
+            organization_id=organization_id,
             ip_address=ip_address,
             resource_id=sid,
             resource_type="SOCKET",

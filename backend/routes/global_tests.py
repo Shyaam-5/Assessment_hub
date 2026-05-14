@@ -1,6 +1,7 @@
 """Global test routes: CRUD for tests, questions, submissions, and AI reports."""
 
 import json
+import asyncio
 import re
 import uuid
 from datetime import datetime, timezone
@@ -11,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from pydantic import BaseModel
 
 import pymysql.cursors
-from database import get_pool
+from database import get_pool, get_primary_pool
 from config import settings
 from services.ai_service import cerebras_chat
 from audit_logger import get_audit_logger, AuditEventType
@@ -21,6 +22,76 @@ audit_logger = get_audit_logger()
 
 PISTON_URL = "https://emkc.org/api/v2/piston/execute"
 SECTIONS = ["aptitude", "verbal", "logical", "coding", "sql"]
+_global_agent_counter: dict[str, int] = {}
+_GLOBAL_AGENT_COUNTER_MAX = 1000
+_GLOBAL_AGENT_INTERVAL = 5
+
+
+async def _insert_unified_proctor_event(
+    *,
+    test_id: str,
+    user_id: str,
+    session_id: str,
+    event_type: str,
+    severity: str,
+    details: str,
+):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    test_type VARCHAR(32) NOT NULL,
+                    test_id VARCHAR(64) NULL,
+                    attempt_id VARCHAR(64) NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(128) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    severity VARCHAR(16) NOT NULL,
+                    details LONGTEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_pu_test_type (test_type),
+                    INDEX idx_pu_user (user_id),
+                    INDEX idx_pu_session (session_id),
+                    INDEX idx_pu_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            await cur.execute(
+                """
+                INSERT INTO proctoring_events_unified
+                (test_type, test_id, attempt_id, user_id, session_id, event_type, severity, details)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                ("global", test_id or None, None, user_id, session_id, event_type, severity, details),
+            )
+        await conn.commit()
+
+
+async def _maybe_trigger_global_agent(session_id: str, user_id: str = ""):
+    try:
+        from services.proctor_agent import agent_analyze_session, save_analysis
+        result = await agent_analyze_session(session_id, "global", user_id=user_id)
+        if result.get("fraud_score", 0) > 0:
+            await save_analysis({**result, "source": "global"})
+            if result.get("recommended_action") == "terminate" or result.get("risk_level") == "terminate":
+                try:
+                    from main import sio
+                    payload = {
+                        "session_id": session_id,
+                        "reason": "Proctoring Intelligence Agent detected critical integrity violations.",
+                        "fraud_score": result.get("fraud_score"),
+                        "risk_level": result.get("risk_level"),
+                    }
+                    await sio.emit("agent_terminate", payload, room=f"session_{session_id}")
+                    if user_id:
+                        await sio.emit("agent_terminate", payload, room=f"student_{user_id}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def _client_ip(request: Request) -> str:
@@ -403,6 +474,7 @@ async def _run_sql_and_compare(schema: str, query: str, expected_output: str) ->
 async def list_global_tests(
     status: Optional[str] = None,
     type: Optional[str] = None,
+    studentId: Optional[str] = None,
 ):
     pool = await get_pool()
     query = "SELECT * FROM global_tests WHERE 1=1"
@@ -413,11 +485,29 @@ async def list_global_tests(
     if type:
         query += " AND type = %s"
         params.append(type)
+    if studentId:
+        query += """
+            AND id IN (
+                SELECT test_id FROM global_test_allocations WHERE student_id = %s
+            )
+        """
+        params.append(studentId)
     query += " ORDER BY created_at DESC"
 
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS global_test_allocations (
+                        id CHAR(36) NOT NULL PRIMARY KEY,
+                        test_id CHAR(36) NOT NULL,
+                        student_id VARCHAR(64) NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY uniq_global_alloc (test_id, student_id)
+                    )
+                    """
+                )
                 await cur.execute(query, params)
                 rows = await cur.fetchall()
         return [_clean_global_test(t) for t in rows]
@@ -809,10 +899,84 @@ async def get_questions(test_id: str, section: Optional[str] = None):
         raise HTTPException(500, str(e))
 
 
+@router.post("/global-tests/proctoring/log")
+async def global_proctoring_log(request: Request):
+    data = await request.json()
+    user_id = str(data.get("userId") or data.get("user_id") or "")
+    session_id = str(data.get("sessionId") or data.get("session_id") or "default")
+    event_type = str(data.get("eventType") or data.get("event_type") or "unknown")
+    severity = str(data.get("severity") or "low")
+    details = data.get("details", "")
+    test_id = str(data.get("testId") or data.get("test_id") or "")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS global_test_proctoring_logs (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    test_id VARCHAR(64) NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(128) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    severity VARCHAR(16) NOT NULL,
+                    details LONGTEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_gtp_user (user_id),
+                    INDEX idx_gtp_session (session_id),
+                    INDEX idx_gtp_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            await cur.execute(
+                """
+                INSERT INTO global_test_proctoring_logs
+                (test_id, user_id, session_id, event_type, severity, details)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                """,
+                (test_id or None, user_id, session_id, event_type, severity, json.dumps(details, ensure_ascii=True) if not isinstance(details, str) else details),
+            )
+        await conn.commit()
+
+    await _insert_unified_proctor_event(
+        test_id=test_id,
+        user_id=user_id,
+        session_id=session_id,
+        event_type=event_type,
+        severity=severity,
+        details=json.dumps(details, ensure_ascii=True) if not isinstance(details, str) else details,
+    )
+
+    if len(_global_agent_counter) > _GLOBAL_AGENT_COUNTER_MAX:
+        for k in sorted(_global_agent_counter, key=_global_agent_counter.get)[: _GLOBAL_AGENT_COUNTER_MAX // 2]:
+            _global_agent_counter.pop(k, None)
+    _global_agent_counter[session_id] = _global_agent_counter.get(session_id, 0) + 1
+    if severity in ("high", "critical") or _global_agent_counter[session_id] % _GLOBAL_AGENT_INTERVAL == 0:
+        task = asyncio.create_task(_maybe_trigger_global_agent(session_id, user_id))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
+
+    audit_logger.log_event(
+        AuditEventType.TEST_PROCTORING_LOG,
+        user_id=user_id or None,
+        ip_address=_client_ip(request),
+        resource_id=session_id,
+        resource_type="global_test_session",
+        action=f"Global test proctoring: {event_type}",
+        details={"severity": severity, "testId": test_id or None},
+    )
+    return {"success": True}
+
+
 # ─── Submit ────────────────────────────────────────────────────
 
 @router.post("/global-tests/{test_id}/submit")
 async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Request):
+    actor = (request.headers.get("x-user-id") or "").strip()
+    can_assign = await _has_any_permission(actor, ["tests.assign"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_assign or (can_attempt and actor == body.studentId)):
+        raise HTTPException(403, "Permission denied")
     if not body.studentId:
         raise HTTPException(400, "studentId required")
 
@@ -820,6 +984,17 @@ async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Requ
 
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS global_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id VARCHAR(64) NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_global_alloc (test_id, student_id)
+                )
+                """
+            )
             await cur.execute("SELECT * FROM global_tests WHERE id = %s", (test_id,))
             test = await cur.fetchone()
             if not test:
@@ -839,6 +1014,13 @@ async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Requ
                 (test_id, body.studentId),
             )
             prior_attempts = (await cur.fetchone())["c"]
+            await cur.execute(
+                "SELECT 1 FROM global_test_allocations WHERE test_id = %s AND student_id = %s LIMIT 1",
+                (test_id, body.studentId),
+            )
+            allocation_row = await cur.fetchone()
+            if not allocation_row:
+                raise HTTPException(403, "This test is not assigned to this user")
             max_attempts = test.get("max_attempts") or 1
             if prior_attempts >= max_attempts:
                 raise HTTPException(400, "Maximum attempts reached for this test")
@@ -1350,3 +1532,25 @@ For CORRECT coding/SQL suggest optimizations. For INCORRECT diagnose the logic g
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
         raise HTTPException(500, str(e))
+async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
+    if not user_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            u = await cur.fetchone()
+            if u and u.get("role") == "admin":
+                return True
+            fmt = ",".join(["%s"] * len(permissions))
+            await cur.execute(
+                f"""
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
+                LIMIT 1
+                """,
+                [user_id, *permissions],
+            )
+            return bool(await cur.fetchone())

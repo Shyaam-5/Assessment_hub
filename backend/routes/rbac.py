@@ -24,12 +24,13 @@ router = APIRouter(prefix="/api", tags=["rbac"])
 PERMISSION_CATALOG: dict[str, list[str]] = {
     "user_mgmt": ["users.create", "users.view", "users.update", "users.delete"],
     "roles": ["roles.create", "roles.view", "roles.update", "roles.delete"],
-    "tests": ["tests.create", "tests.view", "tests.update", "tests.delete", "tests.assign"],
-    "coding": ["coding.create", "coding.assign", "coding.evaluate"],
-    "communication": ["communication.create", "communication.assign", "communication.evaluate"],
-    "aptitude": ["aptitude.create", "aptitude.assign", "aptitude.evaluate"],
+    "tests": ["tests.create", "tests.view", "tests.update", "tests.delete", "tests.assign", "tests.view_allocated", "tests.attempt"],
+    "coding": ["coding.create", "coding.assign", "coding.evaluate", "coding.attempt"],
+    "communication": ["communication.create", "communication.assign", "communication.evaluate", "communication.attempt"],
+    "aptitude": ["aptitude.create", "aptitude.assign", "aptitude.evaluate", "aptitude.attempt"],
     "analytics": ["analytics.view", "analytics.export"],
     "proctoring": ["proctoring.view", "proctoring.override"],
+    "results": ["results.view_own"],
 }
 
 
@@ -383,6 +384,35 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                     (role_id, perm),
                 )
 
+            # Seed default learner template role: exam_taker (minimal permissions).
+            exam_taker_role_id = str(uuid.uuid4())
+            await cur.execute(
+                """
+                INSERT INTO roles (id, organization_id, name, slug, description, is_system)
+                VALUES (%s, %s, %s, %s, %s, 1)
+                """,
+                (
+                    exam_taker_role_id,
+                    org_id,
+                    "Exam Taker",
+                    "exam-taker",
+                    "Minimal learner role for assigned exams only",
+                ),
+            )
+            exam_taker_perms = [
+                "tests.view_allocated",
+                "tests.attempt",
+                "aptitude.attempt",
+                "coding.attempt",
+                "communication.attempt",
+                "results.view_own",
+            ]
+            for perm in exam_taker_perms:
+                await cur.execute(
+                    "INSERT INTO role_permissions (role_id, permission_key) VALUES (%s, %s)",
+                    (exam_taker_role_id, perm),
+                )
+
             await cur.execute(
                 """
                 INSERT INTO users (id, name, email, password, role, organization_id, status, must_change_password, created_at)
@@ -449,6 +479,196 @@ async def update_organization_status(org_id: str, body: OrganizationStatusBody, 
                 raise HTTPException(status_code=404, detail="Organization not found")
         await conn.commit()
     return {"success": True, "organizationId": org_id, "isActive": body.isActive}
+
+
+@router.get("/platform/organizations/analytics")
+async def organization_analytics(request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can view organization analytics")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, name, code, type, is_active, created_at FROM organizations ORDER BY created_at DESC"
+            )
+            orgs = await cur.fetchall() or []
+
+            await cur.execute(
+                """
+                SELECT organization_id, COUNT(*) AS user_count
+                FROM users
+                WHERE organization_id IS NOT NULL
+                GROUP BY organization_id
+                """
+            )
+            user_rows = await cur.fetchall() or []
+            users_by_org = {r["organization_id"]: int(r.get("user_count") or 0) for r in user_rows}
+
+            # API usage count per org from audit table via users table join.
+            api_by_org: dict[str, int] = {}
+            try:
+                await cur.execute(
+                    """
+                    SELECT u.organization_id, COUNT(*) AS api_count
+                    FROM api_request_audit a
+                    JOIN users u ON u.id = a.user_id
+                    WHERE u.organization_id IS NOT NULL
+                    GROUP BY u.organization_id
+                    """
+                )
+                api_rows = await cur.fetchall() or []
+                api_by_org = {r["organization_id"]: int(r.get("api_count") or 0) for r in api_rows}
+            except Exception:
+                api_by_org = {}
+
+            # Test conducted counts (best-effort, sum available submission/attempt tables).
+            tests_by_org: dict[str, int] = {}
+            test_sources = [
+                ("global_test_submissions", "student_id"),
+                ("aptitude_submissions", "student_id"),
+                ("skill_test_attempts", "student_id"),
+                ("comm_test_attempts", "student_id"),
+            ]
+            for table_name, user_col in test_sources:
+                try:
+                    await cur.execute(
+                        f"""
+                        SELECT u.organization_id, COUNT(*) AS cnt
+                        FROM {table_name} t
+                        JOIN users u ON u.id = t.{user_col}
+                        WHERE u.organization_id IS NOT NULL
+                        GROUP BY u.organization_id
+                        """
+                    )
+                    rows = await cur.fetchall() or []
+                    for row in rows:
+                        org_id = row["organization_id"]
+                        tests_by_org[org_id] = tests_by_org.get(org_id, 0) + int(row.get("cnt") or 0)
+                except Exception:
+                    continue
+
+    result = []
+    for org in orgs:
+        oid = org["id"]
+        result.append(
+            {
+                "id": oid,
+                "name": org.get("name"),
+                "code": org.get("code"),
+                "type": org.get("type"),
+                "is_active": org.get("is_active"),
+                "created_at": org.get("created_at"),
+                "total_users": users_by_org.get(oid, 0),
+                "total_tests_conducted": tests_by_org.get(oid, 0),
+                "total_api_requests_used": api_by_org.get(oid, 0),
+            }
+        )
+    return result
+
+
+@router.get("/orgs/{org_id}/analytics")
+async def single_org_analytics(org_id: str, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "analytics.view")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, name, code, type, is_active, created_at FROM organizations WHERE id = %s",
+                (org_id,),
+            )
+            org = await cur.fetchone()
+            if not org:
+                raise HTTPException(status_code=404, detail="Organization not found")
+
+            await cur.execute(
+                "SELECT COUNT(*) AS cnt FROM users WHERE organization_id = %s",
+                (org_id,),
+            )
+            total_users = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            await cur.execute(
+                "SELECT COUNT(*) AS cnt FROM users WHERE organization_id = %s AND LOWER(COALESCE(status, 'active')) = 'active'",
+                (org_id,),
+            )
+            active_users = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            tests_count = 0
+            for table_name, user_col in [
+                ("global_test_submissions", "student_id"),
+                ("aptitude_submissions", "student_id"),
+                ("skill_test_attempts", "student_id"),
+                ("comm_test_attempts", "student_id"),
+            ]:
+                try:
+                    await cur.execute(
+                        f"""
+                        SELECT COUNT(*) AS cnt
+                        FROM {table_name} t
+                        JOIN users u ON u.id = t.{user_col}
+                        WHERE u.organization_id = %s
+                        """,
+                        (org_id,),
+                    )
+                    tests_count += int((await cur.fetchone() or {}).get("cnt") or 0)
+                except Exception:
+                    continue
+
+            api_count = 0
+            try:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM api_request_audit a
+                    JOIN users u ON u.id = a.user_id
+                    WHERE u.organization_id = %s
+                    """,
+                    (org_id,),
+                )
+                api_count = int((await cur.fetchone() or {}).get("cnt") or 0)
+            except Exception:
+                api_count = 0
+
+            await cur.execute(
+                """
+                SELECT id, name, role, status, created_at
+                FROM users
+                WHERE organization_id = %s
+                ORDER BY created_at DESC
+                LIMIT 10
+                """,
+                (org_id,),
+            )
+            recent_users = await cur.fetchall() or []
+
+    return {
+        "id": org.get("id"),
+        "name": org.get("name"),
+        "code": org.get("code"),
+        "type": org.get("type"),
+        "is_active": org.get("is_active"),
+        "created_at": org.get("created_at"),
+        "total_users": total_users,
+        "total_active_users": active_users,
+        "total_tests_conducted": tests_count,
+        "total_api_requests_used": api_count,
+        "recent_users": [
+            {
+                "id": r.get("id"),
+                "name": r.get("name"),
+                "role": r.get("role"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+            }
+            for r in recent_users
+        ],
+    }
 
 
 @router.get("/orgs/{org_id}/roles")

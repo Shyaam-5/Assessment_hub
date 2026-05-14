@@ -218,9 +218,10 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
         totalViolationsRef.current += 1
         const count = totalViolationsRef.current
         setTotalViolations(count)
-        axios.post(`${API_BASE}/proctoring/log`, {
+        axios.post(`${API_BASE}/global-tests/proctoring/log`, {
             userId: user.id,
             sessionId: behaviorSessionId.current,
+            testId: test.id,
             eventType,
             severity,
             details: `Violation ${count}/${MAX_VIOLATIONS}`

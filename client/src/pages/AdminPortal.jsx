@@ -11,6 +11,8 @@ import LocalTestCasesManager from '../components/LocalTestCasesManager'
 import AdminLiveMonitoring from '../components/AdminLiveMonitoring'
 import AdminOperations from '../components/AdminOperations'
 import TenantRBACManager from '../components/TenantRBACManager'
+import OrganizationAnalyticsPanel from '../components/OrganizationAnalyticsPanel'
+import OrgTenantAnalyticsPanel from '../components/OrgTenantAnalyticsPanel'
 
 import FileUpload from '../components/FileUpload'
 import SkillTestManager from '../components/SkillTestManager'
@@ -34,6 +36,7 @@ function AdminPortal() {
     const { user } = useAuth()
     const { t } = useI18n()
     const location = useLocation()
+    const isSuperAdmin = user?.role === 'admin'
     const [title, setTitle] = useState('')
     const [subtitle, setSubtitle] = useState('')
     const perms = Array.isArray(user?.permissions) ? user.permissions : []
@@ -152,6 +155,36 @@ function AdminPortal() {
         }
     ]
         .filter((item) => !item.children || item.children.length > 0)
+
+    if (isSuperAdmin) {
+        const superNavItems = [
+            { path: '/admin', label: 'Organization Management', icon: <Shield size={20} /> },
+            { path: '/admin/org-analytics', label: 'Organization Analytics', icon: <BarChart3 size={20} /> },
+        ]
+        return (
+            <DashboardLayout navItems={superNavItems} title={title || 'Super Admin'} subtitle={subtitle || 'Organization controls and analytics'}>
+                <Routes>
+                    <Route path="/" element={<TenantRBACManager user={user} superAdminOnly={true} />} />
+                    <Route path="/org-analytics" element={<OrganizationAnalyticsPanel user={user} />} />
+                </Routes>
+            </DashboardLayout>
+        )
+    }
+
+    if (user?.role === 'organization_admin') {
+        const orgNavItems = [
+            { path: '/admin', label: 'Role & User Management', icon: <Shield size={20} /> },
+            { path: '/admin/org-analytics', label: 'Organization Analytics', icon: <BarChart3 size={20} /> },
+        ]
+        return (
+            <DashboardLayout navItems={orgNavItems} title={title || 'Organization Admin'} subtitle={subtitle || 'Tenant role, users, and analytics'}>
+                <Routes>
+                    <Route path="/" element={<TenantRBACManager user={user} orgAdminOnly={true} />} />
+                    <Route path="/org-analytics" element={<OrgTenantAnalyticsPanel user={user} />} />
+                </Routes>
+            </DashboardLayout>
+        )
+    }
 
     return (
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>

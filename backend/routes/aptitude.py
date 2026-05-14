@@ -3,21 +3,93 @@
 import uuid
 import logging
 import asyncio
+import json
 from logging_config import LogConfig
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi import APIRouter, HTTPException, Query, Request, Depends, Body
 from pydantic import BaseModel
 
 import pymysql.cursors
-from database import get_pool
+from database import get_pool, get_primary_pool
 from audit_logger import get_audit_logger, AuditEventType
 from services.otp_delivery import send_notification_email
 
 router = APIRouter(prefix="/api", tags=["aptitude"])
 logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
+
+_aptitude_agent_counter: dict[str, int] = {}
+_APT_AGENT_COUNTER_MAX = 1000
+_APT_AGENT_INTERVAL = 5
+
+
+async def _insert_unified_proctor_event(
+    *,
+    test_id: str,
+    user_id: str,
+    session_id: str,
+    event_type: str,
+    severity: str,
+    details: str,
+):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    test_type VARCHAR(32) NOT NULL,
+                    test_id VARCHAR(64) NULL,
+                    attempt_id VARCHAR(64) NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(128) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    severity VARCHAR(16) NOT NULL,
+                    details LONGTEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_pu_test_type (test_type),
+                    INDEX idx_pu_user (user_id),
+                    INDEX idx_pu_session (session_id),
+                    INDEX idx_pu_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            await cur.execute(
+                """
+                INSERT INTO proctoring_events_unified
+                (test_type, test_id, attempt_id, user_id, session_id, event_type, severity, details)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                ("aptitude", test_id or None, None, user_id, session_id, event_type, severity, details),
+            )
+        await conn.commit()
+
+
+async def _maybe_trigger_aptitude_agent(session_id: str, user_id: str = ""):
+    try:
+        from services.proctor_agent import agent_analyze_session, save_analysis
+        result = await agent_analyze_session(session_id, "aptitude", user_id=user_id)
+        if result.get("fraud_score", 0) > 0:
+            await save_analysis({**result, "source": "aptitude"})
+            if result.get("recommended_action") == "terminate" or result.get("risk_level") == "terminate":
+                try:
+                    from main import sio
+                    payload = {
+                        "session_id": session_id,
+                        "reason": "Proctoring Intelligence Agent detected critical integrity violations.",
+                        "fraud_score": result.get("fraud_score"),
+                        "risk_level": result.get("risk_level"),
+                    }
+                    await sio.emit("agent_terminate", payload, room=f"session_{session_id}")
+                    if user_id:
+                        await sio.emit("agent_terminate", payload, room=f"student_{user_id}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def _client_ip(request: Request) -> str:
@@ -243,6 +315,9 @@ async def create_aptitude_test(body: AptitudeTestCreate):
 
 @router.post("/aptitude/{test_id}/submit")
 async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Request):
+    actor = (request.headers.get("x-user-id") or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.attempt", "aptitude.assign"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -516,7 +591,10 @@ async def get_aptitude_submission(submission_id: str):
 # ─── Test-Student Allocation routes ───────────────────────────
 
 @router.post("/aptitude/{test_id}/allocate-students")
-async def allocate_students(test_id: str, body: AllocateStudents):
+async def allocate_students(test_id: str, body: AllocateStudents, request: Request):
+    actor = (request.headers.get("x-user-id") or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.assign"]):
+        raise HTTPException(403, "Permission denied")
     if not body.studentIds:
         raise HTTPException(400, "studentIds must be a non-empty array")
 
@@ -563,7 +641,10 @@ async def allocate_students(test_id: str, body: AllocateStudents):
 
 
 @router.get("/aptitude/{test_id}/allocated-students")
-async def get_allocated_students(test_id: str):
+async def get_allocated_students(test_id: str, request: Request):
+    actor = (request.headers.get("x-user-id") or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.assign"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -579,7 +660,12 @@ async def get_allocated_students(test_id: str):
 
 
 @router.get("/aptitude/allocated-to/{student_id}")
-async def get_tests_allocated_to_student(student_id: str):
+async def get_tests_allocated_to_student(student_id: str, request: Request):
+    actor = (request.headers.get("x-user-id") or "").strip()
+    can_assign = await _has_any_permission(actor, ["aptitude.assign"])
+    can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
+    if not (can_assign or (can_attempt and actor == student_id)):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -595,3 +681,95 @@ async def get_tests_allocated_to_student(student_id: str):
             rows = await cur.fetchall()
 
     return [_clean_test(t) for t in rows]
+
+
+@router.post("/aptitude/proctoring/log")
+async def aptitude_proctoring_log(request: Request, body: dict = Body(...)):
+    user_id = str(body.get("userId") or body.get("user_id") or "")
+    session_id = str(body.get("sessionId") or body.get("session_id") or "default")
+    event_type = str(body.get("eventType") or body.get("event_type") or "unknown")
+    severity = str(body.get("severity") or "low")
+    details = body.get("details", "")
+    test_id = str(body.get("testId") or body.get("test_id") or "")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS aptitude_proctoring_logs (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    test_id VARCHAR(64) NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(128) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    severity VARCHAR(16) NOT NULL,
+                    details LONGTEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_ap_user (user_id),
+                    INDEX idx_ap_session (session_id),
+                    INDEX idx_ap_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            await cur.execute(
+                """
+                INSERT INTO aptitude_proctoring_logs
+                (test_id, user_id, session_id, event_type, severity, details)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                """,
+                (test_id or None, user_id, session_id, event_type, severity, json.dumps(details, ensure_ascii=True) if not isinstance(details, str) else details),
+            )
+        await conn.commit()
+
+    await _insert_unified_proctor_event(
+        test_id=test_id,
+        user_id=user_id,
+        session_id=session_id,
+        event_type=event_type,
+        severity=severity,
+        details=json.dumps(details, ensure_ascii=True) if not isinstance(details, str) else details,
+    )
+
+    if len(_aptitude_agent_counter) > _APT_AGENT_COUNTER_MAX:
+        for k in sorted(_aptitude_agent_counter, key=_aptitude_agent_counter.get)[: _APT_AGENT_COUNTER_MAX // 2]:
+            _aptitude_agent_counter.pop(k, None)
+    _aptitude_agent_counter[session_id] = _aptitude_agent_counter.get(session_id, 0) + 1
+    if severity in ("high", "critical") or _aptitude_agent_counter[session_id] % _APT_AGENT_INTERVAL == 0:
+        task = asyncio.create_task(_maybe_trigger_aptitude_agent(session_id, user_id))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
+
+    audit_logger.log_event(
+        AuditEventType.TEST_PROCTORING_LOG,
+        user_id=user_id or None,
+        ip_address=_client_ip(request),
+        resource_id=session_id,
+        resource_type="aptitude_session",
+        action=f"Aptitude proctoring: {event_type}",
+        details={"severity": severity, "testId": test_id or None},
+    )
+    return {"success": True}
+
+
+async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
+    if not user_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            u = await cur.fetchone()
+            if u and u.get("role") == "admin":
+                return True
+            fmt = ",".join(["%s"] * len(permissions))
+            await cur.execute(
+                f"""
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
+                LIMIT 1
+                """,
+                [user_id, *permissions],
+            )
+            return bool(await cur.fetchone())

@@ -39,6 +39,36 @@ router.dependencies.append(Depends(_log_read_access))
 
 
 # --- Helpers ---
+async def _require_admin(request: Request) -> None:
+    user_id = (request.headers.get("x-user-id") or "").strip()
+    if not user_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Missing user context")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            u = await cur.fetchone()
+            if u and (u.get("role") or "").lower() == "admin":
+                return
+            await cur.execute(
+                """
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key = 'analytics.view'
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            p = await cur.fetchone()
+            if p:
+                return
+    from fastapi import HTTPException
+    raise HTTPException(status_code=403, detail="Admin access required")
+
+
 async def _allocated_student_ids(conn, mentor_id: str | None) -> list[str]:
     """Return the list of student ids visible to a given mentor.
 
@@ -174,6 +204,179 @@ async def get_admin_analytics(request: Request):
     data = await admin_analytics()
     audit_logger.log_data_access(request.headers.get("x-user-id", "anonymous"), _client_ip(request), "analytics_admin", record_count=1)
     return data
+
+
+@router.get("/admin/proctoring-behavior-summary")
+async def admin_proctoring_behavior_summary(
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+):
+    await _require_admin(request)
+    pool = await get_pool()
+
+    cards = {
+        "totalProctorEvents": 0,
+        "criticalProctorEvents": 0,
+        "uniqueSessions": 0,
+        "avgBehaviorTrustScore": 0,
+        "lowTrustAnalyses": 0,
+    }
+    by_test_type = []
+    by_severity = []
+    daily_trend = []
+    behavior_trust_distribution = []
+    recent_behavior_analyses = []
+
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            try:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM proctoring_events_unified
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    """,
+                    (days,),
+                )
+                cards["totalProctorEvents"] = int((await cur.fetchone() or {}).get("c") or 0)
+
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM proctoring_events_unified
+                    WHERE severity IN ('critical','high')
+                      AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    """,
+                    (days,),
+                )
+                cards["criticalProctorEvents"] = int((await cur.fetchone() or {}).get("c") or 0)
+
+                await cur.execute(
+                    """
+                    SELECT COUNT(DISTINCT session_id) AS c
+                    FROM proctoring_events_unified
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    """,
+                    (days,),
+                )
+                cards["uniqueSessions"] = int((await cur.fetchone() or {}).get("c") or 0)
+
+                await cur.execute(
+                    """
+                    SELECT test_type AS name, COUNT(*) AS value
+                    FROM proctoring_events_unified
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    GROUP BY test_type
+                    ORDER BY value DESC
+                    """,
+                    (days,),
+                )
+                by_test_type = [{"name": r["name"], "value": int(r["value"] or 0)} for r in (await cur.fetchall() or [])]
+
+                await cur.execute(
+                    """
+                    SELECT severity AS name, COUNT(*) AS value
+                    FROM proctoring_events_unified
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    GROUP BY severity
+                    ORDER BY value DESC
+                    """,
+                    (days,),
+                )
+                by_severity = [{"name": r["name"], "value": int(r["value"] or 0)} for r in (await cur.fetchall() or [])]
+
+                await cur.execute(
+                    """
+                    SELECT DATE(created_at) AS d, COUNT(*) AS c
+                    FROM proctoring_events_unified
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    GROUP BY DATE(created_at)
+                    ORDER BY d ASC
+                    """,
+                    (days,),
+                )
+                daily_trend = [
+                    {
+                        "date": r["d"].strftime("%b %d") if hasattr(r.get("d"), "strftime") else str(r.get("d")),
+                        "proctorEvents": int(r.get("c") or 0),
+                    }
+                    for r in (await cur.fetchall() or [])
+                ]
+            except Exception:
+                pass
+
+            try:
+                await cur.execute(
+                    """
+                    SELECT COALESCE(AVG(trust_score),0) AS avg_score
+                    FROM behavior_analyses
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    """,
+                    (days,),
+                )
+                cards["avgBehaviorTrustScore"] = round(float((await cur.fetchone() or {}).get("avg_score") or 0), 2)
+
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM behavior_analyses
+                    WHERE trust_score < 60
+                      AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    """,
+                    (days,),
+                )
+                cards["lowTrustAnalyses"] = int((await cur.fetchone() or {}).get("c") or 0)
+
+                await cur.execute(
+                    """
+                    SELECT trust_level AS name, COUNT(*) AS value
+                    FROM behavior_analyses
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    GROUP BY trust_level
+                    ORDER BY value DESC
+                    """,
+                    (days,),
+                )
+                behavior_trust_distribution = [
+                    {"name": r["name"] or "unknown", "value": int(r["value"] or 0)}
+                    for r in (await cur.fetchall() or [])
+                ]
+
+                await cur.execute(
+                    """
+                    SELECT id, session_id, user_id, trust_score, trust_level, created_at
+                    FROM behavior_analyses
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                    """,
+                    (days,),
+                )
+                recent_behavior_analyses = [
+                    {
+                        "id": r["id"],
+                        "sessionId": r["session_id"],
+                        "userId": r["user_id"],
+                        "trustScore": float(r.get("trust_score") or 0),
+                        "trustLevel": r.get("trust_level"),
+                        "createdAt": str(r.get("created_at") or ""),
+                    }
+                    for r in (await cur.fetchall() or [])
+                ]
+            except Exception:
+                pass
+
+    return {
+        "days": days,
+        "cards": cards,
+        "charts": {
+            "byTestType": by_test_type,
+            "bySeverity": by_severity,
+            "dailyTrend": daily_trend,
+            "behaviorTrustDistribution": behavior_trust_distribution,
+        },
+        "recentBehaviorAnalyses": recent_behavior_analyses,
+    }
 
 
 # --- Student Dashboard ---

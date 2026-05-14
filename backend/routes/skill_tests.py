@@ -9,7 +9,7 @@ import asyncio, json, re, datetime as _dt
 from datetime import datetime, timezone
 from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
-from database import get_pool
+from database import get_pool, get_primary_pool
 from services.ai_service import (
     generate_mcq_questions, generate_coding_problems, generate_sql_problems,
     generate_interview_question, evaluate_interview_answer, evaluate_sql_query,
@@ -19,6 +19,49 @@ from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/skill-tests", tags=["skill-tests"])
 audit_logger = get_audit_logger()
+
+
+async def _insert_unified_proctor_event(
+    *,
+    user_id: str,
+    attempt_id: str,
+    event_type: str,
+    severity: str,
+    details: str,
+    test_stage: str,
+):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    test_type VARCHAR(32) NOT NULL,
+                    test_id VARCHAR(64) NULL,
+                    attempt_id VARCHAR(64) NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(128) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    severity VARCHAR(16) NOT NULL,
+                    details LONGTEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_pu_test_type (test_type),
+                    INDEX idx_pu_user (user_id),
+                    INDEX idx_pu_session (session_id),
+                    INDEX idx_pu_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            await cur.execute(
+                """
+                INSERT INTO proctoring_events_unified
+                (test_type, test_id, attempt_id, user_id, session_id, event_type, severity, details)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                ("skill", None, attempt_id, user_id, attempt_id, event_type, severity, _json_str({"stage": test_stage, "details": details})),
+            )
+        await conn.commit()
 
 
 def _client_ip(request: Request) -> str:
@@ -210,11 +253,36 @@ async def get_test_attempts(test_id: int):
 # ═══════════════════════════════════════════════════════════════════
 
 @router.get("/student/available")
-async def student_available(studentId: str = Query(...)):
+async def student_available(studentId: str = Query(...), request: Request = None):
+    actor = (request.headers.get("x-user-id") or "").strip() if request else ""
+    can_assign = await _has_any_permission(actor, ["coding.assign"])
+    can_attempt = await _has_any_permission(actor, ["coding.attempt"])
+    if not (can_assign or (can_attempt and actor == studentId)):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM skill_tests WHERE is_active = TRUE ORDER BY created_at DESC")
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id INT NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_skill_alloc (test_id, student_id)
+                )
+                """
+            )
+            await cur.execute(
+                """
+                SELECT *
+                FROM skill_tests
+                WHERE is_active = TRUE
+                  AND id IN (SELECT test_id FROM skill_test_allocations WHERE student_id = %s)
+                ORDER BY created_at DESC
+                """,
+                (studentId,),
+            )
             tests = await cur.fetchall()
             enriched = []
             for t in tests:
@@ -225,12 +293,34 @@ async def student_available(studentId: str = Query(...)):
 
 @router.post("/{test_id}/start")
 async def start_attempt(test_id: int, request: Request, body: dict = Body(...)):
+    actor = (request.headers.get("x-user-id") or "").strip()
+    can_assign = await _has_any_permission(actor, ["coding.assign"])
+    can_attempt = await _has_any_permission(actor, ["coding.attempt"])
+    if not (can_assign or (can_attempt and actor == body.get("studentId"))):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id INT NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_skill_alloc (test_id, student_id)
+                )
+                """
+            )
             await cur.execute("SELECT * FROM skill_tests WHERE id = %s", (test_id,))
             test = await cur.fetchone()
             if not test: raise HTTPException(404, "Test not found")
+            await cur.execute(
+                "SELECT 1 FROM skill_test_allocations WHERE test_id=%s AND student_id=%s LIMIT 1",
+                (test_id, body["studentId"]),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(403, "This test is not assigned to this user")
             await cur.execute("SELECT id FROM skill_test_attempts WHERE test_id=%s AND student_id=%s", (test_id, body["studentId"]))
             attempts = await cur.fetchall()
             if len(attempts) >= test["attempt_limit"]:
@@ -779,6 +869,15 @@ async def proctoring_log(request: Request, body: dict = Body(...)):
                 await cur.execute("UPDATE skill_test_attempts SET mcq_violations = COALESCE(mcq_violations,0)+1 WHERE id=%s", (attempt_id,))
         await conn.commit()
 
+    await _insert_unified_proctor_event(
+        user_id=user_id or "",
+        attempt_id=str(attempt_id or ""),
+        event_type=str(event_type or "unknown"),
+        severity=str(severity or "low"),
+        details=str(body.get("details", "")),
+        test_stage=str(test_stage or "general"),
+    )
+
     # ── Trigger Proctor Intelligence Agent (background, non-blocking) ──
     aid = str(attempt_id) if attempt_id else ""
     if len(_skill_agent_counter) > _SKILL_AGENT_COUNTER_MAX:
@@ -880,3 +979,25 @@ async def admin_delete_submission(attempt_id: int):
             await cur.execute("DELETE FROM skill_test_attempts WHERE id=%s", (attempt_id,))
         await conn.commit()
     return {"success": True}
+async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
+    if not user_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            u = await cur.fetchone()
+            if u and u.get("role") == "admin":
+                return True
+            fmt = ",".join(["%s"] * len(permissions))
+            await cur.execute(
+                f"""
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
+                LIMIT 1
+                """,
+                [user_id, *permissions],
+            )
+            return bool(await cur.fetchone())

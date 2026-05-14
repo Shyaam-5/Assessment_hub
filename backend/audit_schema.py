@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     event_type VARCHAR(50) NOT NULL,
     user_id VARCHAR(255),
+    organization_id CHAR(36),
     ip_address VARCHAR(45),
     resource_id VARCHAR(255),
     resource_type VARCHAR(100),
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_timestamp (timestamp),
     INDEX idx_user_id (user_id),
+    INDEX idx_organization_id (organization_id),
     INDEX idx_event_type (event_type),
     INDEX idx_ip_address (ip_address),
     INDEX idx_status (status)
@@ -35,6 +37,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 CREATE TABLE IF NOT EXISTS auth_audit (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id VARCHAR(255),
+    organization_id CHAR(36),
     email VARCHAR(255),
     ip_address VARCHAR(45) NOT NULL,
     auth_method VARCHAR(50),
@@ -44,6 +47,7 @@ CREATE TABLE IF NOT EXISTS auth_audit (
     user_agent LONGTEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_user_id (user_id),
+    INDEX idx_organization_id (organization_id),
     INDEX idx_timestamp (timestamp),
     INDEX idx_ip_address (ip_address),
     INDEX idx_success (success)
@@ -75,6 +79,7 @@ CREATE TABLE IF NOT EXISTS admin_actions (
 CREATE TABLE IF NOT EXISTS data_access_audit (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id VARCHAR(255),
+    organization_id CHAR(36),
     data_type VARCHAR(100),
     query_type VARCHAR(50),
     filters JSON,
@@ -83,6 +88,7 @@ CREATE TABLE IF NOT EXISTS data_access_audit (
     timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_user_id (user_id),
+    INDEX idx_organization_id (organization_id),
     INDEX idx_timestamp (timestamp),
     INDEX idx_data_type (data_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -113,6 +119,7 @@ CREATE TABLE IF NOT EXISTS api_request_audit (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     request_id VARCHAR(255) UNIQUE,
     user_id VARCHAR(255),
+    organization_id CHAR(36),
     method VARCHAR(10),
     endpoint VARCHAR(500),
     query_string LONGTEXT,
@@ -124,6 +131,7 @@ CREATE TABLE IF NOT EXISTS api_request_audit (
     timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_user_id (user_id),
+    INDEX idx_organization_id (organization_id),
     INDEX idx_timestamp (timestamp),
     INDEX idx_endpoint (endpoint),
     INDEX idx_response_status (response_status)
@@ -209,6 +217,35 @@ async def create_audit_tables(db_connection) -> None:
                 statement = statement.strip()
                 if statement:
                     await cursor.execute(statement)
+
+            # Backward-compatible migration for existing deployments.
+            audit_col_migrations = [
+                ("audit_events", "organization_id", "CHAR(36) NULL"),
+                ("auth_audit", "organization_id", "CHAR(36) NULL"),
+                ("data_access_audit", "organization_id", "CHAR(36) NULL"),
+                ("api_request_audit", "organization_id", "CHAR(36) NULL"),
+            ]
+            for table_name, column_name, ddl in audit_col_migrations:
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = %s
+                      AND COLUMN_NAME = %s
+                    """,
+                    (table_name, column_name),
+                )
+                row = await cursor.fetchone()
+                if isinstance(row, dict):
+                    exists = int(row.get("c") or 0) > 0
+                else:
+                    exists = int((row[0] if row else 0) or 0) > 0
+                if not exists:
+                    await cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
+                    await cursor.execute(
+                        f"CREATE INDEX idx_{table_name}_{column_name} ON {table_name} ({column_name})"
+                    )
             
             await db_connection.commit()
             print("[OK] Audit tables created successfully")

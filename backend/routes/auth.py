@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from logging_config import LogConfig
 import secrets
 import string
@@ -260,7 +261,11 @@ async def login(body: LoginRequest, request: Request):
 
 def _verify_google_credential_jwt(credential: str) -> dict:
     """Blocking call: validate OIDC token and return claims (email, email_verified, sub, ...)."""
-    if not settings.GOOGLE_OAUTH_CLIENT_ID:
+    if "GOOGLE_OAUTH_CLIENT_ID" in os.environ:
+        google_client_id = (os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or "").strip()
+    else:
+        google_client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+    if not google_client_id:
         raise HTTPException(
             status_code=503,
             detail="Google Sign-In is not configured on this server (missing GOOGLE_OAUTH_CLIENT_ID).",
@@ -269,7 +274,7 @@ def _verify_google_credential_jwt(credential: str) -> dict:
         return google_id_token.verify_oauth2_token(
             credential,
             google_requests.Request(),
-            settings.GOOGLE_OAUTH_CLIENT_ID,
+            google_client_id,
             clock_skew_in_seconds=settings.GOOGLE_OAUTH_CLOCK_SKEW_SECONDS,
         )
     except ValueError as e:

@@ -19,7 +19,7 @@ import random
 from fastapi import APIRouter, HTTPException, Request, Body, Depends
 from fastapi.responses import JSONResponse
 
-from database import get_pool
+from database import get_pool, get_primary_pool
 from services.comm_service import (
     SENTENCES_A,
     SENTENCES_B,
@@ -37,6 +37,74 @@ from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/communication", tags=["communication"])
 audit_logger = get_audit_logger()
+
+
+async def _insert_unified_proctor_event(
+    test_type: str,
+    user_id: str,
+    session_id: str,
+    event_type: str,
+    severity: str,
+    details: str,
+    test_id: str | None = None,
+    attempt_id: str | None = None,
+):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    test_type VARCHAR(32) NOT NULL,
+                    test_id VARCHAR(64) NULL,
+                    attempt_id VARCHAR(64) NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(128) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    severity VARCHAR(16) NOT NULL,
+                    details LONGTEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_pu_test_type (test_type),
+                    INDEX idx_pu_user (user_id),
+                    INDEX idx_pu_session (session_id),
+                    INDEX idx_pu_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            await cur.execute(
+                """
+                INSERT INTO proctoring_events_unified
+                (test_type, test_id, attempt_id, user_id, session_id, event_type, severity, details)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (test_type, test_id, attempt_id, user_id, session_id, event_type, severity, details),
+            )
+        await conn.commit()
+
+
+async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
+    if not user_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            u = await cur.fetchone()
+            if u and u.get("role") == "admin":
+                return True
+            fmt = ",".join(["%s"] * len(permissions))
+            await cur.execute(
+                f"""
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
+                LIMIT 1
+                """,
+                [user_id, *permissions],
+            )
+            return bool(await cur.fetchone())
 
 
 def _client_ip(request: Request) -> str:
@@ -452,6 +520,17 @@ async def proctoring_log(request: Request):
                 (user_id, session_id, event_type, severity, str(details)),
             )
         await conn.commit()
+
+    await _insert_unified_proctor_event(
+        test_type="communication",
+        test_id=str(data.get("testId") or "") or None,
+        attempt_id=str(data.get("attemptId") or "") or None,
+        user_id=str(user_id or ""),
+        session_id=str(session_id or "default"),
+        event_type=str(event_type or "unknown"),
+        severity=str(severity or "low"),
+        details=str(details or ""),
+    )
 
     # ── Trigger Proctor Intelligence Agent (background, non-blocking) ──
     # Evict old entries if counter grows too large
@@ -874,13 +953,38 @@ async def get_comm_test_attempts(test_id: int):
 # ─── Student: Discover & Take Tests ─────────────────────────────
 
 @router.get("/tests/student/available")
-async def student_available_comm_tests(studentId: str):
+async def student_available_comm_tests(studentId: str, request: Request):
     """Get available communication tests for a student."""
+    actor = (request.headers.get("x-user-id") or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    can_attempt = await _has_any_permission(actor, ["communication.attempt"])
+    if not (can_assign or (can_attempt and actor == studentId)):
+        raise HTTPException(status_code=403, detail="Permission denied")
     await _ensure_comm_tables()
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM comm_tests WHERE is_active = TRUE ORDER BY created_at DESC")
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS comm_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id INT NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_comm_alloc (test_id, student_id)
+                )
+                """
+            )
+            await cur.execute(
+                """
+                SELECT *
+                FROM comm_tests
+                WHERE is_active = TRUE
+                  AND id IN (SELECT test_id FROM comm_test_allocations WHERE student_id = %s)
+                ORDER BY created_at DESC
+                """,
+                (studentId,),
+            )
             tests = await cur.fetchall()
 
             enriched = []
@@ -908,6 +1012,11 @@ async def student_available_comm_tests(studentId: str):
 @router.post("/tests/{test_id}/start")
 async def start_comm_test(test_id: int, request: Request):
     """Start a communication test attempt."""
+    actor = (request.headers.get("x-user-id") or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    can_attempt = await _has_any_permission(actor, ["communication.attempt"])
+    if not (can_assign or can_attempt):
+        raise HTTPException(status_code=403, detail="Permission denied")
     await _ensure_comm_tables()
     data = await request.json()
     student_id = data.get("studentId")
@@ -915,14 +1024,33 @@ async def start_comm_test(test_id: int, request: Request):
 
     if not student_id:
         raise HTTPException(400, "studentId is required")
+    if not (can_assign or (can_attempt and actor == student_id)):
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS comm_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id INT NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_comm_alloc (test_id, student_id)
+                )
+                """
+            )
             await cur.execute("SELECT * FROM comm_tests WHERE id = %s", (test_id,))
             test = await cur.fetchone()
             if not test:
                 raise HTTPException(404, "Test not found")
+            await cur.execute(
+                "SELECT 1 FROM comm_test_allocations WHERE test_id=%s AND student_id=%s LIMIT 1",
+                (test_id, student_id),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(status_code=403, detail="This test is not assigned to this user")
 
             await cur.execute(
                 "SELECT id FROM comm_test_attempts WHERE test_id=%s AND student_id=%s",
@@ -997,6 +1125,9 @@ async def get_comm_attempt(attempt_id: int):
 @router.post("/tests/attempt/{attempt_id}/submit-module")
 async def submit_comm_module(attempt_id: int, request: Request):
     """Submit results for a single module within an attempt."""
+    actor = (request.headers.get("x-user-id") or "").strip()
+    if not await _has_any_permission(actor, ["communication.attempt", "communication.assign"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     await _ensure_comm_tables()
     data = await request.json()
     module = data.get("module", "").upper()  # A, B, C, D

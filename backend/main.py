@@ -266,9 +266,10 @@ async def add_corp_header(request, call_next):
     )
     should_resolve_tenant = not any(path.startswith(p) for p in tenant_exempt_prefixes)
     tenant_pool = None
+    resolved_org_id = (request.headers.get("x-org-id") or "").strip()
 
     if should_resolve_tenant:
-        org_id = (request.headers.get("x-org-id") or "").strip()
+        org_id = resolved_org_id
         user_id = (request.headers.get("x-user-id") or "").strip()
         try:
             user_org_id = ""
@@ -284,6 +285,7 @@ async def add_corp_header(request, call_next):
                         from fastapi.responses import JSONResponse
                         return JSONResponse({"detail": "Organization context mismatch"}, status_code=403)
                     org_id = user_org_id
+                    resolved_org_id = user_org_id
 
             if org_id:
                 primary = await get_primary_pool()
@@ -295,10 +297,12 @@ async def add_corp_header(request, call_next):
                     from fastapi.responses import JSONResponse
                     return JSONResponse({"detail": "Organization is inactive. Contact the super admin."}, status_code=403)
                 tenant_pool = await get_tenant_pool_by_org_id(org_id)
+                resolved_org_id = org_id
         except Exception as exc:
             logger.warning("Tenant context resolution failed; using primary DB. path=%s err=%s", path, exc)
 
     try:
+        request.state.organization_id = resolved_org_id or None
         set_request_pool(tenant_pool)
         response = await call_next(request)
     finally:
