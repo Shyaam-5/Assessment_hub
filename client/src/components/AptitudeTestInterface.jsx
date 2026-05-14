@@ -5,6 +5,7 @@ import socketService from '@/services/socketService'
 import { useCamera, useObjectDetection } from '@/hooks/useProctoring'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
+const EMPTY_QUESTIONS = []
 
 // Seeded random shuffle - ensures same student gets same order on refresh
 function seededShuffle(array, seed) {
@@ -52,7 +53,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
     const [showResult, setShowResult] = useState(false)
 
     // Shuffle questions based on student ID + test ID (deterministic per student)
-    const rawQuestions = test.questions || []
+    const rawQuestions = test.questions || EMPTY_QUESTIONS
     const questions = useMemo(() => {
         const seed = generateSeed(user.id, test.id)
         return seededShuffle(rawQuestions, seed)
@@ -147,7 +148,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             console.error('Auto-terminate submission failed:', err)
             setTimeout(() => { onClose() }, 3000)
         }
-    }, [user, test, onClose, onComplete])
+    }, [user.id, user.name, user.email, test.id, test.title, test.duration, onClose, onComplete])
 
     // ── Unified violation recorder ──
     const recordViolation = useCallback((eventType = 'unknown', severity = 'low') => {

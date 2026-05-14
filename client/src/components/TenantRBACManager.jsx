@@ -25,8 +25,14 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     })
     const [roleForm, setRoleForm] = useState({ name: '', description: '', permissions: [] })
     const [userForm, setUserForm] = useState({ name: '', email: '', password: '', roleId: '', phone: '', batch: '' })
+    const [creatingOrg, setCreatingOrg] = useState(false)
 
-    const headers = useMemo(() => ({ 'x-user-id': user?.id || '' }), [user?.id])
+    const headers = useMemo(() => {
+        const h = { 'x-user-id': user?.id || '' }
+        const token = localStorage.getItem('authToken') || ''
+        if (token) h.Authorization = `Bearer ${token}`
+        return h
+    }, [user?.id])
 
     const flatPermissions = useMemo(
         () => Object.values(permissionCatalog || {}).flatMap((arr) => arr || []),
@@ -34,11 +40,46 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     )
 
     const fetchOrgs = async () => {
-        const res = await axios.get(`${API_BASE}/platform/organizations`, { headers })
-        const allOrgs = res.data || []
-        const scoped = orgAdminOnly ? allOrgs.filter((o) => o.id === user?.organizationId) : allOrgs
-        setOrgs(scoped)
-        if (!selectedOrg && scoped.length) setSelectedOrg(scoped[0].id)
+        if (orgAdminOnly) {
+            const orgId = user?.organizationId || ''
+            if (!orgId) {
+                setOrgs([])
+                setSelectedOrg('')
+                setMessage('No organization is mapped to this admin account')
+                return
+            }
+            try {
+                const res = await axios.get(`${API_BASE}/orgs/${orgId}/analytics`, { headers })
+                const org = res.data
+                    ? {
+                        id: orgId,
+                        name: res.data.name || 'Organization',
+                        code: res.data.code || '',
+                        type: res.data.type || 'institutional',
+                        is_active: !!res.data.is_active,
+                    }
+                    : null
+                const scoped = org ? [org] : []
+                setOrgs(scoped)
+                setSelectedOrg(orgId)
+                setMessage('')
+            } catch (e) {
+                setOrgs([])
+                setSelectedOrg('')
+                setMessage(e?.response?.data?.detail || 'Failed to load your organization')
+            }
+            return
+        }
+
+        try {
+            const res = await axios.get(`${API_BASE}/platform/organizations`, { headers })
+            const allOrgs = res.data || []
+            setOrgs(allOrgs)
+            if (!selectedOrg && allOrgs.length) setSelectedOrg(allOrgs[0].id)
+        } catch (e) {
+            setOrgs([])
+            setMessage(e?.response?.data?.detail || 'Failed to load organizations')
+        }
     }
 
     const toggleOrgStatus = async (org) => {
@@ -94,6 +135,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             setMessage('DB URL is required')
             return
         }
+        setCreatingOrg(true)
         try {
             await axios.post(`${API_BASE}/platform/organizations`, orgForm, { headers })
             setMessage('Organization created')
@@ -101,6 +143,8 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             await fetchOrgs()
         } catch (e) {
             setMessage(e?.response?.data?.detail || 'Organization creation failed')
+        } finally {
+            setCreatingOrg(false)
         }
     }
 
@@ -147,13 +191,15 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                     <input style={input} type="password" placeholder="Org Admin Password" value={orgForm.adminPassword} onChange={(e) => setOrgForm({ ...orgForm, adminPassword: e.target.value })} />
                 </div>
                 <div style={{ marginTop: 12 }}>
-                    <button style={btn} onClick={createOrganization}>Create Organization</button>
+                    <button style={btn} onClick={createOrganization} disabled={creatingOrg}>
+                        {creatingOrg ? 'Creating...' : 'Create Organization'}
+                    </button>
                 </div>
             </div>
             )}
 
             <div style={card}>
-                <h3 style={{ marginTop: 0 }}>2. Select Organization</h3>
+                <h3 style={{ marginTop: 0 }}>{orgAdminOnly ? 'Organization' : '2. Select Organization'}</h3>
                 <select style={input} value={selectedOrg} onChange={(e) => setSelectedOrg(e.target.value)}>
                     <option value="">Select organization</option>
                     {orgs.map((o) => <option key={o.id} value={o.id}>{o.name} ({o.code})</option>)}
@@ -180,7 +226,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
 
             {!superAdminOnly && (
             <div style={card}>
-                <h3 style={{ marginTop: 0 }}>3. Create Role with Checkbox Permissions</h3>
+                <h3 style={{ marginTop: 0 }}>{orgAdminOnly ? 'Create Role' : '3. Create Role with Checkbox Permissions'}</h3>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
                     <input style={input} placeholder="Role name" value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} />
                     <input style={input} placeholder="Description" value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} />
@@ -201,7 +247,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
 
             {!superAdminOnly && (
             <div style={card}>
-                <h3 style={{ marginTop: 0 }}>4. Create User and Assign Role</h3>
+                <h3 style={{ marginTop: 0 }}>{orgAdminOnly ? 'Create User and Assign Role' : '4. Create User and Assign Role'}</h3>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                     <input style={input} placeholder="User name" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} />
                     <input style={input} placeholder="Email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} />

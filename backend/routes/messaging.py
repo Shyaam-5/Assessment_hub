@@ -1,4 +1,4 @@
-"""Direct messaging routes."""
+﻿"""Direct messaging routes."""
 
 import uuid
 import logging
@@ -26,7 +26,7 @@ def _client_ip(request: Request) -> str:
 async def _log_read_access(request: Request):
     if request.method == "GET":
         audit_logger.log_data_access(
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="messaging_read",
             query_params={"path": request.url.path, "query": request.url.query},
@@ -193,3 +193,4 @@ async def send_message(body: MessageSend, request: Request):
         "fileUrl": body.fileUrl,
         "createdAt": str(now),
     }
+

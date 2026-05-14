@@ -1,4 +1,4 @@
-"""Code Execution using Judge0 API (free, no local dependencies).
+﻿"""Code Execution using Judge0 API (free, no local dependencies).
 SQL execution uses DuckDB for in-memory database operations.
 """
 
@@ -25,7 +25,7 @@ def _client_ip(request: Request) -> str:
         return request.headers["cf-connecting-ip"]
     return request.client.host if request.client else "UNKNOWN"
 
-# ─── Judge0 Language Mapping ──────────────────────────────────
+# â”€â”€â”€ Judge0 Language Mapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # See: https://judge0.com/languages
 _JUDGE0_LANGUAGES = {
     "python": 71,          # Python (3.8.1)
@@ -46,7 +46,7 @@ _JUDGE0_LANGUAGES = {
 
 _JUDGE0_API = "https://ce.judge0.com/submissions"
 
-# ─── Safety: block dangerous code patterns ─────────────────────
+# â”€â”€â”€ Safety: block dangerous code patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _DANGEROUS_PATTERNS_PY = [
     r'\bos\.system\b', r'\bos\.popen\b', r'\bos\.exec\w*\b',
     r'\bsubprocess\b', r'\b__import__\b', r'\beval\s*\(',
@@ -218,12 +218,12 @@ async def run_code(body: RunRequest, request: Request):
     lang_lower = body.language.lower()
     logger.info("Code execution request language=%s", body.language)
 
-    # Safety check — block dangerous code patterns
+    # Safety check â€” block dangerous code patterns
     safety_err = _check_code_safety(body.code, lang_lower)
     if safety_err:
         audit_logger.log_event(
             AuditEventType.PERMISSION_DENIED,
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="code_execution",
             action="Blocked unsafe code execution request",
@@ -238,7 +238,7 @@ async def run_code(body: RunRequest, request: Request):
             result = await _execute_sql_duckdb(body.sqlSchema, body.code)
             audit_logger.log_event(
                 AuditEventType.RESOURCE_ACCESSED,
-                user_id=request.headers.get("x-user-id", "anonymous"),
+                user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
                 ip_address=_client_ip(request),
                 resource_type="code_execution",
                 action="SQL code executed",
@@ -252,7 +252,7 @@ async def run_code(body: RunRequest, request: Request):
             result = await _execute_with_judge0(body.language, body.code, body.stdin or "")
             audit_logger.log_event(
                 AuditEventType.RESOURCE_ACCESSED,
-                user_id=request.headers.get("x-user-id", "anonymous"),
+                user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
                 ip_address=_client_ip(request),
                 resource_type="code_execution",
                 action="Code executed",
@@ -267,3 +267,4 @@ async def run_code(body: RunRequest, request: Request):
             "error": f"Execution error: {str(e)}",
             "exitCode": 1,
         }
+

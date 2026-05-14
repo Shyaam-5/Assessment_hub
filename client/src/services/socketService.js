@@ -47,13 +47,15 @@ class SocketService {
     // Mentor/Admin joins monitoring
     joinMonitoring(userId, role, mentorId = null) {
         if (!this.socket) this.connect();
-        this.socket.emit('join_monitoring', { userId, role, mentorId });
+        const token = localStorage.getItem('authToken') || '';
+        this.socket.emit('join_monitoring', { userId, role, mentorId, token });
     }
 
     // Student joins their session room (to receive agent commands like terminate)
     joinStudentSession(studentId, sessionId) {
         if (!this.socket) this.connect();
-        this.socket.emit('join_student_session', { studentId, sessionId });
+        const token = localStorage.getItem('authToken') || '';
+        this.socket.emit('join_student_session', { studentId, sessionId, token });
     }
 
     // Listen for agent terminate signal

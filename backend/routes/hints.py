@@ -1,4 +1,4 @@
-"""AI-powered hint generation route."""
+﻿"""AI-powered hint generation route."""
 
 import logging
 from logging_config import LogConfig
@@ -56,7 +56,7 @@ Keep the hint concise (2-4 sentences). Focus on the conceptual approach, not the
         hint = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
         audit_logger.log_event(
             AuditEventType.RESOURCE_ACCESSED,
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="hints",
             action="Hint generated",
@@ -64,3 +64,4 @@ Keep the hint concise (2-4 sentences). Focus on the conceptual approach, not the
         return {"hint": hint, "success": True}
     except Exception as e:
         return {"hint": "Sorry, hint generation failed. Try breaking the problem into smaller parts.", "success": False, "error": str(e)}
+

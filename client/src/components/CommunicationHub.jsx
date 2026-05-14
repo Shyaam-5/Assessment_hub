@@ -198,6 +198,12 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             // Pick first local webcam to avoid Windows phone-camera picker
             const devices = await navigator.mediaDevices.enumerateDevices()
             const webcam = devices.find(d => d.kind === 'videoinput' && d.deviceId)
+            if (!webcam) {
+                setCameraError('No camera device found. Connect a webcam to continue.')
+                setCameraReady(false)
+                showWarning('Camera Required', 'No camera detected. Please connect a webcam.', 'high')
+                return
+            }
             const videoConstraints = webcam?.deviceId
                 ? { deviceId: { exact: webcam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
                 : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
@@ -214,7 +220,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             setCameraReady(false)
             logViolation('camera_denied', 'critical', err.message)
         }
-    }, [logViolation])
+    }, [logViolation, showWarning, cfg.camera])
 
     // ─── Camera blocked detection (stricter: 1s interval) ───
     useEffect(() => {

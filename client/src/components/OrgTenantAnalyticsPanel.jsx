@@ -14,7 +14,12 @@ export default function OrgTenantAnalyticsPanel({ user }) {
     const [data, setData] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
-    const headers = useMemo(() => ({ 'x-user-id': user?.id || '' }), [user?.id])
+    const headers = useMemo(() => {
+        const h = { 'x-user-id': user?.id || '' }
+        const token = localStorage.getItem('authToken') || ''
+        if (token) h.Authorization = `Bearer ${token}`
+        return h
+    }, [user?.id])
     const orgId = user?.organizationId || ''
 
     useEffect(() => {

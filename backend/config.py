@@ -19,7 +19,7 @@ class Settings:
 
     def __init__(self):
         # --- Database ---
-        self.DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
+        self.DATABASE_URL: str = self._normalize_db_url(os.getenv("DATABASE_URL", "").strip())
         db = urlparse(self.DATABASE_URL)
         self.DB_HOST: str = db.hostname or "localhost"
         self.DB_PORT: int = int(db.port or 4000)
@@ -45,7 +45,26 @@ class Settings:
         # --- Server ---
         self.PORT: int = int(os.getenv("PORT", "8000"))
         self.SERVER_LAN_IP: str = os.getenv("SERVER_LAN_IP", "localhost")
-        self.SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production-secret-key")
+        self.SECRET_KEY: str = os.getenv("SECRET_KEY", "").strip()
+        if not self.SECRET_KEY:
+            self.SECRET_KEY = os.urandom(32).hex()
+            logger.warning("SECRET_KEY is not set; using ephemeral runtime key.")
+        self.JWT_ACCESS_TOKEN_EXPIRES_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_MINUTES", "720"))
+        self.STARTUP_DB_PREFLIGHT: bool = os.getenv("STARTUP_DB_PREFLIGHT", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.STARTUP_DB_PREFLIGHT_TENANTS: bool = os.getenv("STARTUP_DB_PREFLIGHT_TENANTS", "false").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.STARTUP_TENANT_SCHEMA_RECONCILE: bool = os.getenv("STARTUP_TENANT_SCHEMA_RECONCILE", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         # --- CORS ---
         _origins = os.getenv("ALLOWED_ORIGINS", "")
@@ -89,11 +108,11 @@ class Settings:
         ).strip().lower() in ("1", "true", "yes")
         self.SUPER_ADMIN_1_ID: str = os.getenv("SUPER_ADMIN_1_ID", "admin-srikanth").strip()
         self.SUPER_ADMIN_1_NAME: str = os.getenv("SUPER_ADMIN_1_NAME", "Srikanth V").strip()
-        self.SUPER_ADMIN_1_EMAIL: str = os.getenv("SUPER_ADMIN_1_EMAIL", "srikanthvoffl@gmail.com").strip()
+        self.SUPER_ADMIN_1_EMAIL: str = os.getenv("SUPER_ADMIN_1_EMAIL", "").strip()
         self.SUPER_ADMIN_1_PASSWORD: str = os.getenv("SUPER_ADMIN_1_PASSWORD", "").strip()
         self.SUPER_ADMIN_2_ID: str = os.getenv("SUPER_ADMIN_2_ID", "admin-shyaam").strip()
         self.SUPER_ADMIN_2_NAME: str = os.getenv("SUPER_ADMIN_2_NAME", "Shyaam Kumar").strip()
-        self.SUPER_ADMIN_2_EMAIL: str = os.getenv("SUPER_ADMIN_2_EMAIL", "shyaamkumar3105@gmail.com").strip()
+        self.SUPER_ADMIN_2_EMAIL: str = os.getenv("SUPER_ADMIN_2_EMAIL", "").strip()
         self.SUPER_ADMIN_2_PASSWORD: str = os.getenv("SUPER_ADMIN_2_PASSWORD", "").strip()
 
         # --- Environment Scan (prescan) settings ---
@@ -128,6 +147,12 @@ class Settings:
                 seen.add(k)
                 unique.append(k)
         return unique
+
+    def _normalize_db_url(self, raw: str) -> str:
+        v = (raw or "").strip()
+        if v.upper().startswith("DATABASE_URL="):
+            v = v.split("=", 1)[1].strip()
+        return v
 
 
 settings = Settings()

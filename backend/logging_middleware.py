@@ -29,7 +29,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         # Extract request info
         start_time = time.time()
         request_id = request.headers.get("x-request-id") or str(uuid4())
-        user_id = request.headers.get("x-user-id", "anonymous")
+        user_id = getattr(request.state, "auth_user_id", None) or "anonymous"
         organization_id = (
             request.headers.get("x-org-id")
             or getattr(request.state, "organization_id", None)
@@ -232,11 +232,13 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         
         for pattern, event_type in sensitive_patterns.items():
             if path.startswith(pattern):
+                parts = path.split("/")
+                resource_type = parts[2] if len(parts) > 2 else "unknown"
                 self.audit_logger.log_event(
                     event_type=event_type,
                     user_id=user_id if user_id != "anonymous" else None,
                     ip_address=client_ip,
-                    resource_type=path.split("/")[2],
+                    resource_type=resource_type,
                     action=f"{method} {path}",
                     details={
                         "status_code": status_code,
@@ -272,7 +274,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.logger = logging.getLogger("security")
         self.audit_logger = get_audit_logger()
-        self.request_counts = {}  # IP -> request count
+        self.request_counts = {}  # IP -> (window_start_ts, request_count)
         self.max_requests_per_minute = 60
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -283,15 +285,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         else:
             client_ip = request.client.host if request.client else "unknown"
         
-        # Check rate limit (simple in-memory implementation)
-        current_count = self.request_counts.get(client_ip, 0) + 1
-        self.request_counts[client_ip] = current_count
+        now = time.time()
+        window_start, current_count = self.request_counts.get(client_ip, (now, 0))
+        if now - window_start >= 60:
+            window_start, current_count = now, 0
+        current_count += 1
+        self.request_counts[client_ip] = (window_start, current_count)
         
         if current_count > self.max_requests_per_minute:
             self.logger.warning(f"Rate limit exceeded for IP: {client_ip}")
             self.audit_logger.log_event(
                 event_type=AuditEventType.PERMISSION_DENIED,
-                user_id=request.headers.get("x-user-id", "anonymous"),
+                user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
                 ip_address=client_ip,
                 action="Rate limit exceeded",
                 details={"request_count": current_count},

@@ -224,6 +224,21 @@ From `backend/`:
 pytest -q
 ```
 
+### DB preflight before changing `DATABASE_URL`
+
+From `backend/`, run:
+
+```bash
+python scripts/db_preflight.py --db-url "mysql://user:password@host:port/database"
+```
+
+It validates:
+- DB connectivity + TLS setup
+- Required tables/columns for this app
+- Basic DB privileges (`CREATE`, `ALTER`, `SELECT/INSERT/UPDATE`, `DROP`) using a temporary probe table
+
+If any check prints `[FAIL]`, fix DB grants/schema before switching production traffic.
+
 ---
 
 ## 6. Security notes

@@ -1,4 +1,4 @@
-"""Global test routes: CRUD for tests, questions, submissions, and AI reports."""
+﻿"""Global test routes: CRUD for tests, questions, submissions, and AI reports."""
 
 import json
 import asyncio
@@ -39,26 +39,6 @@ async def _insert_unified_proctor_event(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
-                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    test_type VARCHAR(32) NOT NULL,
-                    test_id VARCHAR(64) NULL,
-                    attempt_id VARCHAR(64) NULL,
-                    user_id VARCHAR(64) NOT NULL,
-                    session_id VARCHAR(128) NOT NULL,
-                    event_type VARCHAR(64) NOT NULL,
-                    severity VARCHAR(16) NOT NULL,
-                    details LONGTEXT,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_pu_test_type (test_type),
-                    INDEX idx_pu_user (user_id),
-                    INDEX idx_pu_session (session_id),
-                    INDEX idx_pu_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
             await cur.execute(
                 """
                 INSERT INTO proctoring_events_unified
@@ -106,7 +86,7 @@ async def _log_read_access(request: Request):
     if request.method != "GET":
         return
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="global_tests_read",
         query_params={"path": request.url.path, "query": request.url.query},
@@ -114,6 +94,21 @@ async def _log_read_access(request: Request):
 
 
 router.dependencies.append(Depends(_log_read_access))
+
+
+async def _require_test_permission(request: Request, permissions: list[str]) -> str:
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, permissions):
+        raise HTTPException(403, "Permission denied")
+    return actor
+
+
+def _sanitize_question_for_student(item: dict) -> dict:
+    clean = dict(item)
+    clean.pop("correctAnswer", None)
+    clean.pop("explanation", None)
+    clean.pop("solutionCode", None)
+    return clean
 
 LANGUAGE_MAP = {
     "Python": {"language": "python", "version": "3.10.0"},
@@ -125,7 +120,7 @@ LANGUAGE_MAP = {
 }
 
 
-# ─── Request Bodies ────────────────────────────────────────────
+# â”€â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class GlobalTestCreate(BaseModel):
     title: str = "Untitled"
@@ -184,7 +179,7 @@ class GlobalTestSubmit(BaseModel):
     terminationReason: Optional[str] = None
 
 
-# ─── Helpers ───────────────────────────────────────────────────
+# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _fmt_dt(iso: Optional[str]) -> Optional[str]:
     if not iso or not iso.strip():
@@ -468,14 +463,22 @@ async def _run_sql_and_compare(schema: str, query: str, expected_output: str) ->
         return {"isCorrect": False, "output": str(e)}
 
 
-# ─── CRUD Routes ───────────────────────────────────────────────
+# â”€â”€â”€ CRUD Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/global-tests")
 async def list_global_tests(
+    request: Request,
     status: Optional[str] = None,
     type: Optional[str] = None,
     studentId: Optional[str] = None,
 ):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_manage = await _has_any_permission(actor, ["tests.create", "tests.update", "tests.assign", "tests.delete"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_manage or can_attempt):
+        raise HTTPException(403, "Permission denied")
+    if can_attempt and not can_manage:
+        studentId = actor
     pool = await get_pool()
     query = "SELECT * FROM global_tests WHERE 1=1"
     params: list = []
@@ -497,28 +500,22 @@ async def list_global_tests(
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                await cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS global_test_allocations (
-                        id CHAR(36) NOT NULL PRIMARY KEY,
-                        test_id CHAR(36) NOT NULL,
-                        student_id VARCHAR(64) NOT NULL,
-                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE KEY uniq_global_alloc (test_id, student_id)
-                    )
-                    """
-                )
                 await cur.execute(query, params)
                 rows = await cur.fetchall()
         return [_clean_global_test(t) for t in rows]
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Failed to list global tests")
 
 
 @router.get("/global-tests/{test_id}")
-async def get_global_test(test_id: str):
+async def get_global_test(test_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_manage = await _has_any_permission(actor, ["tests.create", "tests.update", "tests.assign", "tests.delete"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_manage or can_attempt):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -556,6 +553,15 @@ async def get_global_test(test_id: str):
                 by_section[sec].append(item)
 
         result = _clean_global_test(t)
+        if can_attempt and not can_manage:
+            async with pool.acquire() as conn:
+                async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    await cur.execute(
+                        "SELECT 1 FROM global_test_allocations WHERE test_id=%s AND student_id=%s LIMIT 1",
+                        (test_id, actor),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(403, "This test is not assigned to this user")
         result["questionsBySection"] = by_section
         result["questions"] = [
             {
@@ -570,17 +576,24 @@ async def get_global_test(test_id: str):
             }
             for q in questions
         ]
+        if can_attempt and not can_manage:
+            result["questionsBySection"] = {
+                k: [_sanitize_question_for_student(i) for i in v]
+                for k, v in result["questionsBySection"].items()
+            }
+            result["questions"] = [_sanitize_question_for_student(i) for i in result["questions"]]
         return result
     except HTTPException:
         raise
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
 @router.post("/global-tests")
 async def create_global_test(body: GlobalTestCreate, request: Request):
+    await _require_test_permission(request, ["tests.create"])
     pool = await get_pool()
     test_id = str(uuid.uuid4())
     if body.duration <= 0:
@@ -627,7 +640,7 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
 
         audit_logger.log_event(
             AuditEventType.ADMIN_TEST_CREATED,
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_id=test_id,
             resource_type="global_test",
@@ -648,11 +661,12 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
 @router.put("/global-tests/{test_id}")
 async def update_global_test(test_id: str, body: GlobalTestUpdate, request: Request):
+    await _require_test_permission(request, ["tests.update", "tests.create"])
     pool = await get_pool()
     if body.duration is not None and body.duration <= 0:
         raise HTTPException(400, "duration must be greater than 0")
@@ -718,7 +732,7 @@ async def update_global_test(test_id: str, body: GlobalTestUpdate, request: Requ
             await conn.commit()
         audit_logger.log_event(
             AuditEventType.ADMIN_TEST_MODIFIED,
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_id=test_id,
             resource_type="global_test",
@@ -729,11 +743,12 @@ async def update_global_test(test_id: str, body: GlobalTestUpdate, request: Requ
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
 @router.delete("/global-tests/{test_id}")
 async def delete_global_test(test_id: str, request: Request):
+    await _require_test_permission(request, ["tests.delete", "tests.update", "tests.create"])
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -756,7 +771,7 @@ async def delete_global_test(test_id: str, request: Request):
             await conn.commit()
         audit_logger.log_event(
             AuditEventType.ADMIN_TEST_DELETED,
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_id=test_id,
             resource_type="global_test",
@@ -768,13 +783,14 @@ async def delete_global_test(test_id: str, request: Request):
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
-# ─── Question routes ──────────────────────────────────────────
+# â”€â”€â”€ Question routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/global-tests/{test_id}/questions")
-async def add_questions(test_id: str, body: QuestionBatch):
+async def add_questions(test_id: str, body: QuestionBatch, request: Request):
+    await _require_test_permission(request, ["tests.update", "tests.create"])
     if body.section not in SECTIONS:
         raise HTTPException(400, f"Invalid section. Use: {', '.join(SECTIONS)}")
     if not body.questions:
@@ -830,11 +846,12 @@ async def add_questions(test_id: str, body: QuestionBatch):
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
 @router.delete("/global-tests/{test_id}/questions")
-async def delete_questions(test_id: str, section: Optional[str] = None):
+async def delete_questions(test_id: str, request: Request, section: Optional[str] = None):
+    await _require_test_permission(request, ["tests.update", "tests.create"])
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -855,11 +872,16 @@ async def delete_questions(test_id: str, section: Optional[str] = None):
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
 @router.get("/global-tests/{test_id}/questions")
-async def get_questions(test_id: str, section: Optional[str] = None):
+async def get_questions(test_id: str, request: Request, section: Optional[str] = None):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_manage = await _has_any_permission(actor, ["tests.create", "tests.update", "tests.assign", "tests.delete"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_manage or can_attempt):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     try:
         q = "SELECT * FROM test_questions WHERE test_id = %s"
@@ -874,7 +896,7 @@ async def get_questions(test_id: str, section: Optional[str] = None):
                 await cur.execute(q, p)
                 rows = await cur.fetchall()
 
-        return [
+        payload = [
             {
                 "id": r["question_id"],
                 "testId": r["test_id"],
@@ -893,10 +915,24 @@ async def get_questions(test_id: str, section: Optional[str] = None):
             }
             for r in rows
         ]
+        if can_attempt and not can_manage:
+            async with pool.acquire() as conn:
+                async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    await cur.execute(
+                        "SELECT 1 FROM global_test_allocations WHERE test_id=%s AND student_id=%s LIMIT 1",
+                        (test_id, actor),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(403, "This test is not assigned to this user")
+            for item in payload:
+                item.pop("correctAnswer", None)
+                item.pop("explanation", None)
+                item.pop("solutionCode", None)
+        return payload
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
 @router.post("/global-tests/proctoring/log")
@@ -912,23 +948,6 @@ async def global_proctoring_log(request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS global_test_proctoring_logs (
-                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    test_id VARCHAR(64) NULL,
-                    user_id VARCHAR(64) NOT NULL,
-                    session_id VARCHAR(128) NOT NULL,
-                    event_type VARCHAR(64) NOT NULL,
-                    severity VARCHAR(16) NOT NULL,
-                    details LONGTEXT,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_gtp_user (user_id),
-                    INDEX idx_gtp_session (session_id),
-                    INDEX idx_gtp_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
             await cur.execute(
                 """
                 INSERT INTO global_test_proctoring_logs
@@ -968,11 +987,11 @@ async def global_proctoring_log(request: Request):
     return {"success": True}
 
 
-# ─── Submit ────────────────────────────────────────────────────
+# â”€â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/global-tests/{test_id}/submit")
 async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Request):
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     can_assign = await _has_any_permission(actor, ["tests.assign"])
     can_attempt = await _has_any_permission(actor, ["tests.attempt"])
     if not (can_assign or (can_attempt and actor == body.studentId)):
@@ -1240,14 +1259,27 @@ async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Requ
     }
 
 
-# ─── Submission listing ───────────────────────────────────────
+# â”€â”€â”€ Submission listing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/global-test-submissions")
 async def list_global_submissions(
+    request: Request,
     testId: Optional[str] = None,
     studentId: Optional[str] = None,
     mentorId: Optional[str] = None,
 ):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["tests.assign"])
+    can_manage = can_assign or await _has_any_permission(actor, ["tests.create", "tests.update"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_manage or (can_attempt and studentId and actor == studentId)):
+        raise HTTPException(403, "Permission denied")
+    if can_attempt and not can_manage:
+        studentId = actor
+    if can_manage and not can_assign:
+        # creators/updaters can only query their own student results unless they also have assign permission
+        studentId = actor
+        mentorId = None
     pool = await get_pool()
     query = """SELECT s.*, u.name AS student_name
                FROM global_test_submissions s
@@ -1300,11 +1332,16 @@ async def list_global_submissions(
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Failed to list global submissions")
 
 
 @router.get("/global-test-submissions/{submission_id}")
-async def get_global_submission(submission_id: str):
+async def get_global_submission(submission_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_manage = await _has_any_permission(actor, ["tests.assign", "tests.create", "tests.update"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_manage or can_attempt):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -1318,6 +1355,8 @@ async def get_global_submission(submission_id: str):
                 s = await cur.fetchone()
                 if not s:
                     raise HTTPException(404, "Submission not found")
+                if not (can_manage or (can_attempt and actor == (s.get("student_id") or ""))):
+                    raise HTTPException(403, "Permission denied")
 
                 await cur.execute("SELECT * FROM question_results WHERE submission_id = %s", (submission_id,))
                 qr = await cur.fetchall()
@@ -1378,13 +1417,18 @@ async def get_global_submission(submission_id: str):
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 
 
-# ─── Personalized report ──────────────────────────────────────
+# â”€â”€â”€ Personalized report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/global-test-submissions/{submission_id}/report")
-async def get_submission_report(submission_id: str):
+async def get_submission_report(submission_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_manage = await _has_any_permission(actor, ["tests.assign", "tests.create", "tests.update"])
+    can_attempt = await _has_any_permission(actor, ["tests.attempt"])
+    if not (can_manage or can_attempt):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -1398,6 +1442,8 @@ async def get_submission_report(submission_id: str):
                 s = await cur.fetchone()
                 if not s:
                     raise HTTPException(404, "Submission not found")
+                if not (can_manage or (can_attempt and actor == (s.get("student_id") or ""))):
+                    raise HTTPException(403, "Permission denied")
 
                 await cur.execute("SELECT * FROM personalized_reports WHERE submission_id = %s", (submission_id,))
                 existing = await cur.fetchall()
@@ -1531,7 +1577,7 @@ For CORRECT coding/SQL suggest optimizations. For INCORRECT diagnose the logic g
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Internal server error")
 async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
     if not user_id:
         return False
@@ -1554,3 +1600,5 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
                 [user_id, *permissions],
             )
             return bool(await cur.fetchone())
+
+

@@ -1,4 +1,4 @@
-"""
+﻿"""
 environment_scan.py
 -------------------
 REST API router for the environment scan (preScan) feature.
@@ -557,4 +557,5 @@ async def validate_mobile_link(token: str, request: Request):
         },
         "websocket_url": websocket_base,
     }
+
 

@@ -1,4 +1,4 @@
-"""Task CRUD routes."""
+﻿"""Task CRUD routes."""
 
 import uuid
 from datetime import datetime, timezone
@@ -81,7 +81,7 @@ async def list_tasks(
         tasks.append(t)
 
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="tasks",
         query_params={"mentorId": mentorId, "status": status, "page": page, "limit": limit},
@@ -120,7 +120,7 @@ async def student_tasks(student_id: str, request: Request):
                 enriched.append(t)
 
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="student_tasks",
         query_params={"studentId": student_id},
@@ -154,7 +154,7 @@ async def create_task(body: TaskCreate, request: Request):
 
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_TEST_CREATED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=task_id,
         resource_type="task",
@@ -184,10 +184,11 @@ async def delete_task(task_id: str, request: Request):
             await cur.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_TEST_DELETED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=task_id,
         resource_type="task",
         action="Task deleted",
     )
     return {"success": True}
+

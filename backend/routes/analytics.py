@@ -1,4 +1,4 @@
-"""Analytics routes for Admin, Mentor, and Student dashboards."""
+﻿"""Analytics routes for Admin, Mentor, and Student dashboards."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -7,7 +7,7 @@ import io
 import json
 
 import pymysql.cursors
-from fastapi import APIRouter, Query, Request, Depends
+from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import Response
 from database import get_pool
 from audit_logger import get_audit_logger, AuditEventType
@@ -28,7 +28,7 @@ async def _log_read_access(request: Request):
     if request.method != "GET":
         return
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="analytics_read",
         query_params={"path": request.url.path, "query": request.url.query},
@@ -38,9 +38,26 @@ async def _log_read_access(request: Request):
 router.dependencies.append(Depends(_log_read_access))
 
 
+async def _require_actor(request: Request):
+    user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not user_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Missing user context")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id FROM users WHERE id = %s LIMIT 1", (user_id,))
+            if not await cur.fetchone():
+                from fastapi import HTTPException
+                raise HTTPException(status_code=401, detail="Invalid user context")
+
+
+router.dependencies.append(Depends(_require_actor))
+
+
 # --- Helpers ---
 async def _require_admin(request: Request) -> None:
-    user_id = (request.headers.get("x-user-id") or "").strip()
+    user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not user_id:
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Missing user context")
@@ -65,8 +82,42 @@ async def _require_admin(request: Request) -> None:
             p = await cur.fetchone()
             if p:
                 return
-    from fastapi import HTTPException
     raise HTTPException(status_code=403, detail="Admin access required")
+
+
+async def _get_actor_user(request: Request) -> dict:
+    user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user context")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, role FROM users WHERE id = %s LIMIT 1",
+                (user_id,),
+            )
+            user = await cur.fetchone()
+            if not user:
+                raise HTTPException(status_code=401, detail="Invalid user context")
+            return user
+
+
+async def _can_view_all_analytics(user_id: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s
+                  AND rp.permission_key IN ('analytics.view', 'analytics.view_all')
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            return bool(await cur.fetchone())
 
 
 async def _allocated_student_ids(conn, mentor_id: str | None) -> list[str]:
@@ -201,8 +252,9 @@ async def admin_analytics():
 @router.get("/admin")
 async def get_admin_analytics(request: Request):
     """Platform-wide dashboard figures for AdminPortal."""
+    await _require_admin(request)
     data = await admin_analytics()
-    audit_logger.log_data_access(request.headers.get("x-user-id", "anonymous"), _client_ip(request), "analytics_admin", record_count=1)
+    audit_logger.log_data_access(getattr(request.state, "auth_user_id", None) or "anonymous", _client_ip(request), "analytics_admin", record_count=1)
     return data
 
 
@@ -382,7 +434,31 @@ async def admin_proctoring_behavior_summary(
 # --- Student Dashboard ---
 
 @router.get("/student/{student_id}")
-async def student_analytics(student_id: str):
+async def student_analytics(student_id: str, request: Request):
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "student" and student_id != actor_id:
+        raise HTTPException(status_code=403, detail="Students can only view their own analytics")
+    if actor_role == "mentor" and not can_view_all:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT 1 FROM mentor_student_allocations
+                    WHERE mentor_id = %s AND student_id = %s
+                    LIMIT 1
+                    """,
+                    (actor_id, student_id),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+    if actor_role not in ("admin", "organization_admin", "mentor", "student") and not can_view_all:
+        if student_id != actor_id:
+            raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -551,7 +627,18 @@ async def student_analytics(student_id: str):
 # --- Mentor Dashboard ---
 
 @router.get("/mentor/{mentor_id}")
-async def mentor_analytics(mentor_id: str):
+async def mentor_analytics(mentor_id: str, request: Request):
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "mentor" and mentor_id != actor_id and not can_view_all:
+        raise HTTPException(status_code=403, detail="Mentors can only view their own analytics")
+    if actor_role == "student":
+        raise HTTPException(status_code=403, detail="Students cannot view mentor analytics")
+    if actor_role not in ("admin", "organization_admin", "mentor") and not can_view_all:
+        raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -719,16 +806,17 @@ async def mentor_analytics(mentor_id: str):
     }
 
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  Topic / Plagiarism / Time-to-Solve / Learning-Path / Peer-Comparison
 #  These are consumed by the StudentPortal "Insights" tabs and the
 #  Admin/Mentor Analytics dashboards. They were missing from the
 #  backend, causing 6 different 404s in the browser console.
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
 @router.get("/topics")
 async def topic_analysis(
+    request: Request,
     studentId: str | None = Query(None),
     mentorId: str | None = Query(None),
 ):
@@ -739,6 +827,25 @@ async def topic_analysis(
       - mentorId set     -> only the mentor's allocated students
       - neither          -> platform-wide (admin)
     """
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "student":
+        if mentorId:
+            raise HTTPException(status_code=403, detail="Students cannot use mentor scope")
+        if studentId and studentId != actor_id:
+            raise HTTPException(status_code=403, detail="Students can only view own analytics")
+        studentId = actor_id
+    elif actor_role == "mentor" and not can_view_all:
+        if mentorId and mentorId != actor_id:
+            raise HTTPException(status_code=403, detail="Mentors can only use own mentor scope")
+        if studentId:
+            raise HTTPException(status_code=403, detail="Mentors must use own mentor scope")
+        mentorId = actor_id
+    elif actor_role not in ("admin", "organization_admin") and not can_view_all:
+        raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -785,7 +892,7 @@ async def topic_analysis(
                 })
 
             # By difficulty (heuristic where the problems table doesn't
-            # expose a difficulty column — use score buckets as a proxy).
+            # expose a difficulty column â€” use score buckets as a proxy).
             await cur.execute(
                 f"""SELECT
                        CASE
@@ -875,15 +982,31 @@ async def topic_analysis(
 
 _PLAGIARISM_FILTER = (
     # The schema has both `flagged_submission` (newer pipeline) and
-    # `plagiarism_detected` (older string column "true"/"false") — accept
+    # `plagiarism_detected` (older string column "true"/"false") â€” accept
     # either so we don't miss legacy rows.
     "(s.flagged_submission = 1 OR LOWER(COALESCE(s.plagiarism_detected,''))='true')"
 )
 
 
 @router.get("/plagiarism")
-async def plagiarism_analytics(mentorId: str | None = Query(None)):
+async def plagiarism_analytics(
+    request: Request,
+    mentorId: str | None = Query(None),
+):
     """Aggregate plagiarism flags across the platform / mentor's students."""
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "student":
+        raise HTTPException(status_code=403, detail="Students cannot access plagiarism analytics")
+    if actor_role == "mentor" and not can_view_all:
+        if mentorId and mentorId != actor_id:
+            raise HTTPException(status_code=403, detail="Mentors can only use own mentor scope")
+        mentorId = actor_id
+    elif actor_role not in ("admin", "organization_admin", "mentor") and not can_view_all:
+        raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -984,7 +1107,7 @@ async def plagiarism_analytics(mentorId: str | None = Query(None)):
                 {
                     "id": r["id"],
                     "studentName": r["studentName"],
-                    "problemTitle": r["problemTitle"] or "—",
+                    "problemTitle": r["problemTitle"] or "â€”",
                     "language": r["language"],
                     "score": r["score"],
                     "copiedFrom": r.get("copied_from_name") or "",
@@ -1002,7 +1125,10 @@ async def plagiarism_analytics(mentorId: str | None = Query(None)):
 
 
 @router.get("/time-to-solve")
-async def time_to_solve(mentorId: str | None = Query(None)):
+async def time_to_solve(
+    request: Request,
+    mentorId: str | None = Query(None),
+):
     """Approximate time-to-solve per problem & difficulty bucket.
 
     The submissions table doesn't store per-attempt wall-clock, so we
@@ -1011,6 +1137,19 @@ async def time_to_solve(mentorId: str | None = Query(None)):
     iterating until they got it right" estimate which is what the UI
     visualises.
     """
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "student":
+        raise HTTPException(status_code=403, detail="Students cannot access mentor/platform analytics")
+    if actor_role == "mentor" and not can_view_all:
+        if mentorId and mentorId != actor_id:
+            raise HTTPException(status_code=403, detail="Mentors can only use own mentor scope")
+        mentorId = actor_id
+    elif actor_role not in ("admin", "organization_admin", "mentor") and not can_view_all:
+        raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -1092,10 +1231,30 @@ async def time_to_solve(mentorId: str | None = Query(None)):
 
 
 @router.get("/learning-path/{student_id}")
-async def learning_path(student_id: str):
+async def learning_path(student_id: str, request: Request):
     """Personalised insights: weak areas, strengths, language proficiency,
     and a short list of recommended problems.
     """
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "student" and student_id != actor_id:
+        raise HTTPException(status_code=403, detail="Students can only view own learning path")
+    if actor_role == "mentor" and not can_view_all:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    "SELECT 1 FROM mentor_student_allocations WHERE mentor_id=%s AND student_id=%s LIMIT 1",
+                    (actor_id, student_id),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+    if actor_role not in ("admin", "organization_admin", "mentor", "student") and not can_view_all:
+        if student_id != actor_id:
+            raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -1195,8 +1354,28 @@ async def learning_path(student_id: str):
 
 
 @router.get("/peer-comparison/{student_id}")
-async def peer_comparison(student_id: str):
+async def peer_comparison(student_id: str, request: Request):
     """Where the student stands relative to their cohort."""
+    actor = await _get_actor_user(request)
+    actor_id = actor["id"]
+    actor_role = (actor.get("role") or "").lower()
+    can_view_all = await _can_view_all_analytics(actor_id)
+    if actor_role == "student" and student_id != actor_id:
+        raise HTTPException(status_code=403, detail="Students can only view own peer comparison")
+    if actor_role == "mentor" and not can_view_all:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    "SELECT 1 FROM mentor_student_allocations WHERE mentor_id=%s AND student_id=%s LIMIT 1",
+                    (actor_id, student_id),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+    if actor_role not in ("admin", "organization_admin", "mentor", "student") and not can_view_all:
+        if student_id != actor_id:
+            raise HTTPException(status_code=403, detail="Forbidden scope")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -1322,14 +1501,15 @@ async def peer_comparison(student_id: str):
 # --- Export (admin platform-wide, or mentor-scoped via mentorId) ---
 
 
-async def _export_bundle(mentor_id: str | None) -> dict:
+async def _export_bundle(request: Request, mentor_id: str | None) -> dict:
     """Snapshot of dashboard + the same insight endpoints the portals load."""
-    topics = await topic_analysis(studentId=None, mentorId=mentor_id)
-    plag = await plagiarism_analytics(mentorId=mentor_id)
-    tts = await time_to_solve(mentorId=mentor_id)
+    topics = await topic_analysis(request=request, studentId=None, mentorId=mentor_id)
+    plag = await plagiarism_analytics(request=request, mentorId=mentor_id)
+    tts = await time_to_solve(request=request, mentorId=mentor_id)
     if mentor_id:
-        dashboard = await mentor_analytics(mentor_id)
+        dashboard = await mentor_analytics(mentor_id, request=request)
     else:
+        await _require_admin(request)
         dashboard = await admin_analytics()
     return {
         "exportedAt": datetime.now(timezone.utc).isoformat(),
@@ -1418,10 +1598,10 @@ def _bundle_to_csv(bundle: dict) -> str:
 @router.get("/export/json")
 async def export_analytics_json(request: Request, mentorId: str | None = Query(None)):
     """Download full analytics snapshot as JSON (platform or mentor-scoped)."""
-    bundle = await _export_bundle(mentorId)
+    bundle = await _export_bundle(request, mentorId)
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_ANALYTICS_EXPORTED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="analytics",
         action="Export analytics JSON",
@@ -1433,11 +1613,11 @@ async def export_analytics_json(request: Request, mentorId: str | None = Query(N
 @router.get("/export/csv")
 async def export_analytics_csv(request: Request, mentorId: str | None = Query(None)):
     """Download analytics snapshot as CSV sections (platform or mentor-scoped)."""
-    bundle = await _export_bundle(mentorId)
+    bundle = await _export_bundle(request, mentorId)
     payload = _bundle_to_csv(bundle)
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_ANALYTICS_EXPORTED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="analytics",
         action="Export analytics CSV",
@@ -1450,3 +1630,4 @@ async def export_analytics_csv(request: Request, mentorId: str | None = Query(No
             "Content-Disposition": 'attachment; filename="analytics_export.csv"',
         },
     )
+

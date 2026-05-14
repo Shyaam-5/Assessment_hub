@@ -7,7 +7,12 @@ export default function OrganizationAnalyticsPanel({ user }) {
     const [rows, setRows] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
-    const headers = useMemo(() => ({ 'x-user-id': user?.id || '' }), [user?.id])
+    const headers = useMemo(() => {
+        const h = { 'x-user-id': user?.id || '' }
+        const token = localStorage.getItem('authToken') || ''
+        if (token) h.Authorization = `Bearer ${token}`
+        return h
+    }, [user?.id])
 
     useEffect(() => {
         const load = async () => {

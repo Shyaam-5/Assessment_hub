@@ -41,7 +41,7 @@ function StudentPortal() {
     const [title, setTitle] = useState('')
     const [subtitle, setSubtitle] = useState('')
     const perms = Array.isArray(user?.permissions) ? user.permissions : []
-    const can = (perm) => user?.role === 'admin' || user?.role === 'organization_admin' || perms.includes(perm)
+    const can = (perm) => perms.includes(perm)
 
 
 

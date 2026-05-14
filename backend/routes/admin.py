@@ -1,11 +1,11 @@
-"""Admin routes – user management CRUD (mirrors the legacy server.js endpoints)."""
+﻿"""Admin routes â€“ user management CRUD (mirrors the legacy server.js endpoints)."""
 
 import uuid
 import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
-from database import get_pool
+from database import get_pool, get_primary_pool
 from routes.auth import _hash_password
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
@@ -23,7 +23,38 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "UNKNOWN"
 
 
-# ─── Models ─────────────────────────────────────────────────────────────────
+async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
+    if not user_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+            if row and row.get("role") == "admin":
+                return True
+            fmt = ",".join(["%s"] * len(permissions))
+            await cur.execute(
+                f"""
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
+                LIMIT 1
+                """,
+                [user_id, *permissions],
+            )
+            return bool(await cur.fetchone())
+
+
+async def _require_admin_permission(request: Request, permissions: list[str]) -> str:
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, permissions):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    return actor
+
+
+# â”€â”€â”€ Models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class CreateUserBody(BaseModel):
     name: str
@@ -53,7 +84,7 @@ class StatusBody(BaseModel):
     status: str
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _clean(row: dict) -> dict:
     u = dict(row)
@@ -70,7 +101,7 @@ def _clean(row: dict) -> dict:
     return u
 
 
-# ─── GET /api/admin/users ─────────────────────────────────────────────────
+# â”€â”€â”€ GET /api/admin/users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/users")
 async def list_users(
@@ -82,6 +113,7 @@ async def list_users(
     page: int = 1,
     limit: int = 20,
 ):
+    await _require_admin_permission(request, ["users.view"])
     page = max(1, page)
     limit = min(100, max(1, limit))
     offset = (page - 1) * limit
@@ -140,7 +172,7 @@ async def list_users(
     users = [_clean(r) for r in rows]
     pages = (total + limit - 1) // limit
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="users",
         query_params={"role": role, "status": status, "batch": batch, "search": search, "page": page, "limit": limit},
@@ -149,10 +181,11 @@ async def list_users(
     return {"data": users, "pagination": {"page": page, "limit": limit, "total": total, "pages": pages}}
 
 
-# ─── POST /api/admin/users ────────────────────────────────────────────────
+# â”€â”€â”€ POST /api/admin/users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/users")
 async def create_user(body: CreateUserBody, request: Request):
+    await _require_admin_permission(request, ["users.create"])
     if not body.name or not body.email or not body.password or not body.role:
         raise HTTPException(status_code=400, detail="name, email, password, and role are required")
 
@@ -184,7 +217,7 @@ async def create_user(body: CreateUserBody, request: Request):
         await conn.commit()
 
     audit_logger.log_admin_action(
-        admin_id=request.headers.get("x-user-id", "anonymous"),
+        admin_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         event_type=AuditEventType.ADMIN_USER_CREATED,
         resource_id=user_id,
@@ -200,8 +233,7 @@ async def create_user(body: CreateUserBody, request: Request):
                 f"Hello {body.name},\n\n"
                 "Your account has been created.\n"
                 f"Login Email: {body.email}\n"
-                f"Temporary Password: {body.password}\n\n"
-                "Please login and change your password.\n"
+                "Please use the password shared securely by your administrator and change it after login.\n"
             ),
         )
     except Exception:
@@ -212,10 +244,11 @@ async def create_user(body: CreateUserBody, request: Request):
                                        "mustChangePassword": True}}
 
 
-# ─── PUT /api/admin/users/:id ─────────────────────────────────────────────
+# â”€â”€â”€ PUT /api/admin/users/:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.put("/users/{user_id}")
 async def update_user(user_id: str, body: UpdateUserBody, request: Request):
+    await _require_admin_permission(request, ["users.update", "users.create"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -255,7 +288,7 @@ async def update_user(user_id: str, body: UpdateUserBody, request: Request):
         await conn.commit()
 
     audit_logger.log_admin_action(
-        admin_id=request.headers.get("x-user-id", "anonymous"),
+        admin_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         event_type=AuditEventType.ADMIN_USER_MODIFIED,
         resource_id=user_id,
@@ -265,10 +298,11 @@ async def update_user(user_id: str, body: UpdateUserBody, request: Request):
     return {"success": True, "user": _clean(updated)}
 
 
-# ─── DELETE /api/admin/users/:id ─────────────────────────────────────────
+# â”€â”€â”€ DELETE /api/admin/users/:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: str, request: Request):
+    await _require_admin_permission(request, ["users.delete", "users.create"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -298,7 +332,7 @@ async def delete_user(user_id: str, request: Request):
         await conn.commit()
 
     audit_logger.log_admin_action(
-        admin_id=request.headers.get("x-user-id", "anonymous"),
+        admin_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         event_type=AuditEventType.ADMIN_USER_DELETED,
         resource_id=user_id,
@@ -308,10 +342,11 @@ async def delete_user(user_id: str, request: Request):
     return {"success": True, "message": f"User {user_id} deleted"}
 
 
-# ─── POST /api/admin/users/:id/reset-password ─────────────────────────────
+# â”€â”€â”€ POST /api/admin/users/:id/reset-password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/users/{user_id}/reset-password")
 async def reset_password(user_id: str, body: ResetPasswordBody, request: Request):
+    await _require_admin_permission(request, ["users.update", "users.create"])
     if not body.newPassword:
         raise HTTPException(status_code=400, detail="newPassword is required")
     if len(body.newPassword) < 6:
@@ -332,7 +367,7 @@ async def reset_password(user_id: str, body: ResetPasswordBody, request: Request
 
     audit_logger.log_event(
         event_type=AuditEventType.AUTH_PASSWORD_RESET,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=user_id,
         resource_type="user",
@@ -341,10 +376,11 @@ async def reset_password(user_id: str, body: ResetPasswordBody, request: Request
     return {"success": True, "message": "Password reset successfully"}
 
 
-# ─── PATCH /api/admin/users/:id/status ───────────────────────────────────
+# â”€â”€â”€ PATCH /api/admin/users/:id/status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.patch("/users/{user_id}/status")
 async def toggle_status(user_id: str, body: StatusBody, request: Request):
+    await _require_admin_permission(request, ["users.update", "users.create"])
     if body.status not in ("active", "inactive", "suspended"):
         raise HTTPException(status_code=400, detail="Invalid status")
 
@@ -355,7 +391,7 @@ async def toggle_status(user_id: str, body: StatusBody, request: Request):
         await conn.commit()
 
     audit_logger.log_admin_action(
-        admin_id=request.headers.get("x-user-id", "anonymous"),
+        admin_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         event_type=AuditEventType.ADMIN_USER_MODIFIED,
         resource_id=user_id,
@@ -365,10 +401,11 @@ async def toggle_status(user_id: str, body: StatusBody, request: Request):
     return {"success": True, "message": f"User status changed to {body.status}"}
 
 
-# ─── GET /api/admin/batches ───────────────────────────────────────────────
+# â”€â”€â”€ GET /api/admin/batches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/batches")
 async def get_batches(request: Request):
+    await _require_admin_permission(request, ["users.view"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -378,9 +415,10 @@ async def get_batches(request: Request):
             rows = await cur.fetchall()
     batches = [r["batch"] for r in rows]
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="batches",
         record_count=len(batches),
     )
     return batches
+

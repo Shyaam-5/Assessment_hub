@@ -1,4 +1,4 @@
-"""Aptitude test routes: CRUD for tests, submissions, and student allocations."""
+﻿"""Aptitude test routes: CRUD for tests, submissions, and student allocations."""
 
 import uuid
 import logging
@@ -37,26 +37,6 @@ async def _insert_unified_proctor_event(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
-                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    test_type VARCHAR(32) NOT NULL,
-                    test_id VARCHAR(64) NULL,
-                    attempt_id VARCHAR(64) NULL,
-                    user_id VARCHAR(64) NOT NULL,
-                    session_id VARCHAR(128) NOT NULL,
-                    event_type VARCHAR(64) NOT NULL,
-                    severity VARCHAR(16) NOT NULL,
-                    details LONGTEXT,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_pu_test_type (test_type),
-                    INDEX idx_pu_user (user_id),
-                    INDEX idx_pu_session (session_id),
-                    INDEX idx_pu_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
             await cur.execute(
                 """
                 INSERT INTO proctoring_events_unified
@@ -103,7 +83,7 @@ def _client_ip(request: Request) -> str:
 async def _log_read_access(request: Request):
     if request.method == "GET":
         audit_logger.log_data_access(
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="aptitude_read",
             query_params={"path": request.url.path, "query": request.url.query},
@@ -113,7 +93,7 @@ async def _log_read_access(request: Request):
 router.dependencies.append(Depends(_log_read_access))
 
 
-# ─── Request Bodies ────────────────────────────────────────────
+# â”€â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class QuestionCreate(BaseModel):
     question: str
@@ -135,7 +115,7 @@ class AptitudeTestCreate(BaseModel):
     description: str = ""
     status: str = "live"
     questions: List[QuestionCreate]
-    createdBy: str
+    createdBy: str = ""
 
 
 class AptitudeSubmit(BaseModel):
@@ -153,7 +133,7 @@ class AllocateStudents(BaseModel):
     studentIds: List[str]
 
 
-# ─── Helpers ───────────────────────────────────────────────────
+# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _clean_test(t: dict) -> dict:
     """Map DB row to camelCase API response."""
@@ -178,27 +158,48 @@ def _clean_test(t: dict) -> dict:
 
 
 def _fmt_dt(iso: Optional[str]) -> Optional[str]:
-    """Parse ISO string → MySQL datetime string."""
+    """Parse ISO string â†’ MySQL datetime string."""
     if not iso:
         return None
     return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ─── Routes ────────────────────────────────────────────────────
+def _clean_question_for_delivery(q: dict, include_answer: bool) -> dict:
+    item = {
+        "id": q["question_id"],
+        "question": q["question"],
+        "options": [q["option_1"], q["option_2"], q["option_3"], q["option_4"]],
+        "category": q.get("category"),
+    }
+    if include_answer:
+        item["correctAnswer"] = q["correct_answer"]
+        item["explanation"] = q.get("explanation")
+    return item
+
+
+# â”€â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # ---------- List aptitude tests ----------
 
 @router.get("/aptitude")
 async def list_aptitude_tests(
+    request: Request,
     mentorId: Optional[str] = None,
     status: Optional[str] = None,
 ):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.create", "aptitude.assign", "aptitude.attempt"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     query = "SELECT * FROM aptitude_tests WHERE 1=1"
     params: list = []
 
     if mentorId:
-        query += ' AND (created_by = %s OR created_by = "admin-001")'
+        query += (
+            " AND (created_by = %s OR created_by IN ("
+            "SELECT id FROM users WHERE role = 'admin'"
+            "))"
+        )
         params.append(mentorId)
     if status:
         query += " AND status = %s"
@@ -215,7 +216,12 @@ async def list_aptitude_tests(
 # ---------- Get single test with questions ----------
 
 @router.get("/aptitude/{test_id}")
-async def get_aptitude_test(test_id: str):
+async def get_aptitude_test(test_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["aptitude.assign", "aptitude.create", "aptitude.evaluate"])
+    can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
+    if not (can_assign or can_attempt):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -224,21 +230,18 @@ async def get_aptitude_test(test_id: str):
             test = await cur.fetchone()
             if not test:
                 raise HTTPException(404, "Test not found")
+            if can_attempt and not can_assign:
+                await cur.execute(
+                    "SELECT 1 FROM test_student_allocations WHERE test_id = %s AND student_id = %s LIMIT 1",
+                    (test_id, actor),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(403, "This test is not assigned to this user")
 
             await cur.execute("SELECT * FROM aptitude_questions WHERE test_id = %s", (test_id,))
             questions = await cur.fetchall()
 
-    clean_questions = [
-        {
-            "id": q["question_id"],
-            "question": q["question"],
-            "options": [q["option_1"], q["option_2"], q["option_3"], q["option_4"]],
-            "correctAnswer": q["correct_answer"],
-            "explanation": q.get("explanation"),
-            "category": q.get("category"),
-        }
-        for q in questions
-    ]
+    clean_questions = [_clean_question_for_delivery(q, include_answer=can_assign) for q in questions]
 
     result = _clean_test(test)
     result["questions"] = clean_questions
@@ -248,7 +251,10 @@ async def get_aptitude_test(test_id: str):
 # ---------- Create test ----------
 
 @router.post("/aptitude")
-async def create_aptitude_test(body: AptitudeTestCreate):
+async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.create"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     test_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
@@ -266,7 +272,7 @@ async def create_aptitude_test(body: AptitudeTestCreate):
                     body.duration, len(body.questions), body.passingScore,
                     body.maxTabSwitches, body.maxAttempts,
                     _fmt_dt(body.startTime), _fmt_dt(body.deadline),
-                    body.description, body.status, body.createdBy, created_at,
+                    body.description, body.status, actor, created_at,
                 ),
             )
 
@@ -287,7 +293,7 @@ async def create_aptitude_test(body: AptitudeTestCreate):
     logger.info("Aptitude test created id=%s title=%s", test_id, body.title)
     audit_logger.log_event(
         AuditEventType.ADMIN_TEST_CREATED,
-        user_id=body.createdBy,
+        user_id=actor,
         resource_id=test_id,
         resource_type="aptitude_test",
         action="Aptitude test created",
@@ -306,7 +312,7 @@ async def create_aptitude_test(body: AptitudeTestCreate):
         "deadline": body.deadline,
         "description": body.description,
         "status": body.status,
-        "createdBy": body.createdBy,
+        "createdBy": actor,
         "createdAt": str(created_at),
     }
 
@@ -315,8 +321,10 @@ async def create_aptitude_test(body: AptitudeTestCreate):
 
 @router.post("/aptitude/{test_id}/submit")
 async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Request):
-    actor = (request.headers.get("x-user-id") or "").strip()
-    if not await _has_any_permission(actor, ["aptitude.attempt", "aptitude.assign"]):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["aptitude.assign"])
+    can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
+    if not (can_assign or (can_attempt and actor == body.studentId)):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
 
@@ -326,6 +334,25 @@ async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Requ
             test = await cur.fetchone()
             if not test:
                 raise HTTPException(404, "Test not found")
+            if (test.get("status") or "").lower() != "live":
+                raise HTTPException(409, "Test is not live")
+            if test.get("deadline") and datetime.now(timezone.utc) > test["deadline"].replace(tzinfo=timezone.utc):
+                raise HTTPException(409, "Test deadline has passed")
+            await cur.execute(
+                "SELECT 1 FROM test_student_allocations WHERE test_id = %s AND student_id = %s LIMIT 1",
+                (test_id, body.studentId),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(403, "This test is not assigned to this user")
+            await cur.execute(
+                "SELECT COUNT(*) AS cnt FROM aptitude_submissions WHERE test_id = %s AND student_id = %s",
+                (test_id, body.studentId),
+            )
+            row = await cur.fetchone()
+            attempts_used = int((row or {}).get("cnt") or 0)
+            max_attempts = int(test.get("max_attempts") or 1)
+            if attempts_used >= max_attempts:
+                raise HTTPException(409, "Attempt limit reached")
 
             await cur.execute("SELECT * FROM aptitude_questions WHERE test_id = %s", (test_id,))
             questions = await cur.fetchall()
@@ -419,6 +446,9 @@ async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Requ
 
 @router.patch("/aptitude/{test_id}/status")
 async def update_aptitude_status(test_id: str, body: StatusUpdate, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.create"]):
+        raise HTTPException(403, "Permission denied")
     if body.status not in ("live", "ended"):
         raise HTTPException(400, 'Invalid status. Must be "live" or "ended"')
 
@@ -432,7 +462,7 @@ async def update_aptitude_status(test_id: str, body: StatusUpdate, request: Requ
 
     audit_logger.log_event(
         AuditEventType.ADMIN_TEST_MODIFIED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=test_id,
         resource_type="aptitude_test",
@@ -446,6 +476,9 @@ async def update_aptitude_status(test_id: str, body: StatusUpdate, request: Requ
 
 @router.delete("/aptitude/{test_id}")
 async def delete_aptitude_test(test_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["aptitude.create"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -475,7 +508,7 @@ async def delete_aptitude_test(test_id: str, request: Request):
 
     audit_logger.log_event(
         AuditEventType.ADMIN_TEST_DELETED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=test_id,
         resource_type="aptitude_test",
@@ -484,14 +517,21 @@ async def delete_aptitude_test(test_id: str, request: Request):
     return {"success": True}
 
 
-# ─── Submission routes ─────────────────────────────────────────
+# â”€â”€â”€ Submission routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/aptitude-submissions")
 async def list_aptitude_submissions(
+    request: Request,
     studentId: Optional[str] = None,
     testId: Optional[str] = None,
     mentorId: Optional[str] = None,
 ):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["aptitude.assign"])
+    can_eval = await _has_any_permission(actor, ["aptitude.evaluate"])
+    can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
+    if not (can_assign or can_eval or (studentId and can_attempt and actor == studentId)):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     query = """SELECT s.*, u.name AS student_name
                FROM aptitude_submissions s
@@ -538,7 +578,8 @@ async def list_aptitude_submissions(
 # ---------- Get single submission with question results ----------
 
 @router.get("/aptitude-submissions/{submission_id}")
-async def get_aptitude_submission(submission_id: str):
+async def get_aptitude_submission(submission_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -553,6 +594,11 @@ async def get_aptitude_submission(submission_id: str):
             s = await cur.fetchone()
             if not s:
                 raise HTTPException(404, "Submission not found")
+            can_assign = await _has_any_permission(actor, ["aptitude.assign"])
+            can_eval = await _has_any_permission(actor, ["aptitude.evaluate"])
+            can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
+            if not (can_assign or can_eval or (can_attempt and actor == (s.get("student_id") or ""))):
+                raise HTTPException(403, "Permission denied")
 
             await cur.execute(
                 "SELECT * FROM aptitude_question_results WHERE submission_id = %s",
@@ -588,11 +634,11 @@ async def get_aptitude_submission(submission_id: str):
     }
 
 
-# ─── Test-Student Allocation routes ───────────────────────────
+# â”€â”€â”€ Test-Student Allocation routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/aptitude/{test_id}/allocate-students")
 async def allocate_students(test_id: str, body: AllocateStudents, request: Request):
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["aptitude.assign"]):
         raise HTTPException(403, "Permission denied")
     if not body.studentIds:
@@ -606,6 +652,8 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
         async with conn.cursor() as cur:
             await cur.execute("SELECT title FROM aptitude_tests WHERE id = %s", (test_id,))
             trow = await cur.fetchone()
+            if not trow:
+                raise HTTPException(404, "Test not found")
             if trow and trow.get("title"):
                 test_title = trow["title"]
             await cur.execute("DELETE FROM test_student_allocations WHERE test_id = %s", (test_id,))
@@ -642,7 +690,7 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
 
 @router.get("/aptitude/{test_id}/allocated-students")
 async def get_allocated_students(test_id: str, request: Request):
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["aptitude.assign"]):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
@@ -661,7 +709,7 @@ async def get_allocated_students(test_id: str, request: Request):
 
 @router.get("/aptitude/allocated-to/{student_id}")
 async def get_tests_allocated_to_student(student_id: str, request: Request):
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     can_assign = await _has_any_permission(actor, ["aptitude.assign"])
     can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
     if not (can_assign or (can_attempt and actor == student_id)):
@@ -685,7 +733,13 @@ async def get_tests_allocated_to_student(student_id: str, request: Request):
 
 @router.post("/aptitude/proctoring/log")
 async def aptitude_proctoring_log(request: Request, body: dict = Body(...)):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["aptitude.assign"])
     user_id = str(body.get("userId") or body.get("user_id") or "")
+    if not user_id:
+        user_id = actor
+    if not (can_assign or actor == user_id):
+        raise HTTPException(403, "Permission denied")
     session_id = str(body.get("sessionId") or body.get("session_id") or "default")
     event_type = str(body.get("eventType") or body.get("event_type") or "unknown")
     severity = str(body.get("severity") or "low")
@@ -695,23 +749,6 @@ async def aptitude_proctoring_log(request: Request, body: dict = Body(...)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS aptitude_proctoring_logs (
-                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    test_id VARCHAR(64) NULL,
-                    user_id VARCHAR(64) NOT NULL,
-                    session_id VARCHAR(128) NOT NULL,
-                    event_type VARCHAR(64) NOT NULL,
-                    severity VARCHAR(16) NOT NULL,
-                    details LONGTEXT,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_ap_user (user_id),
-                    INDEX idx_ap_session (session_id),
-                    INDEX idx_ap_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
             await cur.execute(
                 """
                 INSERT INTO aptitude_proctoring_logs
@@ -773,3 +810,4 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
                 [user_id, *permissions],
             )
             return bool(await cur.fetchone())
+

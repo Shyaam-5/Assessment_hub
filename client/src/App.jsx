@@ -50,6 +50,9 @@ function ProtectedRoute({ children, allowedRoles }) {
         if (Array.isArray(user.permissions) && user.permissions.some(p => p.endsWith('.create'))) {
             return <Navigate to="/mentor" replace />
         }
+        // Learner-like roles should land on student portal, but avoid looping
+        // when this guard itself is already protecting /student.
+        if (allowedRoles.includes('student')) return children
         return <Navigate to="/student" replace />
     }
 
@@ -80,8 +83,11 @@ function App() {
     })
     const [loading, setLoading] = useState(true)
     const navigate = useNavigate()
+    const getToken = () => localStorage.getItem('authToken') || ''
     const authHeaders = (extra = {}) => {
         const h = { 'Content-Type': 'application/json', ...extra }
+        const token = getToken()
+        if (token) h.Authorization = `Bearer ${token}`
         if (user?.id) h['x-user-id'] = user.id
         if (user?.organizationId) h['x-org-id'] = user.organizationId
         return h
@@ -103,6 +109,13 @@ function App() {
             try {
                 const savedUser = localStorage.getItem('currentUser')
                 if (savedUser && savedUser !== 'undefined') {
+                    const token = getToken()
+                    if (!token) {
+                        localStorage.removeItem('currentUser')
+                        setUser(null)
+                        setLoading(false)
+                        return
+                    }
                     const parsedUser = JSON.parse(savedUser)
 
                     // Verify with backend
@@ -116,15 +129,18 @@ function App() {
                         const data = await response.json()
                         setUser(data.user)
                         localStorage.setItem('currentUser', JSON.stringify(data.user))
+                        if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
                     } else {
                         console.warn('Session invalid or expired')
                         localStorage.removeItem('currentUser')
+                        localStorage.removeItem('authToken')
                         setUser(null)
                     }
                 }
             } catch (error) {
                 console.error('Session verification failed:', error)
                 localStorage.removeItem('currentUser')
+                localStorage.removeItem('authToken')
                 setUser(null)
             } finally {
                 setLoading(false)
@@ -147,6 +163,9 @@ function App() {
         } else {
             delete axios.defaults.headers.common['x-user-id']
         }
+        const token = getToken()
+        if (token) axios.defaults.headers.common.Authorization = `Bearer ${token}`
+        else delete axios.defaults.headers.common.Authorization
         if (orgId) {
             axios.defaults.headers.common['x-org-id'] = orgId
         } else {
@@ -185,6 +204,7 @@ function App() {
 
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
+            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -222,6 +242,7 @@ function App() {
 
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
+            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -254,6 +275,7 @@ function App() {
             }
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
+            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -278,6 +300,7 @@ function App() {
             }
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
+            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -288,6 +311,7 @@ function App() {
     const logout = () => {
         setUser(null)
         localStorage.removeItem('currentUser')
+        localStorage.removeItem('authToken')
         navigate('/login')
     }
 
@@ -319,7 +343,7 @@ function App() {
                     } />
 
                     <Route path="/student/*" element={
-                        <ProtectedRoute allowedRoles={['student']}>
+                        <ProtectedRoute allowedRoles={['student', 'org_user', 'learner']}>
                             <StudentPortal />
                         </ProtectedRoute>
                     } />

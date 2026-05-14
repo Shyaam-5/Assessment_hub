@@ -1,4 +1,4 @@
-"""Behavior Analysis Agent — API routes.
+﻿"""Behavior Analysis Agent â€” API routes.
 
 Endpoints for logging behavior events, triggering analysis,
 viewing results, and generating behavioral reports.
@@ -40,7 +40,7 @@ def _client_ip(request: Request) -> str:
 async def _log_read_access(request: Request):
     if request.method == "GET":
         audit_logger.log_data_access(
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="behavior_read",
             query_params={"path": request.url.path, "query": request.url.query},
@@ -50,9 +50,9 @@ async def _log_read_access(request: Request):
 router.dependencies.append(Depends(_log_read_access))
 
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  Request / Response models
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class LogEventsRequest(BaseModel):
     session_id: str
@@ -74,9 +74,9 @@ class ReportRequest(BaseModel):
     candidate_name: str = ""
 
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  Endpoints
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/log-events")
 async def log_behavior_events(req: LogEventsRequest, request: Request):
@@ -116,7 +116,7 @@ async def analyze_session_behavior(req: AnalyzeRequest, request: Request):
         )
         audit_logger.log_event(
             AuditEventType.RESOURCE_ACCESSED,
-            user_id=req.user_id or request.headers.get("x-user-id", "anonymous"),
+            user_id=req.user_id or getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_id=req.session_id,
             resource_type="behavior_analysis",
@@ -251,3 +251,4 @@ async def get_session_behavior(session_id: str):
             for r in rows
         ],
     }
+

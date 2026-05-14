@@ -40,6 +40,8 @@ Logical platform flow (admin -> content -> student -> monitoring):
 import os
 import logging
 import socketio
+import pymysql.cursors
+import pymysql
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi import Request
@@ -48,13 +50,17 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
+from security import decode_access_token
 from database import (
     init_db,
     close_db,
     create_prescan_tables,
     ensure_auth_login_schema,
     ensure_rbac_schema,
+    ensure_proctoring_tables,
     ensure_default_super_admins,
+    run_startup_db_preflight,
+    reconcile_active_tenant_schemas,
     get_pool,
     get_primary_pool,
     get_tenant_pool_by_org_id,
@@ -62,7 +68,7 @@ from database import (
     clear_request_pool,
 )
 from logging_config import setup_logging
-from logging_middleware import LoggingMiddleware, SecurityHeadersMiddleware
+from logging_middleware import LoggingMiddleware, SecurityHeadersMiddleware, RateLimitMiddleware
 from audit_schema import create_audit_tables
 from audit_logger import get_audit_logger
 
@@ -100,6 +106,42 @@ register_prescan_socket_handlers(sio)
 monitors: dict[str, dict] = {"admins": {}, "mentors": {}, "students": {}}
 
 
+def _socket_payload_token(data) -> str:
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("token") or "").strip()
+
+
+async def _verify_socket_actor(data, required_user_key: str) -> dict | None:
+    token = _socket_payload_token(data)
+    try:
+        claims = decode_access_token(token, settings.SECRET_KEY)
+    except Exception:
+        return None
+    claimed_user = str((data or {}).get(required_user_key) or "").strip()
+    if not claimed_user or claimed_user != str(claims.get("sub") or ""):
+        return None
+    return claims
+
+
+async def _validated_mentor_room(student_id: str, claimed_mentor_id: str | None) -> str | None:
+    mentor_id = (claimed_mentor_id or "").strip()
+    if not mentor_id:
+        return None
+    try:
+        pool = await get_primary_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT mentor_id FROM users WHERE id = %s", (student_id,))
+                row = await cur.fetchone()
+        real_mentor_id = str((row or {}).get("mentor_id") or "").strip()
+        if real_mentor_id and real_mentor_id == mentor_id:
+            return f"mentor_{mentor_id}"
+    except Exception:
+        return None
+    return None
+
+
 @sio.event
 async def connect(sid, environ):
     logger.info("Socket connected: %s", sid)
@@ -117,13 +159,47 @@ async def disconnect(sid):
 
 @sio.event
 async def join_monitoring(sid, data):
-    user_id = data.get("userId")
-    role = data.get("role")
+    token = (data.get("token") or "").strip()
+    try:
+        claims = decode_access_token(token, settings.SECRET_KEY)
+    except Exception:
+        await sio.emit("monitoring_error", {"detail": "Invalid token"}, to=sid)
+        return
+    user_id = (data.get("userId") or "").strip()
+    role = (data.get("role") or "").strip()
+    if user_id != str(claims.get("sub") or ""):
+        await sio.emit("monitoring_error", {"detail": "User mismatch"}, to=sid)
+        return
+    if role != str(claims.get("role") or ""):
+        await sio.emit("monitoring_error", {"detail": "Role mismatch"}, to=sid)
+        return
     mentor_id = data.get("mentorId")
+    if not user_id:
+        await sio.emit("monitoring_error", {"detail": "Missing user context"}, to=sid)
+        return
+    try:
+        pool = await get_primary_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+                row = await cur.fetchone()
+        if not row:
+            await sio.emit("monitoring_error", {"detail": "Invalid user"}, to=sid)
+            return
+        db_role = (row.get("role") or "").strip()
+    except Exception:
+        await sio.emit("monitoring_error", {"detail": "Authorization unavailable"}, to=sid)
+        return
+    if role != db_role:
+        await sio.emit("monitoring_error", {"detail": "Role mismatch"}, to=sid)
+        return
     if role == "admin":
         await sio.enter_room(sid, "admin_room")
     elif role == "mentor" and mentor_id:
         await sio.enter_room(sid, f"mentor_{mentor_id}")
+    else:
+        await sio.emit("monitoring_error", {"detail": "Permission denied"}, to=sid)
+        return
     await sio.emit("monitoring_connected", {"userId": user_id, "role": role}, to=sid)
     audit_logger.log_socket_event(
         "join_monitoring",
@@ -136,7 +212,14 @@ async def join_monitoring(sid, data):
 @sio.event
 async def join_student_session(sid, data):
     """Student joins their personal room for receiving agent commands (e.g. terminate)."""
+    token = (data.get("token") or "").strip()
+    try:
+        claims = decode_access_token(token, settings.SECRET_KEY)
+    except Exception:
+        return
     student_id = data.get("studentId")
+    if str(student_id or "") != str(claims.get("sub") or ""):
+        return
     session_id = data.get("sessionId")
     if student_id:
         await sio.enter_room(sid, f"student_{student_id}")
@@ -153,46 +236,61 @@ async def join_student_session(sid, data):
 
 @sio.event
 async def submission_started(sid, data):
-    mentor_id = data.get("mentorId")
+    claims = await _verify_socket_actor(data, "studentId")
+    if not claims:
+        return
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
     await sio.emit("live_update", {**data, "type": "submission_started"}, room="admin_room")
-    if mentor_id:
-        await sio.emit("live_update", {**data, "type": "submission_started"}, room=f"mentor_{mentor_id}")
+    if mentor_room:
+        await sio.emit("live_update", {**data, "type": "submission_started"}, room=mentor_room)
     audit_logger.log_socket_event("submission_started", sid, user_id=data.get("studentId"), payload=data)
 
 
 @sio.event
 async def submission_completed(sid, data):
-    mentor_id = data.get("mentorId")
+    claims = await _verify_socket_actor(data, "studentId")
+    if not claims:
+        return
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
     await sio.emit("live_update", {**data, "type": "submission_completed"}, room="admin_room")
-    if mentor_id:
-        await sio.emit("live_update", {**data, "type": "submission_completed"}, room=f"mentor_{mentor_id}")
+    if mentor_room:
+        await sio.emit("live_update", {**data, "type": "submission_completed"}, room=mentor_room)
     audit_logger.log_socket_event("submission_completed", sid, user_id=data.get("studentId"), payload=data)
 
 
 @sio.event
 async def proctoring_violation(sid, data):
-    mentor_id = data.get("mentorId")
+    claims = await _verify_socket_actor(data, "studentId")
+    if not claims:
+        return
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
     await sio.emit("live_alert", {**data, "type": "proctoring_violation"}, room="admin_room")
-    if mentor_id:
-        await sio.emit("live_alert", {**data, "type": "proctoring_violation"}, room=f"mentor_{mentor_id}")
+    if mentor_room:
+        await sio.emit("live_alert", {**data, "type": "proctoring_violation"}, room=mentor_room)
     audit_logger.log_socket_event("proctoring_violation", sid, user_id=data.get("studentId"), payload=data)
 
 
 @sio.event
 async def progress_update(sid, data):
-    mentor_id = data.get("mentorId")
+    claims = await _verify_socket_actor(data, "studentId")
+    if not claims:
+        return
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
     await sio.emit("live_update", {**data, "type": "progress_update"}, room="admin_room")
-    if mentor_id:
-        await sio.emit("live_update", {**data, "type": "progress_update"}, room=f"mentor_{mentor_id}")
+    if mentor_room:
+        await sio.emit("live_update", {**data, "type": "progress_update"}, room=mentor_room)
     audit_logger.log_socket_event("progress_update", sid, user_id=data.get("studentId"), payload=data)
 
 
 @sio.event
 async def test_failed(sid, data):
-    mentor_id = data.get("mentorId")
+    claims = await _verify_socket_actor(data, "studentId")
+    if not claims:
+        return
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
     await sio.emit("live_alert", {**data, "type": "test_failed"}, room="admin_room")
-    if mentor_id:
-        await sio.emit("live_alert", {**data, "type": "test_failed"}, room=f"mentor_{mentor_id}")
+    if mentor_room:
+        await sio.emit("live_alert", {**data, "type": "test_failed"}, room=mentor_room)
     audit_logger.log_socket_event("test_failed", sid, user_id=data.get("studentId"), payload=data)
 
 
@@ -207,7 +305,33 @@ async def lifespan(app: FastAPI):
     await create_prescan_tables()
     await ensure_auth_login_schema()
     await ensure_rbac_schema()
+    if settings.STARTUP_TENANT_SCHEMA_RECONCILE:
+        tenant_fix = await reconcile_active_tenant_schemas()
+        failed = [r for r in tenant_fix if not r.get("ok")]
+        fixed = [r for r in tenant_fix if r.get("ok") and int(r.get("created") or 0) > 0]
+        if fixed:
+            logger.info("Tenant schema reconcile created missing tables for orgs=%s", fixed)
+        if failed:
+            logger.warning("Tenant schema reconcile failed for orgs=%s", failed)
+    await ensure_proctoring_tables()
     await ensure_default_super_admins()
+    if settings.STARTUP_DB_PREFLIGHT:
+        preflight = await run_startup_db_preflight(check_tenants=settings.STARTUP_DB_PREFLIGHT_TENANTS)
+        if preflight.get("primary_ok"):
+            logger.info("DB preflight (primary): OK")
+        else:
+            logger.error(
+                "DB preflight (primary) failed | missing_tables=%s missing_columns=%s",
+                (preflight.get("primary") or {}).get("missing_tables"),
+                (preflight.get("primary") or {}).get("missing_columns"),
+            )
+            raise RuntimeError("Primary DB preflight failed. Fix schema/permissions before startup.")
+        if settings.STARTUP_DB_PREFLIGHT_TENANTS:
+            bad_tenants = [t for t in (preflight.get("tenants") or []) if not t.get("ok")]
+            if bad_tenants:
+                logger.warning("DB preflight (tenants) failures=%s", bad_tenants)
+            else:
+                logger.info("DB preflight (tenants): OK")
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -226,12 +350,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Assessment Hub API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     req_id = getattr(getattr(request, "state", object()), "request_id", None)
     logger.exception("Unhandled exception on %s %s | request_id=%s", request.method, request.url.path, req_id)
+    if isinstance(exc, pymysql.err.ProgrammingError) and len(exc.args) >= 2 and int(exc.args[0]) == 1146:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Tenant database schema is incomplete. Contact organization admin/super admin to run schema sync.",
+                "requestId": req_id,
+            },
+        )
     return JSONResponse(
         status_code=500,
         content={
@@ -249,10 +382,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _read_auth_token(request: Request) -> str:
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _override_scope_header(scope: dict, name: str, value: str) -> None:
+    key = name.lower().encode("latin-1")
+    val = value.encode("latin-1")
+    headers = []
+    found = False
+    for k, v in scope.get("headers", []):
+        if k == key:
+            if not found:
+                headers.append((k, val))
+                found = True
+        else:
+            headers.append((k, v))
+    if not found:
+        headers.append((key, val))
+    scope["headers"] = headers
+
+
 @app.middleware("http")
 async def add_corp_header(request, call_next):
     # Resolve tenant DB context per request (fallback: primary DB).
     path = request.url.path or ""
+    auth_exempt_prefixes = (
+        "/api/auth/login",
+        "/api/auth/google",
+        "/api/auth/verify-otp",
+        "/api/auth/complete-first-login",
+        "/api/health",
+        "/api/prescan/mobile/",
+        "/docs",
+        "/openapi.json",
+    )
     tenant_exempt_prefixes = (
         "/api/auth/login",
         "/api/auth/google",
@@ -261,28 +428,48 @@ async def add_corp_header(request, call_next):
         "/api/platform/",
         "/api/rbac/",
         "/api/orgs/",
+        "/api/health",
+        "/api/prescan/mobile/",
         "/docs",
         "/openapi.json",
     )
+    auth_exempt = any(path.startswith(p) for p in auth_exempt_prefixes)
+    if path.startswith("/api") and not auth_exempt:
+        token = _read_auth_token(request)
+        if not token:
+            return JSONResponse({"detail": "Missing bearer token"}, status_code=401)
+        try:
+            claims = decode_access_token(token, settings.SECRET_KEY)
+        except Exception:
+            return JSONResponse({"detail": "Invalid or expired token"}, status_code=401)
+        auth_user_id = str(claims.get("sub") or "").strip()
+        auth_org_id = str(claims.get("organization_id") or "").strip()
+        if not auth_user_id:
+            return JSONResponse({"detail": "Invalid token payload"}, status_code=401)
+        request.state.auth_user_id = auth_user_id
+        request.state.auth_role = str(claims.get("role") or "")
+        _override_scope_header(request.scope, "x-user-id", auth_user_id)
+        if auth_org_id:
+            _override_scope_header(request.scope, "x-org-id", auth_org_id)
+
     should_resolve_tenant = not any(path.startswith(p) for p in tenant_exempt_prefixes)
     tenant_pool = None
     resolved_org_id = (request.headers.get("x-org-id") or "").strip()
 
     if should_resolve_tenant:
         org_id = resolved_org_id
-        user_id = (request.headers.get("x-user-id") or "").strip()
+        user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
         try:
             user_org_id = ""
             if user_id:
                 primary = await get_primary_pool()
                 async with primary.acquire() as conn:
-                    async with conn.cursor() as cur:
+                    async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                         await cur.execute("SELECT organization_id FROM users WHERE id = %s", (user_id,))
                         u = await cur.fetchone()
                         user_org_id = (u or {}).get("organization_id") or ""
                 if user_org_id:
                     if org_id and org_id != user_org_id:
-                        from fastapi.responses import JSONResponse
                         return JSONResponse({"detail": "Organization context mismatch"}, status_code=403)
                     org_id = user_org_id
                     resolved_org_id = user_org_id
@@ -290,11 +477,10 @@ async def add_corp_header(request, call_next):
             if org_id:
                 primary = await get_primary_pool()
                 async with primary.acquire() as conn:
-                    async with conn.cursor() as cur:
+                    async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                         await cur.execute("SELECT is_active FROM organizations WHERE id = %s", (org_id,))
                         o = await cur.fetchone()
                 if not o or int(o.get("is_active") or 0) != 1:
-                    from fastapi.responses import JSONResponse
                     return JSONResponse({"detail": "Organization is inactive. Contact the super admin."}, status_code=403)
                 tenant_pool = await get_tenant_pool_by_org_id(org_id)
                 resolved_org_id = org_id

@@ -1,4 +1,4 @@
-"""AI generation & chat routes used by AdminPortal and AIChatbot."""
+﻿"""AI generation & chat routes used by AdminPortal and AIChatbot."""
 
 import logging
 from logging_config import LogConfig
@@ -11,6 +11,8 @@ from services.ai_service import (
     generate_sql_problems,
 )
 from audit_logger import get_audit_logger, AuditEventType
+from database import get_primary_pool
+import pymysql.cursors
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 logger = LogConfig.get_logger(__name__)
@@ -28,7 +30,7 @@ def _client_ip(request: Request) -> str:
 async def _log_read_access(request: Request):
     if request.method == "GET":
         audit_logger.log_data_access(
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="ai_read",
             query_params={"path": request.url.path, "query": request.url.query},
@@ -38,7 +40,24 @@ async def _log_read_access(request: Request):
 router.dependencies.append(Depends(_log_read_access))
 
 
-# ─── Request / Response Models ──────────────────────────────────────────
+async def _require_actor(request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Missing user context")
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id FROM users WHERE id = %s LIMIT 1", (actor,))
+            if not await cur.fetchone():
+                from fastapi import HTTPException
+                raise HTTPException(status_code=401, detail="Invalid user context")
+
+
+router.dependencies.append(Depends(_require_actor))
+
+
+# â”€â”€â”€ Request / Response Models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class GenerateProblemRequest(BaseModel):
@@ -70,7 +89,7 @@ class AIChatRequest(BaseModel):
     context: str = "problem"
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────
+# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 _CODING_SYSTEM = (
@@ -393,7 +412,7 @@ async def _generate_section_questions(section: str, topic: str, difficulty: str,
     return _fallback_aptitude_questions(section, focus, difficulty, count)
 
 
-# ─── Routes ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/generate-problem")
@@ -425,7 +444,7 @@ async def generate_problem(body: GenerateProblemRequest, request: Request):
                 generated.setdefault("language", body.language)
             audit_logger.log_event(
                 AuditEventType.RESOURCE_ACCESSED,
-                user_id=request.headers.get("x-user-id", "anonymous"),
+                user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
                 ip_address=_client_ip(request),
                 resource_type="ai_generation",
                 action="Generated problem/task",
@@ -546,3 +565,4 @@ async def ai_chat(body: AIChatRequest, request: Request):
             "success": False,
             "details": str(exc),
         }
+

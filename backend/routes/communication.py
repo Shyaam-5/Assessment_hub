@@ -1,13 +1,13 @@
-"""Communication Skills API routes – integrated from the standalone coms module.
+﻿"""Communication Skills API routes â€“ integrated from the standalone coms module.
 
 Prefix: /api/communication
 Tag: communication
 
 Provides endpoints for four English communication training modules:
-  A – Read & Speak
-  B – Listen & Repeat (with TTS audio)
-  C – Topic Speaking
-  D – Grammar Quiz
+  A â€“ Read & Speak
+  B â€“ Listen & Repeat (with TTS audio)
+  C â€“ Topic Speaking
+  D â€“ Grammar Quiz
 Plus a performance report endpoint and admin test management.
 """
 
@@ -54,26 +54,6 @@ async def _insert_unified_proctor_event(
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS proctoring_events_unified (
-                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    test_type VARCHAR(32) NOT NULL,
-                    test_id VARCHAR(64) NULL,
-                    attempt_id VARCHAR(64) NULL,
-                    user_id VARCHAR(64) NOT NULL,
-                    session_id VARCHAR(128) NOT NULL,
-                    event_type VARCHAR(64) NOT NULL,
-                    severity VARCHAR(16) NOT NULL,
-                    details LONGTEXT,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_pu_test_type (test_type),
-                    INDEX idx_pu_user (user_id),
-                    INDEX idx_pu_session (session_id),
-                    INDEX idx_pu_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
-            await cur.execute(
-                """
                 INSERT INTO proctoring_events_unified
                 (test_type, test_id, attempt_id, user_id, session_id, event_type, severity, details)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
@@ -107,6 +87,13 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
             return bool(await cur.fetchone())
 
 
+async def _require_comm_permission(request: Request, permissions: list[str]) -> str:
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, permissions):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    return actor
+
+
 def _client_ip(request: Request) -> str:
     if "x-forwarded-for" in request.headers:
         return request.headers["x-forwarded-for"].split(",")[0].strip()
@@ -119,7 +106,7 @@ async def _log_read_access(request: Request):
     if request.method != "GET":
         return
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="communication_read",
         query_params={"path": request.url.path, "query": request.url.query},
@@ -128,7 +115,7 @@ async def _log_read_access(request: Request):
 
 router.dependencies.append(Depends(_log_read_access))
 
-# ─── DB helpers ──────────────────────────────────────────────────
+# â”€â”€â”€ DB helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS comm_performance (
@@ -177,7 +164,7 @@ async def _get_completed(user_id: str, module: str) -> list[int]:
     return [r["question_number"] for r in rows]
 
 
-# ─── Lifecycle: create table on first request ───────────────────
+# â”€â”€â”€ Lifecycle: create table on first request â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _table_ready = False
 
@@ -189,7 +176,7 @@ async def _maybe_init():
         _table_ready = True
 
 
-# ─── GET content endpoints ───────────────────────────────────────
+# â”€â”€â”€ GET content endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/moduleA/sentence")
 async def get_sentence_a(userId: str | None = None):
@@ -217,7 +204,7 @@ async def get_sentence_b(userId: str | None = None):
             available = filtered
     sid = random.choice(available)
 
-    # Generate TTS audio — pass the actual sentence text to edge-tts
+    # Generate TTS audio â€” pass the actual sentence text to edge-tts
     tts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "tts")
     audio_url = await generate_tts_audio(SENTENCES_B[sid], sid, tts_dir)
 
@@ -248,14 +235,15 @@ async def get_quiz_endpoint(userId: str | None = None):
     return get_quiz(num_questions=5, excluded_indices=excluded)
 
 
-# ─── POST submission endpoints ───────────────────────────────────
+# â”€â”€â”€ POST submission endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/moduleA")
 async def submit_module_a(request: Request):
     """Submit Read & Speak transcription for AI evaluation."""
     await _maybe_init()
     data = await request.json()
-    user_id = data.get("userId")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    user_id = data.get("userId") or actor
     session_id = data.get("sessionId", "default")
     sentence_id = data.get("sentenceId")
     transcribed = data.get("transcribedText", "")
@@ -263,6 +251,8 @@ async def submit_module_a(request: Request):
 
     if not user_id:
         raise HTTPException(400, "userId is required")
+    if user_id != actor:
+        raise HTTPException(403, "Permission denied")
 
     target_sentence = data.get("targetSentence")
     result = await run_module_a(transcribed, duration, sentence_id, target_sentence=target_sentence)
@@ -280,7 +270,8 @@ async def submit_module_b(request: Request):
     """Submit Listen & Repeat transcription for AI evaluation."""
     await _maybe_init()
     data = await request.json()
-    user_id = data.get("userId")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    user_id = data.get("userId") or actor
     session_id = data.get("sessionId", "default")
     sentence_id = data.get("sentenceId")
     transcribed = data.get("transcribedText", "")
@@ -288,6 +279,8 @@ async def submit_module_b(request: Request):
 
     if not user_id:
         raise HTTPException(400, "userId is required")
+    if user_id != actor:
+        raise HTTPException(403, "Permission denied")
 
     target_sentence = data.get("targetSentence")
     result = await run_module_b(transcribed, sentence_id, duration, target_sentence=target_sentence)
@@ -305,13 +298,16 @@ async def submit_module_c(request: Request):
     """Submit Topic Speaking transcription for AI evaluation."""
     await _maybe_init()
     data = await request.json()
-    user_id = data.get("userId")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    user_id = data.get("userId") or actor
     session_id = data.get("sessionId", "default")
     topic_id = data.get("topicId")
     transcribed = data.get("transcribedText", "")
 
     if not user_id:
         raise HTTPException(400, "userId is required")
+    if user_id != actor:
+        raise HTTPException(403, "Permission denied")
 
     result = await run_module_c(transcribed, topic_id)
     result["topic_id"] = topic_id
@@ -329,12 +325,15 @@ async def submit_module_d(request: Request):
     """Submit Grammar Quiz answers for evaluation."""
     await _maybe_init()
     data = await request.json()
-    user_id = data.get("userId")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    user_id = data.get("userId") or actor
     session_id = data.get("sessionId", "default")
     answers = data.get("answers", [])
 
     if not user_id:
         raise HTTPException(400, "userId is required")
+    if user_id != actor:
+        raise HTTPException(403, "Permission denied")
     if not answers:
         raise HTTPException(400, "answers are required")
 
@@ -351,12 +350,16 @@ async def submit_module_d(request: Request):
     return result
 
 
-# ─── Report endpoint ────────────────────────────────────────────
+# â”€â”€â”€ Report endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/report")
-async def get_report(userId: str, sessionId: str = "default"):
+async def get_report(request: Request, userId: str, sessionId: str = "default"):
     """Get aggregated performance report per module."""
     await _maybe_init()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == userId):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -394,12 +397,16 @@ async def get_report(userId: str, sessionId: str = "default"):
     }
 
 
-# ─── History endpoint (for the report chart) ────────────────────
+# â”€â”€â”€ History endpoint (for the report chart) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/history")
-async def get_history(userId: str):
+async def get_history(request: Request, userId: str):
     """Get all performance records for a user (for charts)."""
     await _maybe_init()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == userId):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -413,7 +420,7 @@ async def get_history(userId: str):
     return {"success": True, "records": rows}
 
 
-# ─── Proctoring ─────────────────────────────────────────────────
+# â”€â”€â”€ Proctoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _PROCTORING_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS comm_proctoring_logs (
@@ -441,7 +448,7 @@ async def _ensure_proctor_table():
         _proctor_table_ready = True
 
 
-# ── Agent analysis event counter (per session, in-memory) ──
+# â”€â”€ Agent analysis event counter (per session, in-memory) â”€â”€
 _agent_event_counter: dict[str, int] = {}
 _AGENT_COUNTER_MAX = 1000  # Prevent unbounded growth
 _AGENT_TRIGGER_INTERVAL = 5  # run agent every N events
@@ -503,9 +510,14 @@ async def _maybe_trigger_agent(session_id: str, severity: str, user_id: str = ""
 @router.post("/proctoring/log")
 async def proctoring_log(request: Request):
     """Log a proctoring violation event."""
+    await _require_comm_permission(request, ["communication.attempt", "communication.assign"])
     await _ensure_proctor_table()
     data = await request.json()
-    user_id = data.get("userId", "")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    user_id = data.get("userId", "") or actor
+    if not (can_assign or user_id == actor):
+        raise HTTPException(403, "Permission denied")
     session_id = data.get("sessionId", "default")
     event_type = data.get("eventType", "unknown")
     severity = data.get("severity", "low")
@@ -532,7 +544,7 @@ async def proctoring_log(request: Request):
         details=str(details or ""),
     )
 
-    # ── Trigger Proctor Intelligence Agent (background, non-blocking) ──
+    # â”€â”€ Trigger Proctor Intelligence Agent (background, non-blocking) â”€â”€
     # Evict old entries if counter grows too large
     if len(_agent_event_counter) > _AGENT_COUNTER_MAX:
         oldest_keys = sorted(_agent_event_counter, key=_agent_event_counter.get)[:_AGENT_COUNTER_MAX // 2]
@@ -560,8 +572,12 @@ async def proctoring_log(request: Request):
 
 
 @router.get("/proctoring/status")
-async def proctoring_status(userId: str, sessionId: str = "default"):
+async def proctoring_status(request: Request, userId: str, sessionId: str = "default"):
     """Get proctoring violation counts for the current session."""
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == userId):
+        raise HTTPException(403, "Permission denied")
     await _ensure_proctor_table()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -576,9 +592,9 @@ async def proctoring_status(userId: str, sessionId: str = "default"):
     return {"success": True, "violations": violations}
 
 
-# ═══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  ADMIN: Communication Test Management
-# ═══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 _COMM_TESTS_TABLE = """
 CREATE TABLE IF NOT EXISTS comm_tests (
@@ -654,7 +670,7 @@ def _safe_json(val):
     return json.loads(val) if isinstance(val, str) else val
 
 
-# ─── AI Generation for Communication Content ────────────────────
+# â”€â”€â”€ AI Generation for Communication Content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def _ai_generate_sentences(count: int, difficulty: str = "mixed") -> list[str]:
     """Generate sentences for Read & Speak / Listen & Repeat using AI."""
@@ -748,11 +764,12 @@ async def _ai_generate_grammar(count: int) -> list[dict]:
     return QUESTIONS_BANK[:count]
 
 
-# ─── Admin CRUD Endpoints ───────────────────────────────────────
+# â”€â”€â”€ Admin CRUD Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/tests/create")
 async def create_comm_test(request: Request):
     """Create a new communication test (admin)."""
+    await _require_comm_permission(request, ["communication.assign"])
     await _ensure_comm_tables()
     data = await request.json()
 
@@ -831,7 +848,7 @@ async def create_comm_test(request: Request):
 
     audit_logger.log_event(
         AuditEventType.ADMIN_TEST_CREATED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=str(test_id),
         resource_type="communication_test",
@@ -844,6 +861,7 @@ async def create_comm_test(request: Request):
 @router.post("/tests/generate-preview")
 async def generate_preview(request: Request):
     """Generate AI content preview without saving (for admin preview)."""
+    await _require_comm_permission(request, ["communication.assign"])
     data = await request.json()
     module = data.get("module", "A")
     count = int(data.get("count", 5))
@@ -863,8 +881,9 @@ async def generate_preview(request: Request):
 
 
 @router.get("/tests/all")
-async def get_all_comm_tests():
+async def get_all_comm_tests(request: Request):
     """Get all communication tests (admin)."""
+    await _require_comm_permission(request, ["communication.assign"])
     await _ensure_comm_tables()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -888,6 +907,7 @@ async def get_all_comm_tests():
 @router.put("/tests/{test_id}/toggle")
 async def toggle_comm_test(test_id: int, request: Request):
     """Toggle active state of a communication test."""
+    await _require_comm_permission(request, ["communication.assign"])
     await _ensure_comm_tables()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -896,7 +916,7 @@ async def toggle_comm_test(test_id: int, request: Request):
         await conn.commit()
     audit_logger.log_event(
         AuditEventType.ADMIN_TEST_MODIFIED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=str(test_id),
         resource_type="communication_test",
@@ -908,6 +928,7 @@ async def toggle_comm_test(test_id: int, request: Request):
 @router.delete("/tests/{test_id}")
 async def delete_comm_test(test_id: int, request: Request):
     """Delete a communication test and all its attempts."""
+    await _require_comm_permission(request, ["communication.assign"])
     await _ensure_comm_tables()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -917,7 +938,7 @@ async def delete_comm_test(test_id: int, request: Request):
         await conn.commit()
     audit_logger.log_event(
         AuditEventType.ADMIN_TEST_DELETED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=str(test_id),
         resource_type="communication_test",
@@ -927,8 +948,9 @@ async def delete_comm_test(test_id: int, request: Request):
 
 
 @router.get("/tests/{test_id}/attempts")
-async def get_comm_test_attempts(test_id: int):
+async def get_comm_test_attempts(test_id: int, request: Request):
     """Get all attempts for a communication test (admin)."""
+    await _require_comm_permission(request, ["communication.assign"])
     await _ensure_comm_tables()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -950,12 +972,12 @@ async def get_comm_test_attempts(test_id: int):
     ]
 
 
-# ─── Student: Discover & Take Tests ─────────────────────────────
+# â”€â”€â”€ Student: Discover & Take Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/tests/student/available")
 async def student_available_comm_tests(studentId: str, request: Request):
     """Get available communication tests for a student."""
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     can_assign = await _has_any_permission(actor, ["communication.assign"])
     can_attempt = await _has_any_permission(actor, ["communication.attempt"])
     if not (can_assign or (can_attempt and actor == studentId)):
@@ -1012,7 +1034,7 @@ async def student_available_comm_tests(studentId: str, request: Request):
 @router.post("/tests/{test_id}/start")
 async def start_comm_test(test_id: int, request: Request):
     """Start a communication test attempt."""
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     can_assign = await _has_any_permission(actor, ["communication.assign"])
     can_attempt = await _has_any_permission(actor, ["communication.attempt"])
     if not (can_assign or can_attempt):
@@ -1020,7 +1042,7 @@ async def start_comm_test(test_id: int, request: Request):
     await _ensure_comm_tables()
     data = await request.json()
     student_id = data.get("studentId")
-    student_name = data.get("studentName", "")
+    student_name = ""
 
     if not student_id:
         raise HTTPException(400, "studentId is required")
@@ -1060,6 +1082,9 @@ async def start_comm_test(test_id: int, request: Request):
             if len(existing) >= test["attempt_limit"]:
                 raise HTTPException(400, "Attempt limit reached")
 
+            await cur.execute("SELECT name FROM users WHERE id = %s", (student_id,))
+            urow = await cur.fetchone()
+            student_name = (urow or {}).get("name") or ""
             await cur.execute(
                 "INSERT INTO comm_test_attempts (test_id, student_id, student_name, attempt_number) "
                 "VALUES (%s, %s, %s, %s)",
@@ -1092,8 +1117,11 @@ async def start_comm_test(test_id: int, request: Request):
 
 
 @router.get("/tests/attempt/{attempt_id}")
-async def get_comm_attempt(attempt_id: int):
+async def get_comm_attempt(attempt_id: int, request: Request):
     """Get a specific attempt with test data."""
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["communication.attempt", "communication.assign"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     await _ensure_comm_tables()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1108,6 +1136,9 @@ async def get_comm_attempt(attempt_id: int):
             row = await cur.fetchone()
     if not row:
         raise HTTPException(404, "Attempt not found")
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == (row.get("student_id") or "")):
+        raise HTTPException(status_code=403, detail="Permission denied")
     return {
         **row,
         "module_a_data": _safe_json(row.get("module_a_data")),
@@ -1125,7 +1156,7 @@ async def get_comm_attempt(attempt_id: int):
 @router.post("/tests/attempt/{attempt_id}/submit-module")
 async def submit_comm_module(attempt_id: int, request: Request):
     """Submit results for a single module within an attempt."""
-    actor = (request.headers.get("x-user-id") or "").strip()
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["communication.attempt", "communication.assign"]):
         raise HTTPException(status_code=403, detail="Permission denied")
     await _ensure_comm_tables()
@@ -1145,6 +1176,24 @@ async def submit_comm_module(attempt_id: int, request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute("START TRANSACTION")
+            await cur.execute(
+                "SELECT id, student_id, current_module, module_a_score, module_b_score, module_c_score "
+                "FROM comm_test_attempts WHERE id=%s FOR UPDATE",
+                (attempt_id,),
+            )
+            locked = await cur.fetchone()
+            if not locked:
+                raise HTTPException(404, "Attempt not found")
+            if not (await _has_any_permission(actor, ["communication.assign"]) or actor == (locked.get("student_id") or "")):
+                raise HTTPException(status_code=403, detail="Permission denied")
+            current_module = (locked.get("current_module") or "").upper()
+            if not current_module and module != "A":
+                raise HTTPException(409, "Must start with module A")
+            if current_module == "DONE":
+                raise HTTPException(409, "Attempt already completed")
+            if current_module and current_module != module:
+                raise HTTPException(409, f"Module out of order. Expected {current_module}, got {module}")
             if next_module:
                 await cur.execute(
                     f"UPDATE comm_test_attempts SET {col_data}=%s, {col_score}=%s, "
@@ -1153,14 +1202,9 @@ async def submit_comm_module(attempt_id: int, request: Request):
                 )
             else:
                 # Module D = last, calculate overall and complete
-                await cur.execute(
-                    f"SELECT module_a_score, module_b_score, module_c_score FROM comm_test_attempts WHERE id=%s",
-                    (attempt_id,),
-                )
-                prev = await cur.fetchone()
-                a_s = float(prev.get("module_a_score", 0)) if prev else 0
-                b_s = float(prev.get("module_b_score", 0)) if prev else 0
-                c_s = float(prev.get("module_c_score", 0)) if prev else 0
+                a_s = float(locked.get("module_a_score", 0) or 0)
+                b_s = float(locked.get("module_b_score", 0) or 0)
+                c_s = float(locked.get("module_c_score", 0) or 0)
                 overall = (a_s + b_s + c_s + score) / 4
 
                 await cur.execute(
@@ -1179,34 +1223,30 @@ async def submit_comm_module(attempt_id: int, request: Request):
 
 
 @router.post("/tests/attempt/{attempt_id}/finish")
-async def finish_comm_attempt(attempt_id: int, payload: dict = Body(default={})):
+async def finish_comm_attempt(attempt_id: int, request: Request, payload: dict = Body(default={})):
     """Finalize an attempt (mark complete) and store proctoring violations."""
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["communication.attempt", "communication.assign"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     await _ensure_comm_tables()
     pool = await get_pool()
     proctoring_violations = payload.get("proctoring_violations", 0)
     violation_details = payload.get("violation_details", {})
     auto_terminated = 1 if payload.get("auto_terminated") else 0
-    import json as _json
-    violation_json = _json.dumps(violation_details) if violation_details else None
+    violation_json = json.dumps(violation_details) if violation_details else None
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Ensure new columns exist (safe migration)
-            for col_sql in [
-                "ALTER TABLE comm_test_attempts ADD COLUMN violation_details JSON AFTER proctoring_violations",
-                "ALTER TABLE comm_test_attempts ADD COLUMN auto_terminated TINYINT DEFAULT 0 AFTER violation_details",
-            ]:
-                try:
-                    await cur.execute(col_sql)
-                except Exception:
-                    pass  # column already exists
             await cur.execute(
-                "SELECT module_a_score, module_b_score, module_c_score, module_d_score "
+                "SELECT student_id, module_a_score, module_b_score, module_c_score, module_d_score "
                 "FROM comm_test_attempts WHERE id=%s",
                 (attempt_id,),
             )
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(404, "Attempt not found")
+            can_assign = await _has_any_permission(actor, ["communication.assign"])
+            if not (can_assign or actor == (row.get("student_id") or "")):
+                raise HTTPException(status_code=403, detail="Permission denied")
             scores = [float(row.get(f"module_{m}_score", 0)) for m in "abcd"]
             filled = [s for s in scores if s > 0]
             overall = sum(filled) / len(filled) if filled else 0
@@ -1220,8 +1260,8 @@ async def finish_comm_attempt(attempt_id: int, payload: dict = Body(default={}))
         await conn.commit()
     audit_logger.log_event(
         AuditEventType.TEST_COMPLETED,
-        user_id=payload.get("userId"),
-        ip_address=payload.get("ipAddress"),
+        user_id=actor,
+        ip_address=_client_ip(request),
         resource_id=str(attempt_id),
         resource_type="communication_attempt",
         action="Communication test attempt finished",
@@ -1230,3 +1270,16 @@ async def finish_comm_attempt(attempt_id: int, payload: dict = Body(default={}))
     return {"success": True, "overall_score": overall,
             "proctoring_violations": proctoring_violations,
             "auto_terminated": bool(auto_terminated)}
+
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == userId):
+        raise HTTPException(403, "Permission denied")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == userId):
+        raise HTTPException(403, "Permission denied")
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    can_assign = await _has_any_permission(actor, ["communication.assign"])
+    if not (can_assign or actor == userId):
+        raise HTTPException(403, "Permission denied")

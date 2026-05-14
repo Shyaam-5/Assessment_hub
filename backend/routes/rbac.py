@@ -1,9 +1,10 @@
-"""Multi-tenant RBAC routes for organizations, roles, and user-role assignments."""
+﻿"""Multi-tenant RBAC routes for organizations, roles, and user-role assignments."""
 
 from __future__ import annotations
 
 import re
 import uuid
+import os
 from typing import Any
 from urllib.parse import urlparse
 import ssl as _ssl
@@ -40,14 +41,19 @@ def _slugify(value: str) -> str:
 
 
 def _request_user_id(request: Request) -> str:
-    return (request.headers.get("x-user-id") or "").strip()
+    return (getattr(request.state, "auth_user_id", None) or "").strip()
 
 
 def _connect_mysql_from_url(db_url: str):
     parsed = urlparse(db_url)
     ssl_ctx = _ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = _ssl.CERT_NONE
+    if os.getenv("DB_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+    else:
+        ca_path = os.getenv("DB_SSL_CA", "")
+        if ca_path:
+            ssl_ctx.load_verify_locations(ca_path)
     return pymysql.connect(
         host=parsed.hostname,
         port=int(parsed.port or 3306),
@@ -64,8 +70,13 @@ def _connect_mysql_from_url(db_url: str):
 
 def _connect_primary_db():
     ssl_ctx = _ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = _ssl.CERT_NONE
+    if os.getenv("DB_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+    else:
+        ca_path = os.getenv("DB_SSL_CA", "")
+        if ca_path:
+            ssl_ctx.load_verify_locations(ca_path)
     return pymysql.connect(
         host=settings.DB_HOST,
         port=settings.DB_PORT,
@@ -375,7 +386,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                 INSERT INTO roles (id, organization_id, name, slug, description, is_system)
                 VALUES (%s, %s, %s, %s, %s, 1)
                 """,
-                (role_id, org_id, "Organization Admin", "organization-admin", "Default organization super role", 1),
+                (role_id, org_id, "Organization Admin", "organization-admin", "Default organization super role"),
             )
             role_perms = [p for module in PERMISSION_CATALOG.values() for p in module]
             for perm in role_perms:
@@ -397,7 +408,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                     "Exam Taker",
                     "exam-taker",
                     "Minimal learner role for assigned exams only",
-                ),
+                )
             )
             exam_taker_perms = [
                 "tests.view_allocated",
@@ -450,8 +461,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                 f"Hello {body.adminName},\n\n"
                 f"You have been registered as Organization Admin for '{body.name}'.\n"
                 f"Login Email: {body.adminEmail}\n"
-                f"Temporary Password: {body.adminPassword}\n\n"
-                "Please login and change your password immediately.\n"
+                "Please use the password shared securely by super admin and change it immediately after login.\n"
             ),
         )
     except Exception:
@@ -827,10 +837,10 @@ async def create_org_user(org_id: str, body: CreateOrgUserBody, request: Request
                 f"Hello {body.name},\n\n"
                 "Your account has been created.\n"
                 f"Login Email: {body.email}\n"
-                f"Temporary Password: {body.password}\n\n"
-                "Please login and change your password.\n"
+                "Please use the password shared securely by your organization admin and change it after login.\n"
             ),
         )
     except Exception:
         pass
     return {"success": True, "userId": user_id}
+

@@ -1,4 +1,4 @@
-"""AI chatbot route."""
+﻿"""AI chatbot route."""
 
 import logging
 from logging_config import LogConfig
@@ -53,7 +53,7 @@ async def chat(body: ChatRequest, request: Request):
         reply = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
         audit_logger.log_event(
             AuditEventType.RESOURCE_ACCESSED,
-            user_id=request.headers.get("x-user-id", "anonymous"),
+            user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
             ip_address=_client_ip(request),
             resource_type="chat",
             action="AI chat response generated",
@@ -61,3 +61,4 @@ async def chat(body: ChatRequest, request: Request):
         return {"reply": reply, "success": True}
     except Exception as e:
         return {"reply": "Sorry, I'm having trouble responding right now.", "success": False, "error": str(e)}
+

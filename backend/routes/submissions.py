@@ -1,4 +1,4 @@
-"""Submission routes with AI evaluation, plagiarism detection, and SQL execution."""
+﻿"""Submission routes with AI evaluation, plagiarism detection, and SQL execution."""
 
 import json
 import re
@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Form, File, UploadFile, Request
+from fastapi import APIRouter, HTTPException, Query, Form, File, UploadFile, Request, Depends
 from pydantic import BaseModel
 
 import pymysql.cursors
@@ -23,6 +23,56 @@ audit_logger = get_audit_logger()
 PISTON_URL = "https://emkc.org/api/v2/piston/execute"
 
 
+async def _require_actor(request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing user context")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id FROM users WHERE id = %s LIMIT 1", (actor,))
+            if not await cur.fetchone():
+                raise HTTPException(status_code=401, detail="Invalid user context")
+
+
+router.dependencies.append(Depends(_require_actor))
+
+
+async def _get_actor_user(request: Request) -> dict[str, Any]:
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing user context")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, role, mentor_id FROM users WHERE id = %s LIMIT 1",
+                (actor,),
+            )
+            user = await cur.fetchone()
+            if not user:
+                raise HTTPException(status_code=401, detail="Invalid user context")
+            return user
+
+
+async def _can_manage_all_submissions(user_id: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s
+                  AND rp.permission_key IN ('submissions.manage', 'submissions.view_all')
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            return bool(await cur.fetchone())
+
+
 def _client_ip(request: Request) -> str:
     if "x-forwarded-for" in request.headers:
         return request.headers["x-forwarded-for"].split(",")[0].strip()
@@ -31,7 +81,7 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "UNKNOWN"
 
 
-# ─── Request Bodies ────────────────────────────────────────────
+# â”€â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class SubmissionCreate(BaseModel):
     studentId: str
@@ -73,7 +123,7 @@ class ProctoredSubmission(BaseModel):
     proctored: bool | None = False
 
 
-# ─── SQL helpers ───────────────────────────────────────────────
+# â”€â”€â”€ SQL helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _parse_sql_output(output: str) -> list[list[str]] | None:
     if not output or not output.strip():
@@ -149,7 +199,7 @@ def _evaluate_sql(data: dict, expected_result: str) -> dict:
         }
 
 
-# ─── Penalty helpers ───────────────────────────────────────────
+# â”€â”€â”€ Penalty helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _apply_penalties(
     score: int,
@@ -175,46 +225,46 @@ def _apply_penalties(
         # OR-accumulate so reordering the penalty checks below can't ever
         # silently flip integrity from True back to False.
         integrity = integrity or (tab_switches >= 3)
-        feedback += f"\n\n⚠️ Penalty: -{pen} points for {tab_switches} tab switches."
+        feedback += f"\n\nâš ï¸ Penalty: -{pen} points for {tab_switches} tab switches."
 
     if plagiarism_detected:
         score = max(0, int(score * 0.3))
         integrity = True
-        feedback += "\n\n⚠️ Academic Integrity Warning: Plagiarism detected. Score reduced by 70%."
+        feedback += "\n\nâš ï¸ Academic Integrity Warning: Plagiarism detected. Score reduced by 70%."
 
     if copy_paste > 0:
         pen = min(copy_paste * 3, 15)
         score = max(0, score - pen)
-        feedback += f"\n\n⚠️ Penalty: -{pen} points for copy/paste attempts."
+        feedback += f"\n\nâš ï¸ Penalty: -{pen} points for copy/paste attempts."
 
     if camera_blocked > 0:
         pen = min(camera_blocked * 10, 30)
         score = max(0, score - pen)
         if camera_blocked >= 2:
             integrity = True
-        feedback += f"\n\n⚠️ High Penalty: -{pen} points for camera obstruction."
+        feedback += f"\n\nâš ï¸ High Penalty: -{pen} points for camera obstruction."
 
     if phone_detected > 0:
         pen = min(phone_detected * 15, 45)
         score = max(0, score - pen)
         integrity = True
-        feedback += f"\n\n⛔ Severe Penalty: -{pen} points for phone detection."
+        feedback += f"\n\nâ›” Severe Penalty: -{pen} points for phone detection."
 
     if face_not_detected > 0:
         pen = min(face_not_detected * 5, 25)
         score = max(0, score - pen)
-        feedback += f"\n\n⚠️ Penalty: -{pen} points for face not detected ({face_not_detected} times)."
+        feedback += f"\n\nâš ï¸ Penalty: -{pen} points for face not detected ({face_not_detected} times)."
 
     if multiple_faces > 0:
         pen = min(20 * multiple_faces, 60)
         score = max(0, score - pen)
         integrity = True
-        feedback += f"\n\n⛔ Severe Penalty: -{pen} points for multiple people detected."
+        feedback += f"\n\nâ›” Severe Penalty: -{pen} points for multiple people detected."
 
     if face_lookaway > 0:
         pen = min(face_lookaway * 3, 15)
         score = max(0, score - pen)
-        feedback += f"\n\n⚠️ Penalty: -{pen} points for looking away from screen ({face_lookaway} times)."
+        feedback += f"\n\nâš ï¸ Penalty: -{pen} points for looking away from screen ({face_lookaway} times)."
 
     return score, feedback, integrity
 
@@ -251,7 +301,7 @@ def _extract_json(text: str) -> dict:
     return {}
 
 
-# ─── Routes ────────────────────────────────────────────────────
+# â”€â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/submissions")
 async def list_submissions(
@@ -261,6 +311,48 @@ async def list_submissions(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
+    actor_user = await _get_actor_user(request)
+    actor_id = actor_user["id"]
+    actor_role = (actor_user.get("role") or "").lower()
+    has_manage_all = await _can_manage_all_submissions(actor_id)
+
+    # Student scope: only self
+    if actor_role == "student":
+        if mentorId:
+            raise HTTPException(status_code=403, detail="Students cannot query mentor scope")
+        if studentId and studentId != actor_id:
+            raise HTTPException(status_code=403, detail="Students can only view own submissions")
+        studentId = actor_id
+
+    # Mentor scope: only allocated students unless privileged
+    if actor_role == "mentor" and not has_manage_all:
+        if mentorId and mentorId != actor_id:
+            raise HTTPException(status_code=403, detail="Mentors can only query their own mentees")
+        mentorId = actor_id
+        if studentId:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT 1 FROM mentor_student_allocations
+                        WHERE mentor_id = %s AND student_id = %s
+                        LIMIT 1
+                        """,
+                        (actor_id, studentId),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+
+    # Non-admin/non-mentor roles: self only
+    if actor_role not in ("admin", "organization_admin", "mentor", "student") and not has_manage_all:
+        if mentorId:
+            raise HTTPException(status_code=403, detail="Forbidden scope")
+        if studentId and studentId != actor_id:
+            raise HTTPException(status_code=403, detail="Forbidden scope")
+        studentId = actor_id
+
+    # Admin-like users can query freely.
     pool = await get_pool()
     offset = (page - 1) * limit
     params: list = []
@@ -341,7 +433,7 @@ async def list_submissions(
         })
 
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="submissions",
         query_params={"studentId": studentId, "mentorId": mentorId, "page": page, "limit": limit},
@@ -352,6 +444,12 @@ async def list_submissions(
 
 @router.post("/submissions")
 async def create_submission(body: SubmissionCreate, request: Request):
+    actor_user = await _get_actor_user(request)
+    actor_id = actor_user["id"]
+    actor_role = (actor_user.get("role") or "").lower()
+    if actor_role in ("student", "learner") and body.studentId != actor_id:
+        raise HTTPException(status_code=403, detail="Students can submit only for themselves")
+
     pool = await get_pool()
     submission_id = str(uuid.uuid4())
     submitted_at = datetime.now(timezone.utc)
@@ -501,7 +599,7 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
 
     audit_logger.log_event(
         event_type=AuditEventType.SUBMISSION_CREATED,
-        user_id=body.studentId,
+        user_id=actor_id,
         ip_address=_client_ip(request),
         resource_id=submission_id,
         resource_type="submission",
@@ -537,6 +635,12 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
 
 @router.post("/submissions/ml-task")
 async def ml_task_submission(body: MLTaskSubmission, request: Request):
+    actor_user = await _get_actor_user(request)
+    actor_id = actor_user["id"]
+    actor_role = (actor_user.get("role") or "").lower()
+    if actor_role in ("student", "learner") and body.studentId != actor_id:
+        raise HTTPException(status_code=403, detail="Students can submit only for themselves")
+
     if not body.studentId or not body.taskId:
         raise HTTPException(400, "Missing studentId or taskId")
 
@@ -585,7 +689,7 @@ Return strict JSON:
             "metrics": {"Availability": 0},
         }
 
-    # Save to DB (background — don't block response)
+    # Save to DB (background â€” don't block response)
     try:
         pool = await get_pool()
         sub_id = str(uuid.uuid4())
@@ -624,7 +728,7 @@ Return strict JSON:
 
     audit_logger.log_event(
         event_type=AuditEventType.SUBMISSION_CREATED,
-        user_id=body.studentId,
+        user_id=actor_id,
         ip_address=_client_ip(request),
         resource_type="submission",
         action="ML task submission created",
@@ -640,6 +744,12 @@ Return strict JSON:
 
 @router.post("/submissions/proctored")
 async def proctored_submission(body: ProctoredSubmission, request: Request):
+    actor_user = await _get_actor_user(request)
+    actor_id = actor_user["id"]
+    actor_role = (actor_user.get("role") or "").lower()
+    if actor_role in ("student", "learner") and body.studentId != actor_id:
+        raise HTTPException(status_code=403, detail="Students can submit only for themselves")
+
     pool = await get_pool()
     submission_id = str(uuid.uuid4())
     submitted_at = datetime.now(timezone.utc)
@@ -757,7 +867,7 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
 
     audit_logger.log_event(
         event_type=AuditEventType.TEST_PROCTORING_LOG,
-        user_id=studentId,
+        user_id=actor_id,
         ip_address=_client_ip(request),
         resource_id=submission_id,
         resource_type="submission",
@@ -790,3 +900,4 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
         },
         "submittedAt": str(submitted_at),
     }
+

@@ -19,6 +19,7 @@ from config import settings
 from database import get_primary_pool
 from services.otp_delivery import send_login_otp_email
 from audit_logger import get_audit_logger, AuditEventType
+from security import create_access_token
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -109,6 +110,19 @@ def _client_ip_from_request(request: Request | None) -> str:
     return request.client.host if request.client else "UNKNOWN"
 
 
+def _issue_user_token(user: dict) -> str:
+    return create_access_token(
+        {
+            "sub": user.get("id"),
+            "role": user.get("role"),
+            "organization_id": user.get("organizationId"),
+            "email": user.get("email"),
+        },
+        settings.SECRET_KEY,
+        settings.JWT_ACCESS_TOKEN_EXPIRES_MINUTES,
+    )
+
+
 # ---------- Request / Response models ----------
 
 class LoginRequest(BaseModel):
@@ -189,6 +203,30 @@ async def _attach_rbac_context(user: dict) -> dict:
     return user
 
 
+async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
+    if not user_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+            if row and row.get("role") == "admin":
+                return True
+            fmt = ",".join(["%s"] * len(permissions))
+            await cur.execute(
+                f"""
+                SELECT 1
+                FROM user_role_assignments ura
+                JOIN role_permissions rp ON rp.role_id = ura.role_id
+                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
+                LIMIT 1
+                """,
+                [user_id, *permissions],
+            )
+            return bool(await cur.fetchone())
+
+
 # ---------- Routes ----------
 
 @router.post("/auth/login")
@@ -227,8 +265,8 @@ async def login(body: LoginRequest, request: Request):
         )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    status_val = (row.get("status") or "active") or "active"
-    if str(status_val).lower() not in ("active", "enabled", "1", "true", ""):
+    status_val = row.get("status") or "active"
+    if str(status_val).lower() not in ("active", "enabled", "1", "true"):
         audit_logger.log_authentication(
             event_type=AuditEventType.AUTH_LOGIN_FAILURE,
             user_id=row.get("id"),
@@ -323,8 +361,8 @@ async def login_with_google(body: GoogleLoginRequest, request: Request):
             detail="No account exists for this Google email. Ask an administrator to create your user first.",
         )
 
-    status_val = (row.get("status") or "active") or "active"
-    if str(status_val).lower() not in ("active", "enabled", "1", "true", ""):
+    status_val = row.get("status") or "active"
+    if str(status_val).lower() not in ("active", "enabled", "1", "true"):
         audit_logger.log_authentication(
             event_type=AuditEventType.AUTH_LOGIN_FAILURE,
             user_id=row.get("id"),
@@ -435,7 +473,7 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
         action="OTP verified",
         status="SUCCESS",
     )
-    must_change = user.get("mustChangePassword") or bool(int(row.get("must_change_password") or 0))
+    must_change = user.get("mustChangePassword") or str(row.get("must_change_password") or "0").strip().lower() in ("1", "true", "yes")
 
     if must_change:
         setup_token = str(uuid.uuid4())
@@ -454,14 +492,24 @@ async def verify_otp(body: VerifyOtpBody, request: Request):
                     (setup_token, row["id"], setup_mins),
                 )
             await conn.commit()
+        token = _issue_user_token(user)
         return {
             "success": True,
             "mustChangePassword": True,
             "setupToken": setup_token,
             "user": user,
+            "accessToken": token,
+            "tokenType": "Bearer",
         }
 
-    return {"success": True, "mustChangePassword": False, "user": user}
+    token = _issue_user_token(user)
+    return {
+        "success": True,
+        "mustChangePassword": False,
+        "user": user,
+        "accessToken": token,
+        "tokenType": "Bearer",
+    }
 
 
 @router.post("/auth/complete-first-login")
@@ -526,11 +574,16 @@ async def complete_first_login(body: CompleteFirstLoginBody, request: Request):
         action="Completed first login password change",
         status="SUCCESS",
     )
-    return {"success": True, "user": await _attach_rbac_context(_clean_user(row))}
+    user = await _attach_rbac_context(_clean_user(row))
+    token = _issue_user_token(user)
+    return {"success": True, "user": user, "accessToken": token, "tokenType": "Bearer"}
 
 
 @router.post("/auth/verify")
-async def verify_login(body: VerifyRequest):
+async def verify_login(body: VerifyRequest, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor or actor != body.userId:
+        raise HTTPException(status_code=401, detail="Invalid session")
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -554,11 +607,15 @@ async def verify_login(body: VerifyRequest):
             detail="Password change required. Sign in again to finish setup.",
         )
 
-    return {"success": True, "user": user}
+    token = _issue_user_token(user)
+    return {"success": True, "user": user, "accessToken": token, "tokenType": "Bearer"}
 
 
 @router.get("/users/{user_id}")
-async def get_user(user_id: str):
+async def get_user(user_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["users.view"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -572,7 +629,10 @@ async def get_user(user_id: str):
 
 
 @router.get("/users")
-async def list_users(role: str | None = None):
+async def list_users(request: Request, role: str | None = None):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["users.view"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -612,7 +672,10 @@ async def list_users(role: str | None = None):
 
 
 @router.get("/mentors/{mentor_id}/students")
-async def get_mentor_students(mentor_id: str):
+async def get_mentor_students(mentor_id: str, request: Request):
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["users.view"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -623,3 +686,4 @@ async def get_mentor_students(mentor_id: str):
             rows = await cur.fetchall()
 
     return [_clean_user(r) for r in rows]
+

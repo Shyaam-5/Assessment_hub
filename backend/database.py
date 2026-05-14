@@ -30,11 +30,19 @@ from dotenv import dotenv_values
 
 from config import settings
 
+
+def _normalize_db_url(raw: str) -> str:
+    v = (raw or "").strip()
+    if v.upper().startswith("DATABASE_URL="):
+        v = v.split("=", 1)[1].strip()
+    return v
+
 # â"€â"€â"€ Global pool â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _pool: "PyMySQLPool | None" = None
 _tenant_pools: dict[str, "PyMySQLPool"] = {}
 _active_request_pool: ContextVar["PyMySQLPool | None"] = ContextVar("active_request_pool", default=None)
+_tenant_schema_checked: set[str] = set()
 
 
 class _AsyncCursorWrapper:
@@ -222,13 +230,13 @@ def clear_request_pool() -> None:
 def _build_connect_kwargs_from_url(db_url: str) -> dict:
     parsed = urlparse(db_url)
     ssl_ctx = _ssl.create_default_context()
-    if os.getenv("VERIFY_DB_SSL", "").strip() in ("1", "true", "yes"):
+    if os.getenv("DB_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+    else:
         ca_path = os.getenv("DB_SSL_CA", "")
         if ca_path:
             ssl_ctx.load_verify_locations(ca_path)
-    else:
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = _ssl.CERT_NONE
 
     return dict(
         host=parsed.hostname or "localhost",
@@ -271,6 +279,13 @@ async def get_tenant_pool_by_org_id(org_id: str | None) -> "PyMySQLPool | None":
     db_url = (row or {}).get("db_url")
     if not db_url:
         return None
+    # Ensure tenant schema is ready at first touch for this org.
+    if org_id not in _tenant_schema_checked:
+        try:
+            await asyncio.to_thread(_bootstrap_missing_tables_into_tenant, db_url)
+            _tenant_schema_checked.add(org_id)
+        except Exception as exc:
+            raise RuntimeError(f"Tenant schema bootstrap failed for org {org_id}: {exc}")
     return await get_tenant_pool_by_db_url(db_url)
 
 
@@ -282,18 +297,20 @@ async def init_db() -> None:
     # not be verifiable on all platforms.  In production set VERIFY_DB_SSL=1
     # and provide the CA bundle via DB_SSL_CA env-var.
     ssl_ctx = _ssl.create_default_context()
-    if os.getenv("VERIFY_DB_SSL", "").strip() in ("1", "true", "yes"):
+    if os.getenv("DB_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+    else:
         ca_path = os.getenv("DB_SSL_CA", "")
         if ca_path:
             ssl_ctx.load_verify_locations(ca_path)
-    else:
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = _ssl.CERT_NONE
 
     # Resolve DB settings from backend/.env at runtime to avoid stale shell/process env drift.
     env_path = Path(__file__).resolve().parent / ".env"
     env_file = dotenv_values(env_path) if env_path.exists() else {}
-    runtime_db_url = (env_file.get("DATABASE_URL") or os.getenv("DATABASE_URL") or settings.DATABASE_URL or "").strip()
+    runtime_db_url = _normalize_db_url(
+        (env_file.get("DATABASE_URL") or os.getenv("DATABASE_URL") or settings.DATABASE_URL or "").strip()
+    )
     parsed = urlparse(runtime_db_url)
     db_host = parsed.hostname or settings.DB_HOST
     db_port = int(parsed.port or settings.DB_PORT)
@@ -363,6 +380,7 @@ async def close_db() -> None:
         except Exception:
             pass
     _tenant_pools.clear()
+    _tenant_schema_checked.clear()
 
 
 # â"€â"€â"€ Prescan table DDL â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -831,3 +849,279 @@ async def ensure_default_super_admins() -> None:
     except Exception as exc:
         print(f"[WARNING] Default super-admin seed failed: {exc}")
 
+
+async def ensure_proctoring_tables() -> None:
+    """Create all shared proctoring tables once at startup."""
+    if _pool is None:
+        print("[WARNING] Cannot run proctoring schema migration - pool not initialised.")
+        return
+
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS proctoring_events_unified (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            test_type VARCHAR(32) NOT NULL,
+            test_id VARCHAR(64) NULL,
+            attempt_id VARCHAR(64) NULL,
+            user_id VARCHAR(64) NOT NULL,
+            session_id VARCHAR(128) NOT NULL,
+            event_type VARCHAR(64) NOT NULL,
+            severity VARCHAR(16) NOT NULL,
+            details LONGTEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_pu_test_type (test_type),
+            INDEX idx_pu_user (user_id),
+            INDEX idx_pu_session (session_id),
+            INDEX idx_pu_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS aptitude_proctoring_logs (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            test_id VARCHAR(64) NULL,
+            user_id VARCHAR(64) NOT NULL,
+            session_id VARCHAR(128) NOT NULL,
+            event_type VARCHAR(64) NOT NULL,
+            severity VARCHAR(16) NOT NULL,
+            details LONGTEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_ap_user (user_id),
+            INDEX idx_ap_session (session_id),
+            INDEX idx_ap_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS global_test_proctoring_logs (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            test_id VARCHAR(64) NULL,
+            user_id VARCHAR(64) NOT NULL,
+            session_id VARCHAR(128) NOT NULL,
+            event_type VARCHAR(64) NOT NULL,
+            severity VARCHAR(16) NOT NULL,
+            details LONGTEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_gtp_user (user_id),
+            INDEX idx_gtp_session (session_id),
+            INDEX idx_gtp_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS comm_proctoring_logs (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(50) NOT NULL,
+            session_id VARCHAR(100) NOT NULL DEFAULT 'default',
+            event_type VARCHAR(50) NOT NULL,
+            severity VARCHAR(20) NOT NULL DEFAULT 'low',
+            details LONGTEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_user_session (user_id, session_id),
+            INDEX idx_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS skill_proctoring_logs (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            attempt_id INT NOT NULL,
+            test_stage VARCHAR(32) NOT NULL,
+            event_type VARCHAR(64) NOT NULL,
+            severity VARCHAR(16) NOT NULL DEFAULT 'low',
+            details LONGTEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_sp_attempt (attempt_id),
+            INDEX idx_sp_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+    ]
+
+    try:
+        async with _pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                for sql in ddl:
+                    await cur.execute(sql)
+        print("[OK] Proctoring tables verified.")
+    except Exception as exc:
+        print(f"[WARNING] Proctoring schema migration (non-fatal): {exc}")
+
+
+async def run_startup_db_preflight(check_tenants: bool = True) -> dict:
+    """Run DB preflight checks during backend startup.
+
+    Returns a summary dict:
+      {"ok": bool, "primary": {...}, "tenants": [...]}
+    """
+    summary = {"ok": True, "primary_ok": True, "tenant_ok": True, "primary": {}, "tenants": []}
+    pool = await get_primary_pool()
+
+    # Primary DB checks
+    required_tables = [
+        "users",
+        "organizations",
+        "roles",
+        "role_permissions",
+        "user_role_assignments",
+    ]
+    required_columns = {
+        "users": ["id", "email", "password", "role", "organization_id", "status"],
+        "organizations": ["id", "name", "code", "db_url", "is_active"],
+    }
+
+    missing_tables: list[str] = []
+    missing_columns: list[str] = []
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for t in required_tables:
+                await cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+                    LIMIT 1
+                    """,
+                    (settings.DB_NAME, t),
+                )
+                if not await cur.fetchone():
+                    missing_tables.append(t)
+
+            for table, cols in required_columns.items():
+                for col in cols:
+                    await cur.execute(
+                        """
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s
+                        LIMIT 1
+                        """,
+                        (settings.DB_NAME, table, col),
+                    )
+                    if not await cur.fetchone():
+                        missing_columns.append(f"{table}.{col}")
+
+    summary["primary"] = {
+        "db": f"{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}",
+        "missing_tables": missing_tables,
+        "missing_columns": missing_columns,
+    }
+    if missing_tables or missing_columns:
+        summary["ok"] = False
+        summary["primary_ok"] = False
+
+    # Tenant DB URL checks (connectivity only, per active organization)
+    if check_tenants:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT id, name, db_url FROM organizations WHERE is_active = 1 AND db_url IS NOT NULL AND TRIM(db_url) != ''"
+                )
+                orgs = await cur.fetchall() or []
+
+        for org in orgs:
+            org_id = str(org.get("id") or "")
+            org_name = str(org.get("name") or "")
+            db_url = str(org.get("db_url") or "").strip()
+            if not db_url:
+                continue
+            try:
+                _ = await get_tenant_pool_by_db_url(db_url)
+                summary["tenants"].append({"org_id": org_id, "org_name": org_name, "ok": True})
+            except Exception as exc:
+                summary["tenants"].append({"org_id": org_id, "org_name": org_name, "ok": False, "error": str(exc)})
+                summary["ok"] = False
+                summary["tenant_ok"] = False
+
+    return summary
+
+
+def _connect_sync_from_url(db_url: str):
+    kwargs = _build_connect_kwargs_from_url(db_url)
+    return pymysql.connect(**kwargs)
+
+
+def _connect_primary_sync():
+    ssl_ctx = _ssl.create_default_context()
+    if os.getenv("DB_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+    else:
+        ca_path = os.getenv("DB_SSL_CA", "")
+        if ca_path:
+            ssl_ctx.load_verify_locations(ca_path)
+    return pymysql.connect(
+        host=settings.DB_HOST,
+        port=settings.DB_PORT,
+        user=settings.DB_USER,
+        password=settings.DB_PASSWORD,
+        database=settings.DB_NAME,
+        ssl=ssl_ctx,
+        charset="utf8mb4",
+        connect_timeout=15,
+        autocommit=True,
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
+def _bootstrap_missing_tables_into_tenant(tenant_db_url: str) -> dict[str, int]:
+    primary_conn = _connect_primary_sync()
+    tenant_conn = _connect_sync_from_url(tenant_db_url)
+    created = 0
+    existing = 0
+    try:
+        with primary_conn.cursor() as pcur, tenant_conn.cursor() as tcur:
+            pcur.execute("SHOW TABLES")
+            table_rows = pcur.fetchall() or []
+            table_names = [next(iter(r.values())) for r in table_rows]
+            tcur.execute("SET FOREIGN_KEY_CHECKS = 0")
+            for table_name in table_names:
+                tcur.execute(
+                    """
+                    SELECT 1 FROM information_schema.TABLES
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+                    """,
+                    (table_name,),
+                )
+                if tcur.fetchone():
+                    existing += 1
+                    continue
+                pcur.execute(f"SHOW CREATE TABLE `{table_name}`")
+                ddl_row = pcur.fetchone() or {}
+                create_sql = ddl_row.get("Create Table")
+                if not create_sql:
+                    continue
+                tcur.execute(create_sql)
+                created += 1
+            tcur.execute("SET FOREIGN_KEY_CHECKS = 1")
+    finally:
+        try:
+            primary_conn.close()
+        except Exception:
+            pass
+        try:
+            tenant_conn.close()
+        except Exception:
+            pass
+    return {"created": created, "existing": existing}
+
+
+async def reconcile_active_tenant_schemas() -> list[dict]:
+    """Best-effort: clone missing primary tables into all active tenant DBs."""
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, name, db_url FROM organizations WHERE is_active = 1 AND db_url IS NOT NULL AND TRIM(db_url) != ''"
+            )
+            orgs = await cur.fetchall() or []
+
+    results: list[dict] = []
+    for org in orgs:
+        org_id = str(org.get("id") or "")
+        org_name = str(org.get("name") or "")
+        db_url = str(org.get("db_url") or "").strip()
+        if not db_url:
+            continue
+        try:
+            stats = await asyncio.to_thread(_bootstrap_missing_tables_into_tenant, db_url)
+            results.append({"org_id": org_id, "org_name": org_name, "ok": True, **stats})
+        except Exception as exc:
+            results.append({"org_id": org_id, "org_name": org_name, "ok": False, "error": str(exc)})
+    return results

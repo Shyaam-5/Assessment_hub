@@ -1,4 +1,4 @@
-"""Problem CRUD routes with proctoring settings."""
+﻿"""Problem CRUD routes with proctoring settings."""
 
 import uuid
 from datetime import datetime, timezone
@@ -120,7 +120,7 @@ async def list_problems(
         problems.append(p)
 
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="problems",
         query_params={"mentorId": mentorId, "status": status, "page": page, "limit": limit},
@@ -159,7 +159,7 @@ async def student_problems(student_id: str, request: Request):
                 enriched.append(ep)
 
     audit_logger.log_data_access(
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_type="student_problems",
         query_params={"studentId": student_id},
@@ -203,7 +203,7 @@ async def create_problem(body: ProblemCreate, request: Request):
 
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_TEST_CREATED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=problem_id,
         resource_type="problem",
@@ -223,10 +223,11 @@ async def delete_problem(problem_id: str, request: Request):
             await cur.execute("DELETE FROM problems WHERE id = %s", (problem_id,))
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_TEST_DELETED,
-        user_id=request.headers.get("x-user-id", "anonymous"),
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
         ip_address=_client_ip(request),
         resource_id=problem_id,
         resource_type="problem",
         action="Problem deleted",
     )
     return {"success": True}
+

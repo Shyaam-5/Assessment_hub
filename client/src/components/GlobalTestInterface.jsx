@@ -189,7 +189,6 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
         if (monitorCheckIntervalRef.current) clearInterval(monitorCheckIntervalRef.current)
         try {
             const timeSpent = (test.duration || 120) * 60 - timeLeftRef.current
-            proctoringSocketAdapter.emitSubmissionCompleted(user.id, user.name || user.email, test.id, test.title, null, 'terminated', 0)
             const res = await axios.post(`${API_BASE}/global-tests/${test.id}/submit`, {
                 studentId: user.id,
                 answers: answersRef.current,
@@ -204,6 +203,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                 submissionType: 'auto_terminated',
                 terminationReason: reason
             })
+            proctoringSocketAdapter.emitSubmissionCompleted(user.id, user.name || user.email, test.id, test.title, null, 'terminated', 0)
             const submissionResult = res.data.submission || res.data
             setTimeout(() => { onClose(); onComplete && onComplete(submissionResult) }, 3000)
         } catch (err) {
