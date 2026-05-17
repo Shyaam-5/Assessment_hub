@@ -59,6 +59,7 @@ from database import (
     ensure_rbac_schema,
     ensure_proctoring_tables,
     ensure_default_super_admins,
+    ensure_core_domain_tables,
     run_startup_db_preflight,
     reconcile_active_tenant_schemas,
     get_pool,
@@ -89,9 +90,17 @@ def _socket_ip(environ) -> str:
 
 # ─── Socket.io ──────────────────────────────────────────────────
 
+def _cors_origins_for_runtime(origins: list[str]) -> list[str] | str:
+    if origins:
+        return origins
+    if settings.APP_ENV in {"production", "prod"}:
+        return []
+    return "*"
+
+
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins="*",
+    cors_allowed_origins=_cors_origins_for_runtime(settings.SOCKET_ALLOWED_ORIGINS),
 )
 
 # Register prescan socket handlers (must happen before any @sio.event decorators
@@ -124,19 +133,28 @@ async def _verify_socket_actor(data, required_user_key: str) -> dict | None:
     return claims
 
 
-async def _validated_mentor_room(student_id: str, claimed_mentor_id: str | None) -> str | None:
+def _org_admin_room(org_id: str) -> str:
+    return f"admin_room:{org_id}"
+
+
+def _org_mentor_room(org_id: str, mentor_id: str) -> str:
+    return f"mentor:{org_id}:{mentor_id}"
+
+
+async def _validated_mentor_room(student_id: str, claimed_mentor_id: str | None, org_id: str | None) -> str | None:
     mentor_id = (claimed_mentor_id or "").strip()
-    if not mentor_id:
+    if not mentor_id or not org_id:
         return None
     try:
         pool = await get_primary_pool()
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                await cur.execute("SELECT mentor_id FROM users WHERE id = %s", (student_id,))
+                await cur.execute("SELECT mentor_id, organization_id FROM users WHERE id = %s", (student_id,))
                 row = await cur.fetchone()
         real_mentor_id = str((row or {}).get("mentor_id") or "").strip()
-        if real_mentor_id and real_mentor_id == mentor_id:
-            return f"mentor_{mentor_id}"
+        real_org_id = str((row or {}).get("organization_id") or "").strip()
+        if real_mentor_id and real_mentor_id == mentor_id and real_org_id == str(org_id):
+            return _org_mentor_room(str(org_id), mentor_id)
     except Exception:
         return None
     return None
@@ -193,10 +211,20 @@ async def join_monitoring(sid, data):
     if role != db_role:
         await sio.emit("monitoring_error", {"detail": "Role mismatch"}, to=sid)
         return
-    if role == "admin":
-        await sio.enter_room(sid, "admin_room")
-    elif role == "mentor" and mentor_id:
-        await sio.enter_room(sid, f"mentor_{mentor_id}")
+    can_view_monitoring = False
+    try:
+        from routes.auth import _has_any_permission
+        can_view_monitoring = await _has_any_permission(user_id, ["proctoring.view"])
+    except Exception:
+        can_view_monitoring = role == "admin"
+
+    org_id = str(claims.get("organization_id") or "").strip()
+    if role in {"organization_admin"} and can_view_monitoring and org_id:
+        await sio.enter_room(sid, _org_admin_room(org_id))
+    elif role == "admin" and can_view_monitoring:
+        await sio.enter_room(sid, "admin_room:platform")
+    elif role == "mentor" and mentor_id and can_view_monitoring and org_id:
+        await sio.enter_room(sid, _org_mentor_room(org_id, str(mentor_id)))
     else:
         await sio.emit("monitoring_error", {"detail": "Permission denied"}, to=sid)
         return
@@ -239,8 +267,10 @@ async def submission_started(sid, data):
     claims = await _verify_socket_actor(data, "studentId")
     if not claims:
         return
-    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
-    await sio.emit("live_update", {**data, "type": "submission_started"}, room="admin_room")
+    org_id = str(claims.get("organization_id") or "").strip()
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"), org_id)
+    if org_id:
+        await sio.emit("live_update", {**data, "type": "submission_started"}, room=_org_admin_room(org_id))
     if mentor_room:
         await sio.emit("live_update", {**data, "type": "submission_started"}, room=mentor_room)
     audit_logger.log_socket_event("submission_started", sid, user_id=data.get("studentId"), payload=data)
@@ -251,8 +281,10 @@ async def submission_completed(sid, data):
     claims = await _verify_socket_actor(data, "studentId")
     if not claims:
         return
-    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
-    await sio.emit("live_update", {**data, "type": "submission_completed"}, room="admin_room")
+    org_id = str(claims.get("organization_id") or "").strip()
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"), org_id)
+    if org_id:
+        await sio.emit("live_update", {**data, "type": "submission_completed"}, room=_org_admin_room(org_id))
     if mentor_room:
         await sio.emit("live_update", {**data, "type": "submission_completed"}, room=mentor_room)
     audit_logger.log_socket_event("submission_completed", sid, user_id=data.get("studentId"), payload=data)
@@ -263,8 +295,10 @@ async def proctoring_violation(sid, data):
     claims = await _verify_socket_actor(data, "studentId")
     if not claims:
         return
-    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
-    await sio.emit("live_alert", {**data, "type": "proctoring_violation"}, room="admin_room")
+    org_id = str(claims.get("organization_id") or "").strip()
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"), org_id)
+    if org_id:
+        await sio.emit("live_alert", {**data, "type": "proctoring_violation"}, room=_org_admin_room(org_id))
     if mentor_room:
         await sio.emit("live_alert", {**data, "type": "proctoring_violation"}, room=mentor_room)
     audit_logger.log_socket_event("proctoring_violation", sid, user_id=data.get("studentId"), payload=data)
@@ -275,8 +309,10 @@ async def progress_update(sid, data):
     claims = await _verify_socket_actor(data, "studentId")
     if not claims:
         return
-    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
-    await sio.emit("live_update", {**data, "type": "progress_update"}, room="admin_room")
+    org_id = str(claims.get("organization_id") or "").strip()
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"), org_id)
+    if org_id:
+        await sio.emit("live_update", {**data, "type": "progress_update"}, room=_org_admin_room(org_id))
     if mentor_room:
         await sio.emit("live_update", {**data, "type": "progress_update"}, room=mentor_room)
     audit_logger.log_socket_event("progress_update", sid, user_id=data.get("studentId"), payload=data)
@@ -287,8 +323,10 @@ async def test_failed(sid, data):
     claims = await _verify_socket_actor(data, "studentId")
     if not claims:
         return
-    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"))
-    await sio.emit("live_alert", {**data, "type": "test_failed"}, room="admin_room")
+    org_id = str(claims.get("organization_id") or "").strip()
+    mentor_room = await _validated_mentor_room(str(data.get("studentId") or ""), data.get("mentorId"), org_id)
+    if org_id:
+        await sio.emit("live_alert", {**data, "type": "test_failed"}, room=_org_admin_room(org_id))
     if mentor_room:
         await sio.emit("live_alert", {**data, "type": "test_failed"}, room=mentor_room)
     audit_logger.log_socket_event("test_failed", sid, user_id=data.get("studentId"), payload=data)
@@ -305,6 +343,7 @@ async def lifespan(app: FastAPI):
     await create_prescan_tables()
     await ensure_auth_login_schema()
     await ensure_rbac_schema()
+    await ensure_core_domain_tables()
     if settings.STARTUP_TENANT_SCHEMA_RECONCILE:
         tenant_fix = await reconcile_active_tenant_schemas()
         failed = [r for r in tenant_fix if not r.get("ok")]
@@ -348,6 +387,7 @@ async def lifespan(app: FastAPI):
 # ─── Create App ─────────────────────────────────────────────────
 
 app = FastAPI(title="AI Assessment Hub API", version="1.0.0", lifespan=lifespan)
+app.state.sio = sio
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RateLimitMiddleware)
@@ -376,7 +416,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # CORS — use explicit origins when configured, fall back to "*" for local dev.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS or ["*"],
+    allow_origins=settings.ALLOWED_ORIGINS or ([] if settings.APP_ENV in {"production", "prod"} else ["*"]),
     allow_credentials=bool(settings.ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
@@ -483,9 +523,12 @@ async def add_corp_header(request, call_next):
                 if not o or int(o.get("is_active") or 0) != 1:
                     return JSONResponse({"detail": "Organization is inactive. Contact the super admin."}, status_code=403)
                 tenant_pool = await get_tenant_pool_by_org_id(org_id)
+                if tenant_pool is None:
+                    return JSONResponse({"detail": "Tenant database is not configured for this organization"}, status_code=503)
                 resolved_org_id = org_id
         except Exception as exc:
-            logger.warning("Tenant context resolution failed; using primary DB. path=%s err=%s", path, exc)
+            logger.error("Tenant context resolution failed; rejecting request. path=%s err=%s", path, exc)
+            return JSONResponse({"detail": "Tenant database context unavailable"}, status_code=503)
 
     try:
         request.state.organization_id = resolved_org_id or None

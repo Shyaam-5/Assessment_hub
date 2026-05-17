@@ -86,6 +86,7 @@ export default function SkillTestManager() {
     const [viewAttempts, setViewAttempts] = useState(null);
     const [attempts, setAttempts] = useState([]);
     const [creating, setCreating] = useState(false);
+    const [postCreateAction, setPostCreateAction] = useState(null);
     const [form, setForm] = useState({
         title: '', description: '', skills: [],
         difficulty_level: 'mixed',
@@ -123,7 +124,12 @@ export default function SkillTestManager() {
         setError('');
         setCreating(true);
         try {
-            await axios.post(`${API}/api/skill-tests/create`, form);
+            const { data } = await axios.post(`${API}/api/skill-tests/create`, form);
+            setPostCreateAction({
+                id: data?.id,
+                title: form.title,
+                message: 'Skill test created. Next step: allocate learners with coding.assign access before candidates can start.'
+            });
             setShowCreate(false);
             setForm({ title: '', description: '', skills: [], difficulty_level: 'mixed', mcq_count: 10, coding_count: 3, sql_count: 3, interview_count: 5, attempt_limit: 1, mcq_duration_minutes: 30, coding_duration_minutes: 45, sql_duration_minutes: 45, interview_duration_minutes: 30, mcq_passing_score: 60, coding_passing_score: 50, sql_passing_score: 50, interview_passing_score: 6, proctoring_enabled: true, proctoring_config: { camera: true, mic: true, fullscreen: true, paste_disabled: true, face_detection: true, camera_block_detect: true, phone_detect: true } });
             loadTests();
@@ -226,6 +232,23 @@ export default function SkillTestManager() {
                 }}>
                     <span><XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />{error}</span>
                     <button onClick={() => setError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fca5a5', padding: '4px' }}><X size={16} /></button>
+                </div>
+            )}
+
+            {postCreateAction && (
+                <div style={{ background: '#1e293b', border: '1px solid #22c55e', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <div>
+                            <div style={{ color: '#f1f5f9', fontWeight: 800 }}>Skill Test Created: {postCreateAction.title}</div>
+                            <div style={{ color: '#94a3b8', fontSize: 13 }}>{postCreateAction.message}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button onClick={() => document.getElementById(`skill-test-${postCreateAction.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })} style={{ background: '#2563eb', color: 'white', border: 'none', padding: '9px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Users size={16} /> Allocation Shortcut
+                            </button>
+                            <button onClick={() => setPostCreateAction(null)} style={{ background: '#475569', color: 'white', border: 'none', padding: '9px 12px', borderRadius: 8, cursor: 'pointer' }}>Dismiss</button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -599,7 +622,7 @@ export default function SkillTestManager() {
                         {tests.length} assessment{tests.length !== 1 ? 's' : ''}
                     </div>
                     {tests.map(test => (
-                        <div key={test.id} style={{
+                        <div key={test.id} id={`skill-test-${test.id}`} style={{
                             background: '#1e293b', border: '1px solid #334155', borderRadius: '14px',
                             padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
                             borderLeft: `4px solid ${test.is_active ? '#8b5cf6' : '#475569'}`,

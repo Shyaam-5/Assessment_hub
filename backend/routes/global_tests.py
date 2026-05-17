@@ -25,6 +25,14 @@ SECTIONS = ["aptitude", "verbal", "logical", "coding", "sql"]
 _global_agent_counter: dict[str, int] = {}
 _GLOBAL_AGENT_COUNTER_MAX = 1000
 _GLOBAL_AGENT_INTERVAL = 5
+LEGACY_EXAM_TAKER_PERMISSIONS = {
+    "tests.view_allocated",
+    "tests.attempt",
+    "aptitude.attempt",
+    "coding.attempt",
+    "communication.attempt",
+    "results.view_own",
+}
 
 
 async def _insert_unified_proctor_event(
@@ -137,6 +145,7 @@ class GlobalTestCreate(BaseModel):
     createdBy: Optional[str] = None
     sectionConfig: Optional[dict] = None
     proctoring: Optional[dict] = None
+    resultVisibility: str = "immediate"
 
 
 class GlobalTestUpdate(BaseModel):
@@ -153,6 +162,7 @@ class GlobalTestUpdate(BaseModel):
     status: Optional[str] = None
     sectionConfig: Optional[dict] = None
     proctoring: Optional[dict] = None
+    resultVisibility: Optional[str] = None
 
 
 class QuestionBatch(BaseModel):
@@ -346,6 +356,67 @@ def _validate_schedule(start: Optional[str], end: Optional[str]):
         raise HTTPException(400, "startTime must be earlier than deadline")
 
 
+def _normalize_result_visibility(value: Optional[str]) -> str:
+    visibility = (value or "immediate").strip().lower()
+    if visibility not in {"immediate", "after_deadline", "manual"}:
+        raise HTTPException(400, "resultVisibility must be immediate, after_deadline, or manual")
+    return visibility
+
+
+def _as_utc(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    parsed = _parse_dt(str(value))
+    if not parsed:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _result_visibility_status(test_row: dict, *, can_manage: bool = False) -> dict:
+    visibility = _normalize_result_visibility(test_row.get("result_visibility") or "immediate")
+    if can_manage or visibility == "immediate":
+        return {"visible": True, "visibility": visibility, "reason": None}
+    if visibility == "after_deadline":
+        deadline = _as_utc(test_row.get("deadline"))
+        if deadline and datetime.now(timezone.utc) >= deadline:
+            return {"visible": True, "visibility": visibility, "reason": None}
+        return {
+            "visible": False,
+            "visibility": visibility,
+            "reason": "Results will be released after the test deadline.",
+        }
+    return {
+        "visible": False,
+        "visibility": visibility,
+        "reason": "Results are pending admin release.",
+    }
+
+
+def _mask_global_submission(row: dict, visibility_state: dict) -> dict:
+    if visibility_state.get("visible"):
+        return row
+    locked = dict(row)
+    for key in (
+        "aptitudeScore",
+        "verbalScore",
+        "logicalScore",
+        "codingScore",
+        "sqlScore",
+        "totalScore",
+        "overallPercentage",
+        "sectionResults",
+        "questionResults",
+    ):
+        if key in locked:
+            locked[key] = [] if key.endswith("Results") else None
+    locked["resultsVisible"] = False
+    locked["resultVisibility"] = visibility_state.get("visibility")
+    locked["resultVisibilityReason"] = visibility_state.get("reason")
+    return locked
+
+
 def _clean_global_test(t: dict) -> dict:
     proctoring = _normalize_proctoring_config(
         _safe_json(t.get("proctoring_config")),
@@ -373,6 +444,7 @@ def _clean_global_test(t: dict) -> dict:
         "maxTabSwitches": proctoring.get("maxTabSwitches", t.get("max_tab_switches") or 0),
         "sectionConfig": section_cfg,
         "proctoring": proctoring,
+        "resultVisibility": t.get("result_visibility") or "immediate",
     }
 
 
@@ -600,9 +672,10 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
         raise HTTPException(400, "duration must be greater than 0")
     if body.passingScore < 0 or body.passingScore > 100:
         raise HTTPException(400, "passingScore must be between 0 and 100")
-    if body.maxAttempts <= 0:
-        raise HTTPException(400, "maxAttempts must be greater than 0")
+    if body.maxAttempts == 0 or body.maxAttempts < -1:
+        raise HTTPException(400, "maxAttempts must be greater than 0, or -1 for unlimited")
     _validate_schedule(body.startTime, body.deadline)
+    result_visibility = _normalize_result_visibility(body.resultVisibility)
 
     normalized_section_cfg = _normalize_section_config(body.sectionConfig, body.duration)
     normalized_proctoring = _normalize_proctoring_config(body.proctoring, body.maxTabSwitches or 3)
@@ -625,15 +698,15 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
                        (id, title, type, difficulty, duration, total_questions,
                         passing_score, status, created_by, description,
                         start_time, deadline, max_attempts, max_tab_switches,
-                        section_config, proctoring_config)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        section_config, proctoring_config, result_visibility)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (
                         test_id, body.title, body.type, body.difficulty,
                         body.duration, total_q, body.passingScore,
                         body.status, body.createdBy, body.description,
                         _fmt_dt(body.startTime), _fmt_dt(body.deadline),
                         body.maxAttempts, normalized_proctoring.get("maxTabSwitches", 0),
-                        sc_json, pc_json,
+                        sc_json, pc_json, result_visibility,
                     ),
                 )
             await conn.commit()
@@ -657,6 +730,7 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
             "status": body.status,
             "sectionConfig": normalized_section_cfg,
             "proctoring": normalized_proctoring,
+            "resultVisibility": result_visibility,
         }
     except Exception as e:
         if "doesn't exist" in str(e):
@@ -672,8 +746,8 @@ async def update_global_test(test_id: str, body: GlobalTestUpdate, request: Requ
         raise HTTPException(400, "duration must be greater than 0")
     if body.passingScore is not None and (body.passingScore < 0 or body.passingScore > 100):
         raise HTTPException(400, "passingScore must be between 0 and 100")
-    if body.maxAttempts is not None and body.maxAttempts <= 0:
-        raise HTTPException(400, "maxAttempts must be greater than 0")
+    if body.maxAttempts is not None and (body.maxAttempts == 0 or body.maxAttempts < -1):
+        raise HTTPException(400, "maxAttempts must be greater than 0, or -1 for unlimited")
     _validate_schedule(body.startTime, body.deadline)
 
     updates: list[str] = []
@@ -684,10 +758,13 @@ async def update_global_test(test_id: str, body: GlobalTestUpdate, request: Requ
         "duration": "duration", "passingScore": "passing_score",
         "description": "description", "maxAttempts": "max_attempts",
         "maxTabSwitches": "max_tab_switches", "status": "status",
+        "resultVisibility": "result_visibility",
     }
     for attr, col in field_map.items():
         val = getattr(body, attr, None)
         if val is not None:
+            if attr == "resultVisibility":
+                val = _normalize_result_visibility(val)
             updates.append(f"{col} = %s")
             params.append(val)
 
@@ -1041,7 +1118,7 @@ async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Requ
             if not allocation_row:
                 raise HTTPException(403, "This test is not assigned to this user")
             max_attempts = test.get("max_attempts") or 1
-            if prior_attempts >= max_attempts:
+            if max_attempts != -1 and prior_attempts >= max_attempts:
                 raise HTTPException(400, "Maximum attempts reached for this test")
 
             await cur.execute("SELECT * FROM test_questions WHERE test_id = %s", (test_id,))
@@ -1232,30 +1309,52 @@ async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Requ
         action="Global test submitted",
         details={"testId": test_id, "status": status, "overallPercentage": overall_pct},
     )
+    visibility_state = _result_visibility_status(test, can_manage=can_assign)
+    submission_payload = {
+        "id": sub_id,
+        "score": overall_pct,
+        "totalScore": total_score,
+        "status": status,
+        "sectionScores": section_scores,
+        "correctCount": total_correct,
+        "totalQuestions": total_q,
+        "tabSwitches": body.tabSwitches,
+        "timeSpent": body.timeSpent,
+        "copyPasteAttempts": body.copyPasteAttempts,
+        "cameraBlockedCount": body.cameraBlockedCount,
+        "phoneDetectionCount": body.phoneDetectionCount,
+        "faceMissingCount": body.faceMissingCount,
+        "totalViolations": body.totalViolations,
+        "multipleMonitorCount": body.multipleMonitorCount,
+        "proctoringEnabled": bool(body.proctoringEnabled),
+        "behaviorSessionId": body.behaviorSessionId,
+        "submissionType": body.submissionType or "manual",
+        "terminationReason": body.terminationReason,
+        "questionResults": question_results,
+    }
+    if not visibility_state["visible"]:
+        submission_payload.update(
+            {
+                "score": None,
+                "totalScore": None,
+                "sectionScores": {},
+                "correctCount": None,
+                "questionResults": [],
+                "resultsVisible": False,
+                "resultVisibility": visibility_state["visibility"],
+                "resultVisibilityReason": visibility_state["reason"],
+            }
+        )
+    else:
+        submission_payload["resultsVisible"] = True
+        submission_payload["resultVisibility"] = visibility_state["visibility"]
     return {
-        "submission": {
-            "id": sub_id,
-            "score": overall_pct,
-            "totalScore": total_score,
-            "status": status,
-            "sectionScores": section_scores,
-            "correctCount": total_correct,
-            "totalQuestions": total_q,
-            "tabSwitches": body.tabSwitches,
-            "timeSpent": body.timeSpent,
-            "copyPasteAttempts": body.copyPasteAttempts,
-            "cameraBlockedCount": body.cameraBlockedCount,
-            "phoneDetectionCount": body.phoneDetectionCount,
-            "faceMissingCount": body.faceMissingCount,
-            "totalViolations": body.totalViolations,
-            "multipleMonitorCount": body.multipleMonitorCount,
-            "proctoringEnabled": bool(body.proctoringEnabled),
-            "behaviorSessionId": body.behaviorSessionId,
-            "submissionType": body.submissionType or "manual",
-            "terminationReason": body.terminationReason,
-            "questionResults": question_results,
-        },
-        "message": "Congratulations! You passed the test!" if status == "passed" else "Keep practicing!",
+        "submission": submission_payload,
+        "message": (
+            "Your response was submitted. Results will be released by your organization."
+            if not visibility_state["visible"]
+            else ("Congratulations! You passed the test!" if status == "passed" else "Keep practicing!")
+        ),
     }
 
 
@@ -1281,9 +1380,13 @@ async def list_global_submissions(
         studentId = actor
         mentorId = None
     pool = await get_pool()
-    query = """SELECT s.*, u.name AS student_name
+    query = """SELECT s.*, u.name AS student_name,
+                      g.result_visibility AS test_result_visibility,
+                      g.deadline AS test_deadline
                FROM global_test_submissions s
-               JOIN users u ON s.student_id = u.id WHERE 1=1"""
+               JOIN users u ON s.student_id = u.id
+               LEFT JOIN global_tests g ON g.id = s.test_id
+               WHERE 1=1"""
     params: list = []
     if testId:
         query += " AND s.test_id = %s"; params.append(testId)
@@ -1298,8 +1401,16 @@ async def list_global_submissions(
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(query, params)
                 rows = await cur.fetchall()
-        return [
-            {
+        output = []
+        for s in rows:
+            visibility_state = _result_visibility_status(
+                {
+                    "result_visibility": s.get("test_result_visibility"),
+                    "deadline": s.get("test_deadline"),
+                },
+                can_manage=can_manage,
+            )
+            item = {
                 "id": s["id"],
                 "testId": s["test_id"],
                 "testTitle": s["test_title"],
@@ -1327,8 +1438,13 @@ async def list_global_submissions(
                 "terminationReason": s.get("termination_reason"),
                 "submittedAt": str(s.get("submitted_at", "")),
             }
-            for s in rows
-        ]
+            if visibility_state["visible"]:
+                item["resultsVisible"] = True
+                item["resultVisibility"] = visibility_state["visibility"]
+            else:
+                item = _mask_global_submission(item, visibility_state)
+            output.append(item)
+        return output
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
@@ -1347,9 +1463,13 @@ async def get_global_submission(submission_id: str, request: Request):
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(
-                    """SELECT s.*, u.name AS student_name
+                    """SELECT s.*, u.name AS student_name,
+                              g.result_visibility AS test_result_visibility,
+                              g.deadline AS test_deadline
                        FROM global_test_submissions s
-                       JOIN users u ON s.student_id = u.id WHERE s.id = %s""",
+                       JOIN users u ON s.student_id = u.id
+                       LEFT JOIN global_tests g ON g.id = s.test_id
+                       WHERE s.id = %s""",
                     (submission_id,),
                 )
                 s = await cur.fetchone()
@@ -1363,7 +1483,14 @@ async def get_global_submission(submission_id: str, request: Request):
                 await cur.execute("SELECT * FROM section_results WHERE submission_id = %s", (submission_id,))
                 sec = await cur.fetchall()
 
-        return {
+        visibility_state = _result_visibility_status(
+            {
+                "result_visibility": s.get("test_result_visibility"),
+                "deadline": s.get("test_deadline"),
+            },
+            can_manage=can_manage,
+        )
+        item = {
             "id": s["id"],
             "testId": s["test_id"],
             "testTitle": s["test_title"],
@@ -1412,6 +1539,11 @@ async def get_global_submission(submission_id: str, request: Request):
                 for r in sec
             ],
         }
+        if visibility_state["visible"]:
+            item["resultsVisible"] = True
+            item["resultVisibility"] = visibility_state["visibility"]
+            return item
+        return _mask_global_submission(item, visibility_state)
     except HTTPException:
         raise
     except Exception as e:
@@ -1434,9 +1566,13 @@ async def get_submission_report(submission_id: str, request: Request):
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(
-                    """SELECT s.*, u.name AS student_name, u.email AS student_email
+                    """SELECT s.*, u.name AS student_name, u.email AS student_email,
+                              g.result_visibility AS test_result_visibility,
+                              g.deadline AS test_deadline
                        FROM global_test_submissions s
-                       JOIN users u ON s.student_id = u.id WHERE s.id = %s""",
+                       JOIN users u ON s.student_id = u.id
+                       LEFT JOIN global_tests g ON g.id = s.test_id
+                       WHERE s.id = %s""",
                     (submission_id,),
                 )
                 s = await cur.fetchone()
@@ -1444,6 +1580,15 @@ async def get_submission_report(submission_id: str, request: Request):
                     raise HTTPException(404, "Submission not found")
                 if not (can_manage or (can_attempt and actor == (s.get("student_id") or ""))):
                     raise HTTPException(403, "Permission denied")
+                visibility_state = _result_visibility_status(
+                    {
+                        "result_visibility": s.get("test_result_visibility"),
+                        "deadline": s.get("test_deadline"),
+                    },
+                    can_manage=can_manage,
+                )
+                if not visibility_state["visible"]:
+                    raise HTTPException(403, visibility_state["reason"] or "Results are not released yet")
 
                 await cur.execute("SELECT * FROM personalized_reports WHERE submission_id = %s", (submission_id,))
                 existing = await cur.fetchall()
@@ -1588,6 +1733,8 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
             u = await cur.fetchone()
             if u and u.get("role") == "admin":
                 return True
+            if u and u.get("role") in ("student", "learner"):
+                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
             fmt = ",".join(["%s"] * len(permissions))
             await cur.execute(
                 f"""

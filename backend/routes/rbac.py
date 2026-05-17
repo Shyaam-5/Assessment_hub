@@ -14,12 +14,14 @@ import pymysql.cursors
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from database import get_primary_pool
+from database import get_primary_pool, resolve_tenant_db_url
 from routes.auth import _hash_password
 from config import settings
 from services.otp_delivery import send_notification_email
+from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["rbac"])
+audit_logger = get_audit_logger()
 
 
 PERMISSION_CATALOG: dict[str, list[str]] = {
@@ -30,9 +32,12 @@ PERMISSION_CATALOG: dict[str, list[str]] = {
     "communication": ["communication.create", "communication.assign", "communication.evaluate", "communication.attempt"],
     "aptitude": ["aptitude.create", "aptitude.assign", "aptitude.evaluate", "aptitude.attempt"],
     "analytics": ["analytics.view", "analytics.export"],
-    "proctoring": ["proctoring.view", "proctoring.override"],
+    "proctoring": ["proctoring.view", "proctoring.override", "proctoring.manage"],
+    "submissions": ["submissions.view", "submissions.manage"],
     "results": ["results.view_own"],
 }
+VALID_PERMISSIONS = {perm for perms in PERMISSION_CATALOG.values() for perm in perms}
+VALID_USER_STATUSES = {"active", "inactive", "suspended"}
 
 
 def _slugify(value: str) -> str:
@@ -40,8 +45,24 @@ def _slugify(value: str) -> str:
     return slug[:120] or "role"
 
 
+def _normalized_permissions(permissions: list[str] | None) -> list[str]:
+    normalized = sorted(set(p.strip() for p in (permissions or []) if p and p.strip()))
+    unknown = [p for p in normalized if p not in VALID_PERMISSIONS]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown permission(s): {', '.join(unknown)}")
+    return normalized
+
+
 def _request_user_id(request: Request) -> str:
     return (getattr(request.state, "auth_user_id", None) or "").strip()
+
+
+def _client_ip(request: Request) -> str:
+    if "x-forwarded-for" in request.headers:
+        return request.headers["x-forwarded-for"].split(",")[0].strip()
+    if "cf-connecting-ip" in request.headers:
+        return request.headers["cf-connecting-ip"]
+    return request.client.host if request.client else "UNKNOWN"
 
 
 def _connect_mysql_from_url(db_url: str):
@@ -241,6 +262,49 @@ def _provision_user_in_tenant_db(
             pass
 
 
+def _update_user_in_tenant_db(
+    tenant_db_url: str,
+    *,
+    user_id: str,
+    name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    batch: str | None = None,
+    status: str | None = None,
+    password_hash: str | None = None,
+    must_change_password: int | None = None,
+) -> None:
+    updates = []
+    params: list[Any] = []
+    for column, value in {
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "batch": batch,
+        "status": status,
+        "password": password_hash,
+        "must_change_password": must_change_password,
+    }.items():
+        if value is not None:
+            updates.append(f"{column}=%s")
+            params.append(value)
+    if not updates:
+        return
+
+    conn = _connect_mysql_from_url(tenant_db_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE users SET {', '.join(updates)} WHERE id = %s",
+                [*params, user_id],
+            )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 async def _is_platform_super_admin(user_id: str) -> bool:
     if not user_id:
         return False
@@ -272,17 +336,29 @@ async def _has_org_permission(user_id: str, org_id: str, permission: str) -> boo
 class CreateOrganizationBody(BaseModel):
     name: str
     code: str
-    type: str = Field(default="institutional")
-    dbUrl: str
+    dbUrl: str | None = None
+    dbSecretRef: str | None = None
     adminName: str
     adminEmail: str
     adminPassword: str
+
+
+class ConfigureTenantDbBody(BaseModel):
+    dbUrl: str | None = None
+    dbSecretRef: str | None = None
+    activate: bool = True
 
 
 class CreateRoleBody(BaseModel):
     name: str
     description: str | None = None
     permissions: list[str] = Field(default_factory=list)
+
+
+class UpdateRoleBody(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    permissions: list[str] | None = None
 
 
 class CreateOrgUserBody(BaseModel):
@@ -294,8 +370,309 @@ class CreateOrgUserBody(BaseModel):
     batch: str | None = None
 
 
+class UpdateOrgUserBody(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    batch: str | None = None
+    status: str | None = None
+    roleId: str | None = None
+
+
+class ResetOrgUserPasswordBody(BaseModel):
+    newPassword: str
+    sendEmail: bool = True
+
+
+class BulkOrgUserItem(BaseModel):
+    name: str
+    email: str
+    password: str
+    roleId: str
+    phone: str | None = None
+    batch: str | None = None
+
+
+class BulkOrgUsersBody(BaseModel):
+    users: list[BulkOrgUserItem] = Field(default_factory=list)
+
+
 class OrganizationStatusBody(BaseModel):
     isActive: bool
+
+
+class UsageLimitsBody(BaseModel):
+    maxUsers: int | None = None
+    maxActiveUsers: int | None = None
+    maxTests: int | None = None
+    maxSubmissions: int | None = None
+    maxApiRequestsMonthly: int | None = None
+    maxStorageMb: int | None = None
+
+
+def _limit_value(value: int | None) -> int | None:
+    if value is None:
+        return None
+    value = int(value)
+    if value < 0:
+        raise HTTPException(status_code=400, detail="Usage limits must be zero or greater")
+    return value
+
+
+async def _ensure_platform_ops_schema() -> None:
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tenant_db_connection_events (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    organization_id CHAR(36) NOT NULL,
+                    event_source VARCHAR(32) NOT NULL,
+                    status VARCHAR(16) NOT NULL,
+                    db_mode VARCHAR(32) NULL,
+                    db_ready TINYINT(1) NULL DEFAULT 0,
+                    has_users_table TINYINT(1) NULL DEFAULT 0,
+                    can_bootstrap TINYINT(1) NULL DEFAULT 0,
+                    message TEXT NULL,
+                    checked_by VARCHAR(64) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_tenant_db_events_org_created (organization_id, created_at),
+                    INDEX idx_tenant_db_events_status (status)
+                )
+                """
+            )
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS organization_usage_limits (
+                    organization_id CHAR(36) NOT NULL PRIMARY KEY,
+                    max_users INT NULL,
+                    max_active_users INT NULL,
+                    max_tests INT NULL,
+                    max_submissions INT NULL,
+                    max_api_requests_monthly INT NULL,
+                    max_storage_mb INT NULL,
+                    updated_by VARCHAR(64) NULL,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+
+async def _record_tenant_db_event(
+    org_id: str,
+    *,
+    actor: str | None,
+    source: str,
+    db_mode: str,
+    readiness: dict[str, Any],
+) -> None:
+    await _ensure_platform_ops_schema()
+    status = "SUCCESS" if readiness.get("ok") else "FAILED"
+    message = readiness.get("reason") or readiness.get("ddlError") or ("Healthy" if readiness.get("ok") else "DB check failed")
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO tenant_db_connection_events
+                (id, organization_id, event_source, status, db_mode, db_ready,
+                 has_users_table, can_bootstrap, message, checked_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    org_id,
+                    source,
+                    status,
+                    db_mode,
+                    1 if readiness.get("ok") else 0,
+                    1 if readiness.get("hasUsersTable") else 0,
+                    1 if readiness.get("ddlOk") else 0,
+                    str(message or "")[:2000],
+                    actor or None,
+                ),
+            )
+        await conn.commit()
+
+
+async def _get_org_db_readiness(org_id: str, *, actor: str | None, source: str, record: bool = True) -> dict[str, Any]:
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, name, code, is_active, db_url, db_secret_ref, created_at FROM organizations WHERE id = %s",
+                (org_id,),
+            )
+            org = await cur.fetchone()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    db_secret_ref = org.get("db_secret_ref")
+    db_url = org.get("db_url")
+    db_mode = "secret_ref" if db_secret_ref else ("direct_url" if db_url else "missing")
+    readiness: dict[str, Any] = {"ok": False, "reason": "Tenant DB is not configured"}
+    if db_secret_ref or db_url:
+        try:
+            resolved_url = resolve_tenant_db_url(db_url=db_url, db_secret_ref=db_secret_ref)
+            readiness = _check_tenant_db_readiness(resolved_url) if resolved_url else {"ok": False, "reason": "Unable to resolve tenant DB URL"}
+        except Exception as exc:
+            readiness = {"ok": False, "reason": str(exc)}
+    if record:
+        await _record_tenant_db_event(org_id, actor=actor, source=source, db_mode=db_mode, readiness=readiness)
+    return {
+        "id": org.get("id"),
+        "name": org.get("name"),
+        "code": org.get("code"),
+        "is_active": bool(org.get("is_active")),
+        "dbConfigured": bool(db_secret_ref or db_url),
+        "dbMode": db_mode,
+        "ok": bool(readiness.get("ok")) and bool(org.get("is_active")),
+        "dbReady": bool(readiness.get("ok")),
+        "hasUsersTable": bool(readiness.get("hasUsersTable")),
+        "canBootstrap": bool(readiness.get("ddlOk")),
+        "reason": readiness.get("reason") or ("Healthy" if readiness.get("ok") else "DB check failed"),
+        "created_at": org.get("created_at"),
+    }
+
+
+async def _get_usage_limits(org_id: str) -> dict[str, Any]:
+    await _ensure_platform_ops_schema()
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT * FROM organization_usage_limits WHERE organization_id = %s", (org_id,))
+            row = await cur.fetchone() or {}
+    return {
+        "maxUsers": row.get("max_users"),
+        "maxActiveUsers": row.get("max_active_users"),
+        "maxTests": row.get("max_tests"),
+        "maxSubmissions": row.get("max_submissions"),
+        "maxApiRequestsMonthly": row.get("max_api_requests_monthly"),
+        "maxStorageMb": row.get("max_storage_mb"),
+        "updatedBy": row.get("updated_by"),
+        "updatedAt": row.get("updated_at"),
+    }
+
+
+async def _collect_org_usage(org_id: str) -> dict[str, int]:
+    pool = await get_primary_pool()
+    usage = {
+        "users": 0,
+        "activeUsers": 0,
+        "tests": 0,
+        "submissions": 0,
+        "apiRequestsMonthly": 0,
+        "storageMb": 0,
+    }
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE organization_id = %s", (org_id,))
+            usage["users"] = int((await cur.fetchone() or {}).get("cnt") or 0)
+            await cur.execute(
+                "SELECT COUNT(*) AS cnt FROM users WHERE organization_id = %s AND LOWER(COALESCE(status, 'active')) = 'active'",
+                (org_id,),
+            )
+            usage["activeUsers"] = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            for table_name in ("global_tests", "aptitude_tests", "skill_tests", "comm_tests"):
+                try:
+                    await cur.execute(
+                        f"""
+                        SELECT COUNT(*) AS cnt
+                        FROM {table_name} t
+                        JOIN users u ON u.id = t.created_by
+                        WHERE u.organization_id = %s
+                        """,
+                        (org_id,),
+                    )
+                    usage["tests"] += int((await cur.fetchone() or {}).get("cnt") or 0)
+                except Exception:
+                    continue
+
+            for table_name, user_col in (
+                ("global_test_submissions", "student_id"),
+                ("aptitude_submissions", "student_id"),
+                ("skill_test_attempts", "student_id"),
+                ("comm_test_attempts", "student_id"),
+                ("submissions", "student_id"),
+            ):
+                try:
+                    await cur.execute(
+                        f"""
+                        SELECT COUNT(*) AS cnt
+                        FROM {table_name} t
+                        JOIN users u ON u.id = t.{user_col}
+                        WHERE u.organization_id = %s
+                        """,
+                        (org_id,),
+                    )
+                    usage["submissions"] += int((await cur.fetchone() or {}).get("cnt") or 0)
+                except Exception:
+                    continue
+
+            try:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM api_request_audit a
+                    JOIN users u ON u.id = a.user_id
+                    WHERE u.organization_id = %s
+                      AND a.timestamp >= DATE_FORMAT(NOW(), '%%Y-%%m-01')
+                    """,
+                    (org_id,),
+                )
+                usage["apiRequestsMonthly"] = int((await cur.fetchone() or {}).get("cnt") or 0)
+            except Exception:
+                usage["apiRequestsMonthly"] = 0
+    return usage
+
+
+def _build_usage_limit_status(usage: dict[str, int], limits: dict[str, Any]) -> dict[str, Any]:
+    mapping = {
+        "users": "maxUsers",
+        "activeUsers": "maxActiveUsers",
+        "tests": "maxTests",
+        "submissions": "maxSubmissions",
+        "apiRequestsMonthly": "maxApiRequestsMonthly",
+        "storageMb": "maxStorageMb",
+    }
+    items = []
+    for usage_key, limit_key in mapping.items():
+        limit = limits.get(limit_key)
+        used = int(usage.get(usage_key) or 0)
+        pct = None if limit in (None, "") else round((used / max(1, int(limit))) * 100)
+        status = "unlimited"
+        if limit not in (None, ""):
+            status = "over" if used > int(limit) else ("warning" if pct is not None and pct >= 80 else "ok")
+        items.append({"key": usage_key, "used": used, "limit": limit, "percent": pct, "status": status})
+    return {"items": items, "overLimit": any(i["status"] == "over" for i in items)}
+
+
+async def _usage_payload_for_org(org_id: str) -> dict[str, Any]:
+    usage = await _collect_org_usage(org_id)
+    limits = await _get_usage_limits(org_id)
+    return {"organizationId": org_id, "usage": usage, "limits": limits, "status": _build_usage_limit_status(usage, limits)}
+
+
+async def _assert_usage_limit_available(org_id: str, resource: str, increment: int = 1) -> None:
+    payload = await _usage_payload_for_org(org_id)
+    usage = payload["usage"]
+    limits = payload["limits"]
+    checks = []
+    if resource == "users":
+        checks = [("users", "maxUsers"), ("activeUsers", "maxActiveUsers")]
+    elif resource == "tests":
+        checks = [("tests", "maxTests")]
+    elif resource == "submissions":
+        checks = [("submissions", "maxSubmissions")]
+    for usage_key, limit_key in checks:
+        limit = limits.get(limit_key)
+        if limit is not None and int(usage.get(usage_key) or 0) + increment > int(limit):
+            raise HTTPException(
+                status_code=402,
+                detail=f"Tenant usage limit reached for {usage_key}: {usage.get(usage_key, 0)}/{limit}",
+            )
 
 
 @router.get("/rbac/permissions")
@@ -313,10 +690,34 @@ async def list_organizations(request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                "SELECT id, name, code, type, is_active, created_by, created_at FROM organizations ORDER BY created_at DESC"
+                "SELECT id, name, code, is_active, created_by, created_at FROM organizations ORDER BY created_at DESC"
             )
             rows = await cur.fetchall()
     return rows
+
+
+@router.get("/platform/organizations/health")
+async def organization_health(request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can view organization health")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT id
+                FROM organizations
+                ORDER BY created_at DESC
+                """
+            )
+            orgs = await cur.fetchall() or []
+
+    health = []
+    for org in orgs:
+        health.append(await _get_org_db_readiness(org.get("id"), actor=actor, source="health_check", record=True))
+    return health
 
 
 @router.post("/platform/organizations")
@@ -326,35 +727,45 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
         raise HTTPException(status_code=403, detail="Only platform super admin can create organizations")
 
     db_url = (body.dbUrl or "").strip()
-    if not db_url:
-        raise HTTPException(status_code=400, detail="DB URL is required for each organization")
+    db_secret_ref = (body.dbSecretRef or "").strip()
+    bootstrap_stats = {"created": 0, "existing": 0}
+    org_is_active = 1
+    resolved_db_url = None
+    if db_url or db_secret_ref:
+        try:
+            resolved_db_url = resolve_tenant_db_url(db_url=db_url or None, db_secret_ref=db_secret_ref or None)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if resolved_db_url:
+        readiness = _check_tenant_db_readiness(resolved_db_url)
+        if not readiness.get("ok"):
+            raise HTTPException(status_code=400, detail=readiness.get("reason") or "Tenant DB is not ready")
+        if not readiness.get("ddlOk", False):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Tenant DB user does not have CREATE/DROP privilege required for bootstrap. "
+                    f"Details: {readiness.get('ddlError')}"
+                ),
+            )
 
-    readiness = _check_tenant_db_readiness(db_url)
-    if not readiness.get("ok"):
-        raise HTTPException(status_code=400, detail=readiness.get("reason") or "Tenant DB is not ready")
-    if not readiness.get("ddlOk", False):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Tenant DB user does not have CREATE/DROP privilege required for bootstrap. "
-                f"Details: {readiness.get('ddlError')}"
-            ),
-        )
+        # Bootstrap all current table structures into tenant DB before registering org.
+        try:
+            bootstrap_stats = _bootstrap_tenant_schema_from_primary(resolved_db_url)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Tenant DB bootstrap failed: {exc}")
 
-    # Bootstrap all current table structures into tenant DB before registering org.
-    try:
-        bootstrap_stats = _bootstrap_tenant_schema_from_primary(db_url)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Tenant DB bootstrap failed: {exc}")
-
-    post_bootstrap = _check_tenant_db_readiness(db_url)
-    if not post_bootstrap.get("ok"):
-        raise HTTPException(status_code=400, detail=post_bootstrap.get("reason") or "Tenant DB post-check failed")
-    if not post_bootstrap.get("hasUsersTable", False):
-        raise HTTPException(
-            status_code=400,
-            detail="Tenant DB bootstrap incomplete: missing required 'users' table",
-        )
+        post_bootstrap = _check_tenant_db_readiness(resolved_db_url)
+        if not post_bootstrap.get("ok"):
+            raise HTTPException(status_code=400, detail=post_bootstrap.get("reason") or "Tenant DB post-check failed")
+        if not post_bootstrap.get("hasUsersTable", False):
+            raise HTTPException(
+                status_code=400,
+                detail="Tenant DB bootstrap incomplete: missing required 'users' table",
+            )
+    else:
+        # Tenant-owned DB onboarding: org can be created first, DB configured later.
+        org_is_active = 1
 
     org_id = str(uuid.uuid4())
     org_admin_id = f"orgadmin-{uuid.uuid4().hex[:8]}"
@@ -373,10 +784,10 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
 
             await cur.execute(
                 """
-                INSERT INTO organizations (id, name, code, type, db_url, is_active, created_by)
-                VALUES (%s, %s, %s, %s, %s, 1, %s)
+                INSERT INTO organizations (id, name, code, db_url, db_secret_ref, is_active, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (org_id, body.name, body.code, body.type, db_url, actor or None),
+                (org_id, body.name, body.code, db_url or None, db_secret_ref or None, org_is_active, actor or None),
             )
 
             # Seed default organization admin role with broad permissions.
@@ -442,16 +853,17 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
         await conn.commit()
 
     # Keep tenant DB's users table in sync for runtime joins on tenant-scoped modules.
-    _provision_user_in_tenant_db(
-        db_url,
-        user_id=org_admin_id,
-        name=body.adminName,
-        email=body.adminEmail,
-        password_hash=org_admin_password_hash,
-        role="organization_admin",
-        organization_id=org_id,
-        must_change_password=1,
-    )
+    if resolved_db_url:
+        _provision_user_in_tenant_db(
+            resolved_db_url,
+            user_id=org_admin_id,
+            name=body.adminName,
+            email=body.adminEmail,
+            password_hash=org_admin_password_hash,
+            role="organization_admin",
+            organization_id=org_id,
+            must_change_password=1,
+        )
     try:
         await asyncio.to_thread(
             send_notification_email,
@@ -472,7 +884,161 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
         "organizationId": org_id,
         "organizationAdminId": org_admin_id,
         "tenantSchema": bootstrap_stats,
+        "tenantDbConfigured": bool(resolved_db_url),
+        "organizationActive": bool(org_is_active),
     }
+
+
+@router.post("/orgs/{org_id}/tenant-db")
+async def configure_tenant_db(org_id: str, body: ConfigureTenantDbBody, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.create")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    db_url = (body.dbUrl or "").strip()
+    db_secret_ref = (body.dbSecretRef or "").strip()
+    if not db_url and not db_secret_ref:
+        raise HTTPException(status_code=400, detail="Either DB URL or DB secret reference is required")
+    try:
+        resolved_db_url = resolve_tenant_db_url(db_url=db_url or None, db_secret_ref=db_secret_ref or None)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not resolved_db_url:
+        raise HTTPException(status_code=400, detail="Unable to resolve tenant DB URL")
+
+    readiness = _check_tenant_db_readiness(resolved_db_url)
+    if not readiness.get("ok"):
+        raise HTTPException(status_code=400, detail=readiness.get("reason") or "Tenant DB is not ready")
+    if not readiness.get("ddlOk", False):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Tenant DB user does not have CREATE/DROP privilege required for bootstrap. "
+                f"Details: {readiness.get('ddlError')}"
+            ),
+        )
+    try:
+        bootstrap_stats = _bootstrap_tenant_schema_from_primary(resolved_db_url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Tenant DB bootstrap failed: {exc}")
+
+    post_bootstrap = _check_tenant_db_readiness(resolved_db_url)
+    if not post_bootstrap.get("ok") or not post_bootstrap.get("hasUsersTable", False):
+        raise HTTPException(status_code=400, detail="Tenant DB bootstrap incomplete")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "UPDATE organizations SET db_url = %s, db_secret_ref = %s, is_active = %s WHERE id = %s",
+                ((db_url or None), (db_secret_ref or None), 1 if body.activate else 0, org_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Organization not found")
+            await cur.execute(
+                """
+                SELECT id, name, email, password, role, organization_id, phone, batch, must_change_password
+                FROM users
+                WHERE organization_id = %s
+                """,
+                (org_id,),
+            )
+            existing_users = await cur.fetchall() or []
+        await conn.commit()
+    for existing_user in existing_users:
+        _provision_user_in_tenant_db(
+            resolved_db_url,
+            user_id=existing_user["id"],
+            name=existing_user.get("name") or "",
+            email=existing_user.get("email") or "",
+            password_hash=existing_user.get("password") or "",
+            role=existing_user.get("role") or "org_user",
+            organization_id=org_id,
+            phone=existing_user.get("phone"),
+            batch=existing_user.get("batch"),
+            must_change_password=int(existing_user.get("must_change_password") or 0),
+        )
+    await _record_tenant_db_event(
+        org_id,
+        actor=actor,
+        source="configure",
+        db_mode="secret_ref" if db_secret_ref else "direct_url",
+        readiness=post_bootstrap,
+    )
+    return {"success": True, "organizationId": org_id, "tenantSchema": bootstrap_stats, "organizationActive": bool(body.activate)}
+
+
+@router.post("/platform/organizations/{org_id}/tenant-db/retry")
+async def retry_tenant_db_connection(org_id: str, request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can retry tenant DB connections")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,))
+            org = await cur.fetchone()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    db_url = org.get("db_url")
+    db_secret_ref = org.get("db_secret_ref")
+    db_mode = "secret_ref" if db_secret_ref else ("direct_url" if db_url else "missing")
+    bootstrap_stats = {"created": 0, "existing": 0}
+    if not db_url and not db_secret_ref:
+        readiness = {"ok": False, "reason": "Tenant DB is not configured"}
+        await _record_tenant_db_event(org_id, actor=actor, source="manual_retry", db_mode=db_mode, readiness=readiness)
+        return {"success": False, "organizationId": org_id, "readiness": readiness, "tenantSchema": bootstrap_stats}
+
+    try:
+        resolved_db_url = resolve_tenant_db_url(db_url=db_url, db_secret_ref=db_secret_ref)
+        readiness = _check_tenant_db_readiness(resolved_db_url) if resolved_db_url else {"ok": False, "reason": "Unable to resolve tenant DB URL"}
+        if readiness.get("ok") and readiness.get("ddlOk"):
+            try:
+                bootstrap_stats = _bootstrap_tenant_schema_from_primary(resolved_db_url)
+                readiness = _check_tenant_db_readiness(resolved_db_url)
+            except Exception as exc:
+                readiness = {"ok": False, "reason": f"Tenant DB bootstrap failed: {exc}"}
+    except Exception as exc:
+        readiness = {"ok": False, "reason": str(exc)}
+
+    await _record_tenant_db_event(org_id, actor=actor, source="manual_retry", db_mode=db_mode, readiness=readiness)
+    return {
+        "success": bool(readiness.get("ok")),
+        "organizationId": org_id,
+        "readiness": readiness,
+        "tenantSchema": bootstrap_stats,
+    }
+
+
+@router.get("/platform/organizations/{org_id}/tenant-db/history")
+async def tenant_db_connection_history(org_id: str, request: Request, limit: int = 20):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can view tenant DB history")
+    await _ensure_platform_ops_schema()
+    safe_limit = max(1, min(int(limit or 20), 100))
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id FROM organizations WHERE id = %s", (org_id,))
+            if not await cur.fetchone():
+                raise HTTPException(status_code=404, detail="Organization not found")
+            await cur.execute(
+                """
+                SELECT id, organization_id, event_source, status, db_mode, db_ready,
+                       has_users_table, can_bootstrap, message, checked_by, created_at
+                FROM tenant_db_connection_events
+                WHERE organization_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (org_id, safe_limit),
+            )
+            return await cur.fetchall() or []
 
 
 @router.patch("/platform/organizations/{org_id}/status")
@@ -501,7 +1067,7 @@ async def organization_analytics(request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                "SELECT id, name, code, type, is_active, created_at FROM organizations ORDER BY created_at DESC"
+                "SELECT id, name, code, is_active, created_at FROM organizations ORDER BY created_at DESC"
             )
             orgs = await cur.fetchall() or []
 
@@ -567,7 +1133,6 @@ async def organization_analytics(request: Request):
                 "id": oid,
                 "name": org.get("name"),
                 "code": org.get("code"),
-                "type": org.get("type"),
                 "is_active": org.get("is_active"),
                 "created_at": org.get("created_at"),
                 "total_users": users_by_org.get(oid, 0),
@@ -576,6 +1141,99 @@ async def organization_analytics(request: Request):
             }
         )
     return result
+
+
+@router.get("/platform/organizations/usage-summary")
+async def platform_usage_summary(request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can view usage summary")
+    await _ensure_platform_ops_schema()
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id, name, code, is_active FROM organizations ORDER BY created_at DESC")
+            orgs = await cur.fetchall() or []
+    summary = []
+    for org in orgs:
+        payload = await _usage_payload_for_org(org["id"])
+        summary.append({**org, **payload})
+    return summary
+
+
+@router.get("/platform/organizations/{org_id}/usage-limits")
+async def get_organization_usage_limits(org_id: str, request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can view usage limits")
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT 1 FROM organizations WHERE id = %s", (org_id,))
+            if not await cur.fetchone():
+                raise HTTPException(status_code=404, detail="Organization not found")
+    return await _usage_payload_for_org(org_id)
+
+
+@router.put("/platform/organizations/{org_id}/usage-limits")
+async def update_organization_usage_limits(org_id: str, body: UsageLimitsBody, request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can update usage limits")
+    await _ensure_platform_ops_schema()
+    limits = {
+        "max_users": _limit_value(body.maxUsers),
+        "max_active_users": _limit_value(body.maxActiveUsers),
+        "max_tests": _limit_value(body.maxTests),
+        "max_submissions": _limit_value(body.maxSubmissions),
+        "max_api_requests_monthly": _limit_value(body.maxApiRequestsMonthly),
+        "max_storage_mb": _limit_value(body.maxStorageMb),
+    }
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT 1 FROM organizations WHERE id = %s", (org_id,))
+            if not await cur.fetchone():
+                raise HTTPException(status_code=404, detail="Organization not found")
+            await cur.execute(
+                """
+                INSERT INTO organization_usage_limits
+                (organization_id, max_users, max_active_users, max_tests, max_submissions,
+                 max_api_requests_monthly, max_storage_mb, updated_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    max_users = VALUES(max_users),
+                    max_active_users = VALUES(max_active_users),
+                    max_tests = VALUES(max_tests),
+                    max_submissions = VALUES(max_submissions),
+                    max_api_requests_monthly = VALUES(max_api_requests_monthly),
+                    max_storage_mb = VALUES(max_storage_mb),
+                    updated_by = VALUES(updated_by),
+                    updated_at = NOW()
+                """,
+                (
+                    org_id,
+                    limits["max_users"],
+                    limits["max_active_users"],
+                    limits["max_tests"],
+                    limits["max_submissions"],
+                    limits["max_api_requests_monthly"],
+                    limits["max_storage_mb"],
+                    actor or None,
+                ),
+            )
+        await conn.commit()
+    audit_logger.log_event(
+        AuditEventType.CONFIG_CHANGED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=org_id,
+        resource_type="organization_usage_limits",
+        action="Platform usage limits updated",
+        details=body.model_dump(),
+    )
+    return await _usage_payload_for_org(org_id)
 
 
 @router.get("/orgs/{org_id}/analytics")
@@ -590,7 +1248,7 @@ async def single_org_analytics(org_id: str, request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                "SELECT id, name, code, type, is_active, created_at FROM organizations WHERE id = %s",
+                "SELECT id, name, code, is_active, created_at FROM organizations WHERE id = %s",
                 (org_id,),
             )
             org = await cur.fetchone()
@@ -661,7 +1319,6 @@ async def single_org_analytics(org_id: str, request: Request):
         "id": org.get("id"),
         "name": org.get("name"),
         "code": org.get("code"),
-        "type": org.get("type"),
         "is_active": org.get("is_active"),
         "created_at": org.get("created_at"),
         "total_users": total_users,
@@ -710,6 +1367,41 @@ async def list_org_roles(org_id: str, request: Request):
     return rows
 
 
+@router.get("/orgs/{org_id}/audit-events")
+async def list_org_audit_events(org_id: str, request: Request, limit: int = 50):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (
+        await _is_platform_super_admin(actor)
+        or await _has_org_permission(actor, org_id, "users.view")
+        or await _has_org_permission(actor, org_id, "roles.view")
+    ):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    safe_limit = max(1, min(int(limit or 50), 100))
+    pool = await get_primary_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT id, timestamp, event_type, user_id, ip_address, resource_id,
+                           resource_type, action, status, error_message, details
+                    FROM audit_events
+                    WHERE organization_id = %s
+                       OR user_id IN (SELECT id FROM users WHERE organization_id = %s)
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                    """,
+                    (org_id, org_id, safe_limit),
+                )
+                rows = await cur.fetchall() or []
+    except Exception:
+        return []
+    return rows
+
+
 @router.post("/orgs/{org_id}/roles")
 async def create_org_role(org_id: str, body: CreateRoleBody, request: Request):
     actor = _request_user_id(request)
@@ -720,7 +1412,9 @@ async def create_org_role(org_id: str, body: CreateRoleBody, request: Request):
 
     role_id = str(uuid.uuid4())
     slug = _slugify(body.name)
-    permissions = sorted(set(p.strip() for p in body.permissions if p and p.strip()))
+    permissions = _normalized_permissions(body.permissions)
+    if not permissions:
+        raise HTTPException(status_code=400, detail="Select at least one permission")
 
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
@@ -739,6 +1433,122 @@ async def create_org_role(org_id: str, body: CreateRoleBody, request: Request):
                 )
         await conn.commit()
 
+    audit_logger.log_event(
+        AuditEventType.ADMIN_USER_ROLE_CHANGED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=role_id,
+        resource_type="role",
+        action="Role created",
+        details={"name": body.name.strip(), "permissions": permissions},
+    )
+    return {"success": True, "roleId": role_id}
+
+
+@router.put("/orgs/{org_id}/roles/{role_id}")
+async def update_org_role(org_id: str, role_id: str, body: UpdateRoleBody, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "roles.update")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    permissions = _normalized_permissions(body.permissions) if body.permissions is not None else None
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, name, slug, is_system FROM roles WHERE id = %s AND organization_id = %s",
+                (role_id, org_id),
+            )
+            role = await cur.fetchone()
+            if not role:
+                raise HTTPException(status_code=404, detail="Role not found")
+            if role.get("slug") == "organization-admin":
+                raise HTTPException(status_code=403, detail="Organization Admin role cannot be edited")
+
+            updates = []
+            params: list[Any] = []
+            if body.name is not None and not int(role.get("is_system") or 0):
+                name = body.name.strip()
+                if not name:
+                    raise HTTPException(status_code=400, detail="Role name is required")
+                updates.extend(["name = %s", "slug = %s"])
+                params.extend([name, _slugify(name)])
+            if body.description is not None:
+                updates.append("description = %s")
+                params.append(body.description or None)
+            if updates:
+                await cur.execute(
+                    f"UPDATE roles SET {', '.join(updates)} WHERE id = %s AND organization_id = %s",
+                    [*params, role_id, org_id],
+                )
+
+            if permissions is not None:
+                if not permissions:
+                    raise HTTPException(status_code=400, detail="Select at least one permission")
+                await cur.execute("DELETE FROM role_permissions WHERE role_id = %s", (role_id,))
+                for perm in permissions:
+                    await cur.execute(
+                        "INSERT INTO role_permissions (role_id, permission_key) VALUES (%s, %s)",
+                        (role_id, perm),
+                    )
+        await conn.commit()
+
+    audit_logger.log_event(
+        AuditEventType.ADMIN_USER_ROLE_CHANGED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=role_id,
+        resource_type="role",
+        action="Role updated",
+        details={"name": body.name, "permissionsChanged": permissions is not None},
+    )
+    return {"success": True, "roleId": role_id}
+
+
+@router.delete("/orgs/{org_id}/roles/{role_id}")
+async def delete_org_role(org_id: str, role_id: str, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "roles.delete")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, is_system FROM roles WHERE id = %s AND organization_id = %s",
+                (role_id, org_id),
+            )
+            role = await cur.fetchone()
+            if not role:
+                raise HTTPException(status_code=404, detail="Role not found")
+            if int(role.get("is_system") or 0):
+                raise HTTPException(status_code=403, detail="System roles cannot be deleted")
+            await cur.execute(
+                "SELECT COUNT(*) AS cnt FROM user_role_assignments WHERE role_id = %s AND organization_id = %s",
+                (role_id, org_id),
+            )
+            assigned = int((await cur.fetchone() or {}).get("cnt") or 0)
+            if assigned:
+                raise HTTPException(status_code=409, detail="Move users to another role before deleting this role")
+            await cur.execute("DELETE FROM role_permissions WHERE role_id = %s", (role_id,))
+            await cur.execute("DELETE FROM roles WHERE id = %s AND organization_id = %s", (role_id, org_id))
+        await conn.commit()
+
+    audit_logger.log_event(
+        AuditEventType.ADMIN_USER_ROLE_CHANGED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=role_id,
+        resource_type="role",
+        action="Role deleted",
+    )
     return {"success": True, "roleId": role_id}
 
 
@@ -755,7 +1565,7 @@ async def list_org_users(org_id: str, request: Request):
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
                 """
-                SELECT u.id, u.name, u.email, u.status, u.phone, u.batch, u.created_at,
+                SELECT u.id, u.name, u.email, u.status, u.phone, u.batch, u.must_change_password, u.created_at,
                        r.id AS role_id, r.name AS role_name, r.slug AS role_slug
                 FROM users u
                 JOIN user_role_assignments ura ON ura.user_id = u.id AND ura.organization_id = %s
@@ -766,6 +1576,46 @@ async def list_org_users(org_id: str, request: Request):
                 (org_id, org_id),
             )
             rows = await cur.fetchall()
+            user_ids = [row.get("id") for row in rows if row.get("id")]
+            activity_by_user: dict[str, dict[str, Any]] = {}
+            if user_ids:
+                placeholders = ",".join(["%s"] * len(user_ids))
+                try:
+                    await cur.execute(
+                        f"""
+                        SELECT user_id,
+                               COUNT(*) AS activity_count,
+                               MAX(timestamp) AS last_activity_at,
+                               MAX(CASE WHEN event_type IN ('LOGIN_SUCCESS', 'OTP_VERIFIED') THEN timestamp ELSE NULL END) AS last_login_at
+                        FROM audit_events
+                        WHERE user_id IN ({placeholders})
+                        GROUP BY user_id
+                        """,
+                        user_ids,
+                    )
+                    for item in await cur.fetchall() or []:
+                        activity_by_user[item["user_id"]] = dict(item)
+                    await cur.execute(
+                        f"""
+                        SELECT ae.user_id, ae.event_type AS last_activity_type, ae.action AS last_activity_action
+                        FROM audit_events ae
+                        JOIN (
+                            SELECT user_id, MAX(timestamp) AS last_activity_at
+                            FROM audit_events
+                            WHERE user_id IN ({placeholders})
+                            GROUP BY user_id
+                        ) latest
+                          ON latest.user_id = ae.user_id
+                         AND latest.last_activity_at = ae.timestamp
+                        """,
+                        user_ids,
+                    )
+                    for item in await cur.fetchall() or []:
+                        activity_by_user.setdefault(item["user_id"], {}).update(dict(item))
+                except Exception:
+                    activity_by_user = {}
+            for row in rows:
+                row.update(activity_by_user.get(row.get("id"), {}))
     return rows
 
 
@@ -783,11 +1633,16 @@ async def create_org_user(org_id: str, body: CreateOrgUserBody, request: Request
     primary = await get_primary_pool()
     async with primary.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT db_url FROM organizations WHERE id = %s", (org_id,))
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,))
             org = await cur.fetchone()
-    tenant_db_url = (org or {}).get("db_url")
+    tenant_db_url = resolve_tenant_db_url(
+        db_url=(org or {}).get("db_url"),
+        db_secret_ref=(org or {}).get("db_secret_ref"),
+    )
     if not tenant_db_url:
         raise HTTPException(status_code=400, detail="Organization DB URL missing; cannot provision user")
+
+    await _assert_usage_limit_available(org_id, "users", 1)
 
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
@@ -842,5 +1697,295 @@ async def create_org_user(org_id: str, body: CreateOrgUserBody, request: Request
         )
     except Exception:
         pass
+    audit_logger.log_event(
+        AuditEventType.ADMIN_USER_CREATED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=user_id,
+        resource_type="user",
+        action="Organization user created",
+        details={"email": body.email, "roleId": body.roleId},
+    )
+    return {"success": True, "userId": user_id}
+
+
+@router.post("/orgs/{org_id}/users/bulk")
+async def bulk_create_org_users(org_id: str, body: BulkOrgUsersBody, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.create")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if not body.users:
+        raise HTTPException(status_code=400, detail="No users provided")
+    if len(body.users) > 500:
+        raise HTTPException(status_code=400, detail="Bulk import is limited to 500 users")
+
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,))
+            org = await cur.fetchone() or {}
+    tenant_db_url = resolve_tenant_db_url(db_url=org.get("db_url"), db_secret_ref=org.get("db_secret_ref"))
+    if not tenant_db_url:
+        raise HTTPException(status_code=400, detail="Organization DB URL missing; cannot provision users")
+
+    await _assert_usage_limit_available(org_id, "users", len(body.users))
+
+    results: list[dict[str, Any]] = []
+    created = 0
+    for index, item in enumerate(body.users, start=1):
+        try:
+            if not item.name.strip() or not item.email.strip() or not item.password or not item.roleId:
+                raise ValueError("name, email, password, and roleId are required")
+            user_id = f"user-{uuid.uuid4().hex[:8]}"
+            password_hash = _hash_password(item.password)
+            async with primary.acquire() as conn:
+                async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    await cur.execute("SELECT id FROM users WHERE email = %s", (item.email.strip(),))
+                    if await cur.fetchone():
+                        raise ValueError("Email already exists")
+                    await cur.execute("SELECT id FROM roles WHERE id = %s AND organization_id = %s", (item.roleId, org_id))
+                    if not await cur.fetchone():
+                        raise ValueError("Role not found for organization")
+                    await cur.execute(
+                        """
+                        INSERT INTO users (id, name, email, password, role, organization_id, phone, batch, status, must_change_password, created_at)
+                        VALUES (%s, %s, %s, %s, 'org_user', %s, %s, %s, 'active', 1, NOW())
+                        """,
+                        (user_id, item.name.strip(), item.email.strip(), password_hash, org_id, item.phone, item.batch),
+                    )
+                    await cur.execute(
+                        """
+                        INSERT INTO user_role_assignments (user_id, organization_id, role_id, is_primary)
+                        VALUES (%s, %s, %s, 1)
+                        """,
+                        (user_id, org_id, item.roleId),
+                    )
+                await conn.commit()
+            _provision_user_in_tenant_db(
+                tenant_db_url,
+                user_id=user_id,
+                name=item.name.strip(),
+                email=item.email.strip(),
+                password_hash=password_hash,
+                role="org_user",
+                organization_id=org_id,
+                phone=item.phone,
+                batch=item.batch,
+                must_change_password=1,
+            )
+            created += 1
+            results.append({"row": index, "email": item.email, "success": True, "userId": user_id})
+        except Exception as exc:
+            results.append({"row": index, "email": item.email, "success": False, "error": str(exc)})
+
+    audit_logger.log_event(
+        AuditEventType.BULK_OPERATION,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_type="user",
+        action="Bulk user import",
+        details={"created": created, "failed": len(results) - created},
+    )
+    return {"success": True, "created": created, "failed": len(results) - created, "results": results}
+
+
+@router.put("/orgs/{org_id}/users/{user_id}")
+async def update_org_user(org_id: str, user_id: str, body: UpdateOrgUserBody, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.update")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    status = body.status.strip().lower() if body.status is not None else None
+    if status is not None and status not in VALID_USER_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid user status")
+
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT * FROM users WHERE id = %s AND organization_id = %s", (user_id, org_id))
+            target = await cur.fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="User not found")
+            if target.get("role") == "organization_admin" and not await _is_platform_super_admin(actor):
+                raise HTTPException(status_code=403, detail="Organization admin accounts cannot be edited here")
+
+            if body.email is not None and body.email.strip() and body.email.strip() != target.get("email"):
+                await cur.execute("SELECT id FROM users WHERE email = %s AND id <> %s", (body.email.strip(), user_id))
+                if await cur.fetchone():
+                    raise HTTPException(status_code=409, detail="Email already exists")
+
+            role_id = body.roleId.strip() if body.roleId else None
+            if role_id:
+                await cur.execute("SELECT id FROM roles WHERE id = %s AND organization_id = %s", (role_id, org_id))
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Role not found for organization")
+
+            updates = []
+            params: list[Any] = []
+            for column, value in {
+                "name": body.name.strip() if body.name is not None else None,
+                "email": body.email.strip() if body.email is not None else None,
+                "phone": body.phone if body.phone is not None else None,
+                "batch": body.batch if body.batch is not None else None,
+                "status": status,
+            }.items():
+                if value is not None:
+                    updates.append(f"{column} = %s")
+                    params.append(value)
+            if updates:
+                await cur.execute(
+                    f"UPDATE users SET {', '.join(updates)} WHERE id = %s AND organization_id = %s",
+                    [*params, user_id, org_id],
+                )
+            if role_id:
+                await cur.execute(
+                    """
+                    INSERT INTO user_role_assignments (user_id, organization_id, role_id, is_primary)
+                    VALUES (%s, %s, %s, 1)
+                    ON DUPLICATE KEY UPDATE role_id = VALUES(role_id), is_primary = 1
+                    """,
+                    (user_id, org_id, role_id),
+                )
+        await conn.commit()
+
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,))
+            org = await cur.fetchone() or {}
+    tenant_db_url = resolve_tenant_db_url(db_url=org.get("db_url"), db_secret_ref=org.get("db_secret_ref"))
+    if tenant_db_url:
+        _update_user_in_tenant_db(
+            tenant_db_url,
+            user_id=user_id,
+            name=body.name.strip() if body.name is not None else None,
+            email=body.email.strip() if body.email is not None else None,
+            phone=body.phone if body.phone is not None else None,
+            batch=body.batch if body.batch is not None else None,
+            status=status,
+        )
+    audit_logger.log_event(
+        AuditEventType.ADMIN_USER_MODIFIED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=user_id,
+        resource_type="user",
+        action="Organization user updated",
+        details={"roleChanged": bool(body.roleId), "status": status},
+    )
+    return {"success": True, "userId": user_id}
+
+
+@router.delete("/orgs/{org_id}/users/{user_id}")
+async def delete_org_user(org_id: str, user_id: str, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if actor == user_id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.delete")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s AND organization_id = %s", (user_id, org_id))
+            target = await cur.fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="User not found")
+            if target.get("role") == "organization_admin" and not await _is_platform_super_admin(actor):
+                raise HTTPException(status_code=403, detail="Organization admin accounts cannot be deactivated here")
+            await cur.execute("UPDATE users SET status = 'inactive' WHERE id = %s AND organization_id = %s", (user_id, org_id))
+        await conn.commit()
+
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,))
+            org = await cur.fetchone() or {}
+    tenant_db_url = resolve_tenant_db_url(db_url=org.get("db_url"), db_secret_ref=org.get("db_secret_ref"))
+    if tenant_db_url:
+        _update_user_in_tenant_db(tenant_db_url, user_id=user_id, status="inactive")
+    audit_logger.log_event(
+        AuditEventType.ADMIN_USER_DELETED,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=user_id,
+        resource_type="user",
+        action="Organization user deactivated",
+    )
+    return {"success": True, "userId": user_id, "status": "inactive"}
+
+
+@router.post("/orgs/{org_id}/users/{user_id}/reset-password")
+async def reset_org_user_password(org_id: str, user_id: str, body: ResetOrgUserPasswordBody, request: Request):
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.update")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if len(body.newPassword or "") < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    password_hash = _hash_password(body.newPassword)
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id, name, email, role FROM users WHERE id = %s AND organization_id = %s", (user_id, org_id))
+            target = await cur.fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="User not found")
+            if target.get("role") == "organization_admin" and not await _is_platform_super_admin(actor):
+                raise HTTPException(status_code=403, detail="Organization admin passwords cannot be reset here")
+            await cur.execute(
+                "UPDATE users SET password = %s, must_change_password = 1, status = 'active' WHERE id = %s AND organization_id = %s",
+                (password_hash, user_id, org_id),
+            )
+        await conn.commit()
+
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,))
+            org = await cur.fetchone() or {}
+    tenant_db_url = resolve_tenant_db_url(db_url=org.get("db_url"), db_secret_ref=org.get("db_secret_ref"))
+    if tenant_db_url:
+        _update_user_in_tenant_db(
+            tenant_db_url,
+            user_id=user_id,
+            status="active",
+            password_hash=password_hash,
+            must_change_password=1,
+        )
+
+    if body.sendEmail:
+        try:
+            await asyncio.to_thread(
+                send_notification_email,
+                target.get("email"),
+                "Your Account Password Was Reset",
+                (
+                    f"Hello {target.get('name') or 'there'},\n\n"
+                    "Your organization admin reset your password.\n"
+                    f"Temporary password: {body.newPassword}\n"
+                    "You will be asked to change it after login.\n"
+                ),
+            )
+        except Exception:
+            pass
+    audit_logger.log_event(
+        AuditEventType.AUTH_PASSWORD_RESET,
+        user_id=actor,
+        organization_id=org_id,
+        ip_address=_client_ip(request),
+        resource_id=user_id,
+        resource_type="user",
+        action="Organization user password reset/reinvite",
+    )
     return {"success": True, "userId": user_id}
 

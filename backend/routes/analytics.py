@@ -7,13 +7,19 @@ import io
 import json
 
 import pymysql.cursors
+import pymysql.err
 from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import Response
-from database import get_pool
+from database import get_pool, get_primary_pool
+from routes.auth import _has_any_permission
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 audit_logger = get_audit_logger()
+
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    return isinstance(exc, pymysql.err.ProgrammingError) and len(exc.args) > 0 and exc.args[0] == 1146
 
 
 def _client_ip(request: Request) -> str:
@@ -41,14 +47,12 @@ router.dependencies.append(Depends(_log_read_access))
 async def _require_actor(request: Request):
     user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not user_id:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Missing user context")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT id FROM users WHERE id = %s LIMIT 1", (user_id,))
             if not await cur.fetchone():
-                from fastapi import HTTPException
                 raise HTTPException(status_code=401, detail="Invalid user context")
 
 
@@ -59,7 +63,6 @@ router.dependencies.append(Depends(_require_actor))
 async def _require_admin(request: Request) -> None:
     user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not user_id:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Missing user context")
 
     pool = await get_pool()
@@ -67,20 +70,16 @@ async def _require_admin(request: Request) -> None:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
             u = await cur.fetchone()
-            if u and (u.get("role") or "").lower() == "admin":
+            if u and (u.get("role") or "").lower() in {"admin", "organization_admin"}:
                 return
-            await cur.execute(
-                """
-                SELECT 1
-                FROM user_role_assignments ura
-                JOIN role_permissions rp ON rp.role_id = ura.role_id
-                WHERE ura.user_id = %s AND rp.permission_key = 'analytics.view'
-                LIMIT 1
-                """,
-                (user_id,),
-            )
-            p = await cur.fetchone()
-            if p:
+    if await _has_any_permission(user_id, ["analytics.view"]):
+        return
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+            u = await cur.fetchone()
+            if u and (u.get("role") or "").lower() in {"admin", "organization_admin"}:
                 return
     raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -127,12 +126,17 @@ async def _allocated_student_ids(conn, mentor_id: str | None) -> list[str]:
     """
     async with conn.cursor(pymysql.cursors.DictCursor) as cur:
         if mentor_id:
-            await cur.execute(
-                "SELECT student_id FROM mentor_student_allocations WHERE mentor_id=%s",
-                (mentor_id,),
-            )
-            rows = await cur.fetchall()
-            return [r["student_id"] for r in rows]
+            try:
+                await cur.execute(
+                    "SELECT student_id FROM mentor_student_allocations WHERE mentor_id=%s",
+                    (mentor_id,),
+                )
+                rows = await cur.fetchall()
+                return [r["student_id"] for r in rows]
+            except Exception as exc:
+                if _is_missing_table_error(exc):
+                    return []
+                raise
         await cur.execute("SELECT id FROM users WHERE role='student'")
         rows = await cur.fetchall()
         return [r["id"] for r in rows]
@@ -445,16 +449,21 @@ async def student_analytics(student_id: str, request: Request):
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                await cur.execute(
-                    """
-                    SELECT 1 FROM mentor_student_allocations
-                    WHERE mentor_id = %s AND student_id = %s
-                    LIMIT 1
-                    """,
-                    (actor_id, student_id),
-                )
-                if not await cur.fetchone():
-                    raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+                try:
+                    await cur.execute(
+                        """
+                        SELECT 1 FROM mentor_student_allocations
+                        WHERE mentor_id = %s AND student_id = %s
+                        LIMIT 1
+                        """,
+                        (actor_id, student_id),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+                except Exception as exc:
+                    if _is_missing_table_error(exc):
+                        raise HTTPException(status_code=403, detail="Mentor allocation data is unavailable")
+                    raise
     if actor_role not in ("admin", "organization_admin", "mentor", "student") and not can_view_all:
         if student_id != actor_id:
             raise HTTPException(status_code=403, detail="Forbidden scope")
@@ -464,15 +473,21 @@ async def student_analytics(student_id: str, request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             # Get student's mentor from allocation table
-            await cur.execute(
-                """SELECT m.id AS mentor_id, m.name AS mentor_name, m.email AS mentor_email
-                   FROM mentor_student_allocations msa
-                   JOIN users m ON msa.mentor_id = m.id
-                   WHERE msa.student_id = %s
-                   LIMIT 1""",
-                (student_id,),
-            )
-            alloc_row = await cur.fetchone()
+            try:
+                await cur.execute(
+                    """SELECT m.id AS mentor_id, m.name AS mentor_name, m.email AS mentor_email
+                       FROM mentor_student_allocations msa
+                       JOIN users m ON msa.mentor_id = m.id
+                       WHERE msa.student_id = %s
+                       LIMIT 1""",
+                    (student_id,),
+                )
+                alloc_row = await cur.fetchone()
+            except Exception as exc:
+                if _is_missing_table_error(exc):
+                    alloc_row = None
+                else:
+                    raise
             mentor_info = None
             mentor_id = None
             if alloc_row:
@@ -1245,12 +1260,17 @@ async def learning_path(student_id: str, request: Request):
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                await cur.execute(
-                    "SELECT 1 FROM mentor_student_allocations WHERE mentor_id=%s AND student_id=%s LIMIT 1",
-                    (actor_id, student_id),
-                )
-                if not await cur.fetchone():
-                    raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+                try:
+                    await cur.execute(
+                        "SELECT 1 FROM mentor_student_allocations WHERE mentor_id=%s AND student_id=%s LIMIT 1",
+                        (actor_id, student_id),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+                except Exception as exc:
+                    if _is_missing_table_error(exc):
+                        raise HTTPException(status_code=403, detail="Mentor allocation data is unavailable")
+                    raise
     if actor_role not in ("admin", "organization_admin", "mentor", "student") and not can_view_all:
         if student_id != actor_id:
             raise HTTPException(status_code=403, detail="Forbidden scope")
@@ -1366,12 +1386,17 @@ async def peer_comparison(student_id: str, request: Request):
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                await cur.execute(
-                    "SELECT 1 FROM mentor_student_allocations WHERE mentor_id=%s AND student_id=%s LIMIT 1",
-                    (actor_id, student_id),
-                )
-                if not await cur.fetchone():
-                    raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+                try:
+                    await cur.execute(
+                        "SELECT 1 FROM mentor_student_allocations WHERE mentor_id=%s AND student_id=%s LIMIT 1",
+                        (actor_id, student_id),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(status_code=403, detail="Student is not allocated to this mentor")
+                except Exception as exc:
+                    if _is_missing_table_error(exc):
+                        raise HTTPException(status_code=403, detail="Mentor allocation data is unavailable")
+                    raise
     if actor_role not in ("admin", "organization_admin", "mentor", "student") and not can_view_all:
         if student_id != actor_id:
             raise HTTPException(status_code=403, detail="Forbidden scope")
@@ -1630,4 +1655,114 @@ async def export_analytics_csv(request: Request, mentorId: str | None = Query(No
             "Content-Disposition": 'attachment; filename="analytics_export.csv"',
         },
     )
+
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    event_type: str | None = Query(None),
+    user_id_filter: str | None = Query(None, alias="userId"),
+):
+    """Return paginated audit log entries. Admin/org-admin only."""
+    actor = getattr(request.state, "auth_user_id", None) or ""
+    if not await _has_any_permission(actor, ["admin.view", "audit.view"]):
+        raise HTTPException(status_code=403, detail="Admin permission required")
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            conditions = []
+            params: list = []
+            if event_type:
+                conditions.append("event_type = %s")
+                params.append(event_type)
+            if user_id_filter:
+                conditions.append("user_id = %s")
+                params.append(user_id_filter)
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            try:
+                await cur.execute(
+                    f"SELECT id, event_type, user_id, ip_address, resource_type, resource_id, action, details, created_at "
+                    f"FROM audit_log {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                    [*params, limit, offset],
+                )
+                rows = await cur.fetchall()
+                await cur.execute(f"SELECT COUNT(*) AS total FROM audit_log {where}", params)
+                count_row = await cur.fetchone()
+            except Exception:
+                rows = []
+                count_row = {"total": 0}
+
+    def _fmt(row):
+        r = dict(row)
+        if isinstance(r.get("created_at"), datetime):
+            r["created_at"] = r["created_at"].isoformat()
+        if isinstance(r.get("details"), str):
+            try:
+                r["details"] = json.loads(r["details"])
+            except Exception:
+                pass
+        return r
+
+    return {
+        "logs": [_fmt(r) for r in rows],
+        "total": int((count_row or {}).get("total") or 0),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/system-errors")
+async def get_system_errors(
+    request: Request,
+    hours: int = Query(24, ge=1, le=168),
+):
+    """Return system error counts and recent errors for the error monitoring dashboard. Admin only."""
+    actor = getattr(request.state, "auth_user_id", None) or ""
+    if not await _has_any_permission(actor, ["admin.view", "audit.view"]):
+        raise HTTPException(status_code=403, detail="Admin permission required")
+
+    pool = await get_primary_pool()
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            try:
+                await cur.execute(
+                    "SELECT event_type, COUNT(*) AS count FROM audit_log "
+                    "WHERE event_type IN ('SYSTEM_ERROR','DATABASE_QUERY_ERROR','ACCESS_DENIED','PERMISSION_DENIED') "
+                    "AND created_at >= %s GROUP BY event_type ORDER BY count DESC",
+                    (since,),
+                )
+                summary = await cur.fetchall()
+                await cur.execute(
+                    "SELECT id, event_type, user_id, ip_address, resource_type, action, details, created_at "
+                    "FROM audit_log "
+                    "WHERE event_type IN ('SYSTEM_ERROR','DATABASE_QUERY_ERROR','ACCESS_DENIED','PERMISSION_DENIED') "
+                    "AND created_at >= %s ORDER BY created_at DESC LIMIT 50",
+                    (since,),
+                )
+                recent = await cur.fetchall()
+            except Exception:
+                summary = []
+                recent = []
+
+    def _fmt(row):
+        r = dict(row)
+        if isinstance(r.get("created_at"), datetime):
+            r["created_at"] = r["created_at"].isoformat()
+        if isinstance(r.get("details"), str):
+            try:
+                r["details"] = json.loads(r["details"])
+            except Exception:
+                pass
+        return r
+
+    return {
+        "hours": hours,
+        "summary": [dict(r) for r in summary],
+        "recent_errors": [_fmt(r) for r in recent],
+        "total_errors": sum(int(r.get("count") or 0) for r in summary),
+    }
 

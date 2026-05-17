@@ -901,3 +901,132 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
         "submittedAt": str(submitted_at),
     }
 
+
+# ---------------------------------------------------------------------------
+# Mentor feedback and escalation
+# ---------------------------------------------------------------------------
+
+class FeedbackBody(BaseModel):
+    mentor_id: str
+    comment: str
+    rating: int | None = None  # optional 1-5
+
+
+class EscalateBody(BaseModel):
+    mentor_id: str
+    reason: str = ""
+
+
+@router.post("/submissions/{submission_id}/feedback")
+async def add_submission_feedback(submission_id: str, body: FeedbackBody, request: Request):
+    actor_user = await _get_actor_user(request)
+    role = (actor_user.get("role") or "").lower()
+    if role not in ("admin", "organization_admin", "mentor", "org_user"):
+        raise HTTPException(status_code=403, detail="Mentor/Admin permission required")
+
+    pool = await get_pool()
+    feedback_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            try:
+                await cur.execute(
+                    """CREATE TABLE IF NOT EXISTS submission_feedback (
+                        id VARCHAR(36) PRIMARY KEY,
+                        submission_id VARCHAR(36) NOT NULL,
+                        mentor_id VARCHAR(36) NOT NULL,
+                        comment TEXT NOT NULL,
+                        rating TINYINT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_sub_fb (submission_id)
+                    )"""
+                )
+                await cur.execute(
+                    "INSERT INTO submission_feedback (id, submission_id, mentor_id, comment, rating, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (feedback_id, submission_id, body.mentor_id, body.comment, body.rating, now),
+                )
+                await conn.commit()
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Failed to save feedback: {exc}")
+
+    audit_logger.log_event(
+        AuditEventType.SUBMISSION_MODIFIED,
+        user_id=actor_user["id"],
+        ip_address=_client_ip(request),
+        resource_id=submission_id,
+        resource_type="submission_feedback",
+        action="Mentor feedback added",
+        details={"mentor_id": body.mentor_id, "rating": body.rating},
+    )
+    return {"id": feedback_id, "submission_id": submission_id, "created_at": now.isoformat()}
+
+
+@router.get("/submissions/{submission_id}/feedback")
+async def get_submission_feedback(submission_id: str, request: Request):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            try:
+                await cur.execute(
+                    "SELECT sf.*, u.name AS mentor_name FROM submission_feedback sf "
+                    "LEFT JOIN users u ON u.id = sf.mentor_id "
+                    "WHERE sf.submission_id = %s ORDER BY sf.created_at DESC",
+                    (submission_id,),
+                )
+                rows = await cur.fetchall()
+            except Exception:
+                rows = []
+
+    def _fmt(r):
+        d = dict(r)
+        if isinstance(d.get("created_at"), datetime):
+            d["created_at"] = d["created_at"].isoformat()
+        return d
+
+    return {"feedback": [_fmt(r) for r in rows]}
+
+
+@router.post("/submissions/{submission_id}/escalate")
+async def escalate_submission(submission_id: str, body: EscalateBody, request: Request):
+    actor_user = await _get_actor_user(request)
+    role = (actor_user.get("role") or "").lower()
+    if role not in ("admin", "organization_admin", "mentor", "org_user"):
+        raise HTTPException(status_code=403, detail="Mentor/Admin permission required")
+
+    pool = await get_pool()
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            try:
+                await cur.execute(
+                    """CREATE TABLE IF NOT EXISTS submission_escalations (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        submission_id VARCHAR(36) NOT NULL,
+                        mentor_id VARCHAR(36) NOT NULL,
+                        reason TEXT,
+                        escalated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        resolved TINYINT(1) DEFAULT 0,
+                        INDEX idx_sub_esc (submission_id)
+                    )"""
+                )
+                await cur.execute(
+                    "INSERT INTO submission_escalations (submission_id, mentor_id, reason, escalated_at) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (submission_id, body.mentor_id, body.reason, now),
+                )
+                await conn.commit()
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Failed to escalate: {exc}")
+
+    audit_logger.log_event(
+        AuditEventType.PROCTOR_ACTION_TAKEN,
+        user_id=actor_user["id"],
+        ip_address=_client_ip(request),
+        resource_id=submission_id,
+        resource_type="submission_escalation",
+        action="Submission escalated to admin",
+        details={"mentor_id": body.mentor_id, "reason": body.reason},
+    )
+    return {"status": "escalated", "submission_id": submission_id, "escalated_at": now.isoformat()}
+

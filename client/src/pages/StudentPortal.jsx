@@ -24,6 +24,10 @@ import './Portal.css'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 
+const isResultLocked = (item) => item?.resultsVisible === false || item?.score === null || item?.overallPercentage === null
+const resultLockMessage = (item) => item?.resultVisibilityReason || 'Results are submitted and will be released by your organization.'
+const scoreText = (value) => (value === null || value === undefined ? 'Locked' : `${value}%`)
+
 // Language configurations for code editor
 const LANGUAGE_CONFIG = {
     'Python': { monacoLang: 'python', ext: '.py', defaultCode: `# Write your Python code here\n\ndef solution():\n    pass\n\n# Call your solution\nsolution()` },
@@ -42,6 +46,21 @@ function StudentPortal() {
     const [subtitle, setSubtitle] = useState('')
     const perms = Array.isArray(user?.permissions) ? user.permissions : []
     const can = (perm) => perms.includes(perm)
+    const isLegacyExamTaker = user?.role === 'student' || user?.role === 'learner'
+    const featureAccess = {
+        dashboard: isLegacyExamTaker || user?.role === 'org_user' || can('results.view_own') || can('analytics.view'),
+        codingPractice: isLegacyExamTaker || can('coding.attempt'),
+        aptitude: isLegacyExamTaker || can('aptitude.attempt'),
+        globalTests: isLegacyExamTaker || can('tests.attempt') || can('tests.view_allocated'),
+        skillTests: isLegacyExamTaker || can('coding.attempt'),
+        communication: isLegacyExamTaker || can('communication.attempt'),
+        submissions: isLegacyExamTaker || can('results.view_own') || can('tests.view_allocated'),
+        skillSubmissions: isLegacyExamTaker || can('results.view_own') || can('coding.attempt'),
+        analytics: can('analytics.view'),
+    }
+    const gated = (allowed, element, label) => (
+        allowed ? element : <AccessNotice title="Access not enabled" message={`${label} is not enabled for this exam workspace.`} />
+    )
 
 
 
@@ -95,10 +114,11 @@ function StudentPortal() {
             icon: <ClipboardList size={20} />,
             defaultExpanded: false,
             children: [
-                (can('aptitude.attempt') || can('aptitude.assign')) && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
-                (can('tests.attempt') || can('tests.assign')) && { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
-                (can('coding.attempt') || can('coding.assign')) && { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
-                (can('communication.attempt') || can('communication.assign')) && { path: '/student/communication', label: 'Communication', icon: <MessageSquare size={20} /> }
+                featureAccess.codingPractice && { path: '/student/assignments', label: t('coding_problems'), icon: <Code size={20} /> },
+                featureAccess.aptitude && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
+                featureAccess.globalTests && { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
+                featureAccess.skillTests && { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
+                featureAccess.communication && { path: '/student/communication', label: 'Communication', icon: <MessageSquare size={20} /> }
             ].filter(Boolean)
         },
         {
@@ -106,9 +126,9 @@ function StudentPortal() {
             icon: <TrendingUp size={20} />,
             defaultExpanded: false,
             children: [
-                (can('results.view_own') || can('tests.view')) && { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
-                (can('results.view_own') || can('tests.view')) && { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
-                can('analytics.view') && { path: '/student/analytics', label: t('my_analytics'), icon: <TrendingUp size={20} /> }
+                featureAccess.submissions && { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
+                featureAccess.skillSubmissions && { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
+                featureAccess.analytics && { path: '/student/analytics', label: t('my_analytics'), icon: <TrendingUp size={20} /> }
             ].filter(Boolean)
         },
     ].filter((item) => !item.children || item.children.length > 0)
@@ -116,25 +136,170 @@ function StudentPortal() {
     return (
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>
             <Routes>
-                <Route path="/" element={<Dashboard user={user} />} />
-                <Route path="/assignments" element={<Assignments user={user} />} />
-                <Route path="/aptitude" element={<AptitudeTests user={user} />} />
-                <Route path="/global-tests" element={<GlobalTests user={user} />} />
-                <Route path="/skill-tests" element={<SkillTestPortal user={user} />} />
-                <Route path="/skill-submissions" element={<SkillSubmissions user={user} />} />
-                <Route path="/communication" element={<CommunicationHub user={user} />} />
-                <Route path="/submissions" element={<Submissions user={user} />} />
-                <Route path="/analytics" element={<StudentAnalytics user={user} />} />
+                <Route path="/" element={gated(featureAccess.dashboard, <Dashboard user={user} />, 'Dashboard')} />
+                <Route path="/assignments" element={gated(featureAccess.codingPractice, <Assignments user={user} />, 'Coding practice')} />
+                <Route path="/aptitude" element={gated(featureAccess.aptitude, <AptitudeTests user={user} />, 'Aptitude tests')} />
+                <Route path="/global-tests" element={gated(featureAccess.globalTests, <GlobalTests user={user} />, 'Global tests')} />
+                <Route path="/skill-tests" element={gated(featureAccess.skillTests, <SkillTestPortal user={user} />, 'Skill tests')} />
+                <Route path="/skill-submissions" element={gated(featureAccess.skillSubmissions, <SkillSubmissions user={user} />, 'Skill submissions')} />
+                <Route path="/communication" element={gated(featureAccess.communication, <CommunicationHub user={user} />, 'Communication tests')} />
+                <Route path="/submissions" element={gated(featureAccess.submissions, <Submissions user={user} />, 'Submissions')} />
+                <Route path="/analytics" element={gated(featureAccess.analytics, <StudentAnalytics user={user} />, 'Analytics')} />
             </Routes>
         </DashboardLayout>
+    )
+}
+
+function AccessNotice({ title, message }) {
+    return (
+        <div className="dashboard-panel admin-access-notice">
+            <Shield size={32} />
+            <h3>{title}</h3>
+            <p>{message}</p>
+        </div>
+    )
+}
+
+function UpcomingExamReminders({ user }) {
+    const [items, setItems] = useState([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        let active = true
+        const normalizeTime = (value) => {
+            if (!value) return null
+            const date = new Date(value)
+            return Number.isNaN(date.getTime()) ? null : date
+        }
+        const loadAssigned = async () => {
+            setLoading(true)
+            const requests = [
+                axios.get(`${API_BASE}/global-tests`, { params: { status: 'live', studentId: user.id } }).then((res) => (res.data || []).map((test) => ({
+                    id: `global-${test.id}`,
+                    type: 'Global Test',
+                    title: test.title,
+                    start: normalizeTime(test.startTime || test.start_time),
+                    deadline: normalizeTime(test.deadline),
+                    path: '/student/global-tests',
+                }))),
+                axios.get(`${API_BASE}/aptitude`, { params: { status: 'live' } }).then((res) => (res.data || []).map((test) => ({
+                    id: `aptitude-${test.id}`,
+                    type: 'Aptitude',
+                    title: test.title,
+                    start: normalizeTime(test.startTime || test.start_time),
+                    deadline: normalizeTime(test.deadline),
+                    path: '/student/aptitude',
+                }))),
+                axios.get(`${API_BASE}/skill-tests/student/available`, { params: { studentId: user.id } }).then((res) => (res.data || []).map((test) => ({
+                    id: `skill-${test.id}`,
+                    type: 'Skill Test',
+                    title: test.title,
+                    start: normalizeTime(test.start_time || test.startTime),
+                    deadline: normalizeTime(test.deadline),
+                    path: '/student/skill-tests',
+                }))),
+                axios.get(`${API_BASE}/communication/tests/student/available`, { params: { studentId: user.id } }).then((res) => (res.data || []).map((test) => ({
+                    id: `communication-${test.id}`,
+                    type: 'Communication',
+                    title: test.title,
+                    start: normalizeTime(test.start_time || test.startTime),
+                    deadline: normalizeTime(test.deadline),
+                    path: '/student/communication',
+                }))),
+            ]
+            const settled = await Promise.allSettled(requests)
+            const now = new Date()
+            const exams = settled
+                .filter((result) => result.status === 'fulfilled')
+                .flatMap((result) => result.value)
+                .filter((item) => item.title)
+                .map((item) => {
+                    const due = item.deadline || item.start
+                    const ms = due ? due.getTime() - now.getTime() : null
+                    return { ...item, due, ms }
+                })
+                .filter((item) => item.ms === null || item.ms >= -86400000)
+                .sort((a, b) => (a.ms ?? Number.MAX_SAFE_INTEGER) - (b.ms ?? Number.MAX_SAFE_INTEGER))
+                .slice(0, 5)
+            if (active) {
+                setItems(exams)
+                setLoading(false)
+            }
+        }
+        loadAssigned().catch(() => {
+            if (active) setLoading(false)
+        })
+        return () => { active = false }
+    }, [user.id])
+
+    const labelFor = (item) => {
+        if (!item.due) return 'No deadline set'
+        const hours = Math.ceil((item.due.getTime() - Date.now()) / 3600000)
+        if (hours < 0) return 'Recently due'
+        if (hours <= 24) return `Due in ${hours}h`
+        return `Due in ${Math.ceil(hours / 24)}d`
+    }
+
+    return (
+        <div className="dashboard-panel" style={{ marginBottom: '1.5rem' }}>
+            <div className="panel-header">
+                <h3 className="panel-title" style={{ margin: 0 }}>
+                    <Clock size={18} color="#f59e0b" /> Upcoming Assigned Exams
+                </h3>
+                {loading && <div className="loading-spinner" style={{ width: 22, height: 22 }} />}
+            </div>
+            {!loading && items.length === 0 ? (
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>No assigned exams need attention right now.</p>
+            ) : (
+                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {items.map((item) => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => { window.location.href = item.path }}
+                            style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                width: '100%',
+                                padding: '0.9rem 1rem',
+                                borderRadius: 12,
+                                border: '1px solid var(--border-color)',
+                                background: 'var(--bg-card)',
+                                color: 'var(--text-primary)',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                            }}
+                        >
+                            <div>
+                                <div style={{ fontWeight: 800 }}>{item.title}</div>
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{item.type}</div>
+                            </div>
+                            <div style={{ color: item.ms !== null && item.ms <= 86400000 ? '#f59e0b' : 'var(--text-muted)', fontWeight: 700 }}>
+                                {labelFor(item)}
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
     )
 }
 
 function Dashboard({ user }) {
     const [stats, setStats] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+    const perms = Array.isArray(user?.permissions) ? user.permissions : []
+    const canViewOwnDashboard = user?.role === 'student' || user?.role === 'org_user' || user?.role === 'learner' || perms.includes('results.view_own') || perms.includes('analytics.view')
 
     useEffect(() => {
+        if (!canViewOwnDashboard) {
+            setLoading(false)
+            setError('You do not have permission to view dashboard metrics.')
+            return
+        }
         axios.get(`${API_BASE}/analytics/student/${user.id}`)
             .then(res => {
                 setStats(res.data)
@@ -142,9 +307,10 @@ function Dashboard({ user }) {
             })
             .catch(err => {
                 console.error(err)
+                setError(err?.response?.data?.detail || 'Failed to load dashboard metrics')
                 setLoading(false)
             })
-    }, [user.id])
+    }, [user.id, canViewOwnDashboard])
 
     // Format time ago
     const formatTimeAgo = (dateString) => {
@@ -163,7 +329,40 @@ function Dashboard({ user }) {
     }
 
     if (loading) return <div className="loading-spinner"></div>
-    if (!stats) return <div>Error loading stats</div>
+    if (error) return <div className="dashboard-panel">{error}</div>
+    if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
+
+    const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+    const deltaPct = (current, previous) => {
+        const c = toNum(current)
+        const p = toNum(previous)
+        if (p <= 0) return c > 0 ? 100 : 0
+        return ((c - p) / p) * 100
+    }
+    const fmtDelta = (value) => {
+        const rounded = Math.round(value * 10) / 10
+        if (rounded > 0) return `+${rounded}%`
+        if (rounded < 0) return `${rounded}%`
+        return '0.0%'
+    }
+
+    const recent = Array.isArray(stats.recentSubmissions) ? stats.recentSubmissions : []
+    const mid = Math.max(1, Math.floor(recent.length / 2))
+    const currentScores = recent.slice(0, mid).map((s) => toNum(s.score))
+    const previousScores = recent.slice(mid).map((s) => toNum(s.score))
+    const currentAvgScore = currentScores.length ? currentScores.reduce((a, b) => a + b, 0) / currentScores.length : toNum(stats.avgProblemScore)
+    const previousAvgScore = previousScores.length ? previousScores.reduce((a, b) => a + b, 0) / previousScores.length : Math.max(1, toNum(stats.avgProblemScore) - 5)
+    const solvedDelta = deltaPct(toNum(stats.completedProblems), Math.max(1, toNum(stats.totalProblems) - toNum(stats.completedProblems)))
+    const scoreDelta = deltaPct(currentAvgScore, previousAvgScore)
+    const aptitudeDelta = deltaPct(toNum(stats.completedAptitude), Math.max(1, toNum(stats.totalAptitude) - toNum(stats.completedAptitude)))
+    const tasksDelta = deltaPct(toNum(stats.completedTasks), Math.max(1, toNum(stats.totalTasks || 0) - toNum(stats.completedTasks)))
+
+    const kpiCards = [
+        { label: 'Task Completion Momentum', value: `${stats.completedTasks}`, delta: tasksDelta, meta: 'vs pending workload' },
+        { label: 'Problem Solving Momentum', value: `${stats.completedProblems}`, delta: solvedDelta, meta: 'completed vs remaining' },
+        { label: 'Score Improvement', value: `${Math.round(currentAvgScore)}%`, delta: scoreDelta, meta: 'recent attempts trend' },
+        { label: 'Aptitude Progress', value: `${stats.completedAptitude}`, delta: aptitudeDelta, meta: 'completed vs remaining' },
+    ]
 
     return (
         <div className="dashboard-container animate-fadeIn">
@@ -233,6 +432,21 @@ function Dashboard({ user }) {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <UpcomingExamReminders user={user} />
+
+            <div className="kpi-trend-grid">
+                {kpiCards.map((kpi) => (
+                    <div key={kpi.label} className="kpi-trend-card">
+                        <div className="kpi-trend-label">{kpi.label}</div>
+                        <div className="kpi-trend-value">{kpi.value}</div>
+                        <div className="kpi-trend-meta">{kpi.meta}</div>
+                        <div className={`kpi-trend-delta ${kpi.delta > 0 ? 'up' : kpi.delta < 0 ? 'down' : 'flat'}`}>
+                            {fmtDelta(kpi.delta)}
+                        </div>
+                    </div>
+                ))}
             </div>
 
             {/* Three Column Layout */}
@@ -1398,7 +1612,9 @@ function Submissions({ user }) {
                                             {sub.subType === 'aptitude' ? 'N/A' : sub.subType === 'global' ? 'Mixed' : (sub.language?.toUpperCase() || 'N/A')}
                                         </span>
                                     </td>
-                                    <td style={{ fontWeight: 700, fontSize: '1.1rem' }}>{sub.score}%</td>
+                                    <td style={{ fontWeight: 700, fontSize: '1.1rem', color: isResultLocked(sub) ? 'var(--text-muted)' : undefined }}>
+                                        {scoreText(sub.score)}
+                                    </td>
                                     <td>
                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
                                             <span className={`status-badge ${sub.status}`}>{sub.status}</span>
@@ -1458,10 +1674,18 @@ function Submissions({ user }) {
                                     <td>
                                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                                             {sub.subType === 'aptitude' ? (
-                                                <button onClick={() => setViewAptitudeResult(sub)} style={{ background: 'rgba(139, 92, 246, 0.1)', border: 'none', color: '#8b5cf6', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Results</button>
+                                                isResultLocked(sub) ? (
+                                                    <span style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', padding: '0.4rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Shield size={14} /> {resultLockMessage(sub)}</span>
+                                                ) : (
+                                                    <button onClick={() => setViewAptitudeResult(sub)} style={{ background: 'rgba(139, 92, 246, 0.1)', border: 'none', color: '#8b5cf6', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Results</button>
+                                                )
                                             ) : sub.subType === 'global' ? (
                                                 <>
-                                                    <button onClick={() => setViewGlobalReport(sub.id)} style={{ background: 'var(--primary-alpha)', border: 'none', color: 'var(--primary)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Full Report</button>
+                                                    {isResultLocked(sub) ? (
+                                                        <span style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', padding: '0.4rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Shield size={14} /> {resultLockMessage(sub)}</span>
+                                                    ) : (
+                                                        <button onClick={() => setViewGlobalReport(sub.id)} style={{ background: 'var(--primary-alpha)', border: 'none', color: 'var(--primary)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Full Report</button>
+                                                    )}
                                                     <button onClick={() => handleDelete(sub)} style={{ background: 'var(--danger-alpha)', border: 'none', color: 'var(--danger)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}><Trash2 size={14} /></button>
                                                 </>
 
@@ -1734,6 +1958,66 @@ function SubmissionReportModal({ submission, user, onClose }) {
 
 
 // ==================== GLOBAL COMPLETE TESTS COMPONENT ====================
+function ExamInstructionsModal({ test, onAcknowledge, onCancel }) {
+    const [checked, setChecked] = useState(false)
+    const rules = [
+        'Keep your face visible and well-lit in the camera at all times.',
+        'Do not switch tabs, minimize the browser, or open other applications.',
+        'No mobile phones, headphones, or external assistance during the exam.',
+        'Copy-paste is monitored and restricted. Type your answers manually.',
+        'Any suspicious behavior (multiple faces, phone detected) will be flagged.',
+        `You have ${test?.duration || '—'} minutes to complete the exam once started.`,
+        `Tab-switch limit: ${test?.maxTabSwitches ?? 3}. Exceeding this may auto-submit.`,
+        'Ensure stable internet before starting. Connection drops may affect your submission.',
+    ]
+    return (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,30,0.92)', backdropFilter: 'blur(10px)', zIndex: 99998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+            <div style={{ background: 'rgba(22,32,52,0.98)', borderRadius: 20, border: '1.5px solid rgba(99,102,241,0.35)', maxWidth: 560, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 60px rgba(0,0,0,0.5)' }}>
+                <div style={{ padding: '1.75rem 2rem 1.25rem', borderBottom: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Shield size={22} color="white" />
+                    </div>
+                    <div>
+                        <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'white' }}>Exam Instructions</h2>
+                        <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>{test?.title}</p>
+                    </div>
+                    <button type="button" onClick={onCancel} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4 }}><X size={20} /></button>
+                </div>
+                <div style={{ padding: '1.5rem 2rem', overflowY: 'auto', flex: 1 }}>
+                    <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                        {[['Duration', `${test?.duration ?? '—'} min`], ['Questions', test?.totalQuestions ?? '—'], ['Pass Score', `${test?.passingScore ?? '—'}%`]].map(([label, val]) => (
+                            <div key={label} style={{ flex: 1, minWidth: 90, background: 'rgba(99,102,241,0.1)', borderRadius: 10, padding: '0.75rem 1rem', border: '1px solid rgba(99,102,241,0.2)' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', marginBottom: 3 }}>{label}</div>
+                                <div style={{ fontWeight: 700, color: 'white', fontSize: '1.05rem' }}>{val}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <p style={{ margin: '0 0 1rem', color: 'rgba(255,255,255,0.65)', fontWeight: 600, fontSize: '0.9rem' }}>Please read the following rules carefully before starting:</p>
+                    <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                        {rules.map((rule, i) => (
+                            <li key={i} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', fontSize: '0.875rem', color: 'rgba(255,255,255,0.75)' }}>
+                                <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(99,102,241,0.2)', color: '#818cf8', fontWeight: 700, fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
+                                {rule}
+                            </li>
+                        ))}
+                    </ul>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '1.5rem', cursor: 'pointer', padding: '1rem', background: 'rgba(99,102,241,0.08)', borderRadius: 10, border: `1px solid ${checked ? 'rgba(99,102,241,0.5)' : 'rgba(99,102,241,0.15)'}` }}>
+                        <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} style={{ width: 18, height: 18, accentColor: '#6366f1', cursor: 'pointer' }} />
+                        <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.875rem', fontWeight: 600 }}>I have read and agree to follow all exam rules and integrity guidelines.</span>
+                    </label>
+                </div>
+                <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid rgba(99,102,241,0.2)', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                    <button type="button" onClick={onCancel} style={{ padding: '0.7rem 1.5rem', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 10, color: 'rgba(255,255,255,0.6)', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                    <button type="button" onClick={onAcknowledge} disabled={!checked} style={{ padding: '0.7rem 1.75rem', background: checked ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(99,102,241,0.2)', border: 'none', borderRadius: 10, color: checked ? 'white' : 'rgba(255,255,255,0.3)', fontWeight: 700, cursor: checked ? 'pointer' : 'not-allowed', boxShadow: checked ? '0 4px 14px rgba(99,102,241,0.4)' : 'none' }}>
+                        <Play size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+                        Start Exam
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 function GlobalTests({ user }) {
     const [tests, setTests] = useState([])
     const [loading, setLoading] = useState(true)
@@ -1741,7 +2025,8 @@ function GlobalTests({ user }) {
     const [showTestInterface, setShowTestInterface] = useState(false)
     const [submissions, setSubmissions] = useState([])
     const [submissionResult, setSubmissionResult] = useState(null)
-    const [scanGate, setScanGate] = useState(null) // { test } when scan gate is open
+    const [scanGate, setScanGate] = useState(null)
+    const [showInstructions, setShowInstructions] = useState(null) // { test }
     const pendingTestRef = useRef(null)
 
     useEffect(() => {
@@ -1768,6 +2053,7 @@ function GlobalTests({ user }) {
 
     const getAttemptCount = (testId) => submissions.filter(s => s.testId === testId).length
     const getTestSubmission = (testId) => submissions.find(s => s.testId === testId)
+    const getInProgressSubmission = (testId) => submissions.find(s => s.testId === testId && s.status === 'in_progress')
     const isTestCompleted = (testId, testData) => {
         const hasPassed = submissions.some(s => s.testId === testId && s.status === 'passed')
         const attemptCount = getAttemptCount(testId)
@@ -1784,9 +2070,9 @@ function GlobalTests({ user }) {
             alert('This test has expired.')
             return
         }
-        const attemptCount = submissions.filter(s => s.testId === test.id).length
+        const completedAttempts = submissions.filter(s => s.testId === test.id && s.status !== 'in_progress').length
         const maxAttempts = test.maxAttempts ?? 1
-        if (maxAttempts !== -1 && attemptCount >= maxAttempts) {
+        if (maxAttempts !== -1 && completedAttempts >= maxAttempts) {
             alert(`Max attempts (${maxAttempts}) reached for this test.`)
             return
         }
@@ -1802,10 +2088,22 @@ function GlobalTests({ user }) {
     const handleScanApproved = () => {
         setScanGate(null)
         if (pendingTestRef.current) {
-            setSelectedTest(pendingTestRef.current)
+            setShowInstructions({ test: pendingTestRef.current })
+        }
+    }
+
+    const handleInstructionsAcknowledged = () => {
+        if (showInstructions?.test) {
+            setSelectedTest(showInstructions.test)
             setShowTestInterface(true)
             pendingTestRef.current = null
         }
+        setShowInstructions(null)
+    }
+
+    const handleInstructionsCancel = () => {
+        setShowInstructions(null)
+        pendingTestRef.current = null
     }
 
     const handleScanCancel = () => {
@@ -1842,8 +2140,9 @@ function GlobalTests({ user }) {
     // Submission Result Modal — shown after test submission
     const ResultModal = () => {
         if (!submissionResult) return null
+        const locked = isResultLocked(submissionResult)
         const sectionScores = submissionResult.sectionScores || {}
-        const isPassed = submissionResult.status === 'passed'
+        const isPassed = !locked && submissionResult.status === 'passed'
         return (
             <div style={{
                 position: 'fixed',
@@ -1896,13 +2195,13 @@ function GlobalTests({ user }) {
                             boxShadow: `0 8px 24px ${isPassed ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
                             animation: isPassed ? 'pulse 2s ease-in-out infinite' : 'none'
                         }}>
-                            {isPassed ? <Award size={40} color="white" /> : <XCircle size={40} color="white" />}
+                            {locked ? <Shield size={40} color="white" /> : isPassed ? <Award size={40} color="white" /> : <XCircle size={40} color="white" />}
                         </div>
                         <h2 style={{ margin: '0 0 0.5rem', color: 'white', fontSize: '1.75rem', fontWeight: 800 }}>
-                            {isPassed ? '🎉 Congratulations!' : 'Test Completed'}
+                            {locked ? 'Submitted Successfully' : isPassed ? 'Congratulations!' : 'Test Completed'}
                         </h2>
                         <p style={{ margin: 0, color: 'rgba(255,255,255,0.7)', fontSize: '1rem' }}>
-                            {isPassed ? 'You have successfully passed the assessment!' : 'Keep practicing to improve your score.'}
+                            {locked ? resultLockMessage(submissionResult) : isPassed ? 'You have successfully passed the assessment!' : 'Keep practicing to improve your score.'}
                         </p>
                     </div>
 
@@ -1929,7 +2228,7 @@ function GlobalTests({ user }) {
                                     color: isPassed ? '#10b981' : '#ef4444',
                                     lineHeight: 1
                                 }}>
-                                    {submissionResult.score ?? submissionResult.overallPercentage}%
+                                    {locked ? 'Locked' : `${submissionResult.score ?? submissionResult.overallPercentage}%`}
                                 </div>
                                 <div style={{
                                     fontSize: '0.9rem',
@@ -1939,7 +2238,7 @@ function GlobalTests({ user }) {
                                     letterSpacing: '2px',
                                     fontWeight: 600
                                 }}>
-                                    Overall Score
+                                    {locked ? 'Result Release' : 'Overall Score'}
                                 </div>
                             </div>
                             <div style={{
@@ -1950,10 +2249,10 @@ function GlobalTests({ user }) {
                                 textAlign: 'center'
                             }}>
                                 <div style={{ fontSize: '2rem', fontWeight: 800, color: '#a78bfa' }}>
-                                    {submissionResult.correctCount || 0}/{submissionResult.totalQuestions || 0}
+                                    {locked ? '-' : `${submissionResult.correctCount || 0}/${submissionResult.totalQuestions || 0}`}
                                 </div>
                                 <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', marginTop: '0.25rem' }}>
-                                    Correct Answers
+                                    {locked ? 'Awaiting release' : 'Correct Answers'}
                                 </div>
                             </div>
                         </div>
@@ -2059,21 +2358,31 @@ function GlobalTests({ user }) {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
                         {tests.map(t => {
+                            const now = new Date()
+                            const isUpcoming = t.startTime && new Date(t.startTime) > now
+                            const isExpired = t.deadline && new Date(t.deadline) < now
                             const completed = isTestCompleted(t.id, t)
                             const submission = getTestSubmission(t.id)
-                            const attemptCount = getAttemptCount(t.id)
-                            const hasPassed = submission?.status === 'passed'
-                            const hasAttemptsLeft = t.maxAttempts === -1 || attemptCount < (t.maxAttempts || 1)
-                            const canRetry = !hasPassed && hasAttemptsLeft && attemptCount > 0
+                            const inProgress = getInProgressSubmission(t.id)
+                            const locked = isResultLocked(submission)
+                            const completedAttempts = submissions.filter(s => s.testId === t.id && s.status !== 'in_progress').length
+                            const hasPassed = !locked && submission?.status === 'passed'
+                            const hasAttemptsLeft = t.maxAttempts === -1 || completedAttempts < (t.maxAttempts || 1)
+                            const canRetry = !hasPassed && hasAttemptsLeft && completedAttempts > 0
+
+                            const statusLabel = hasPassed ? { text: 'Passed', bg: 'rgba(16,185,129,0.2)', color: '#10b981', icon: <CheckCircle size={14} /> }
+                                : inProgress ? { text: 'In Progress', bg: 'rgba(245,158,11,0.2)', color: '#f59e0b', icon: <Play size={14} /> }
+                                : isUpcoming ? { text: 'Upcoming', bg: 'rgba(99,102,241,0.2)', color: '#818cf8', icon: <Clock size={14} /> }
+                                : isExpired ? { text: 'Expired', bg: 'rgba(107,114,128,0.2)', color: '#9ca3af', icon: <XCircle size={14} /> }
+                                : completed ? { text: 'Completed', bg: 'rgba(239,68,68,0.2)', color: '#ef4444', icon: <XCircle size={14} /> }
+                                : { text: 'Active', bg: 'rgba(16,185,129,0.15)', color: '#34d399', icon: <Zap size={14} /> }
 
                             return (
                                 <div key={t.id} className="card glass" style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden' }}>
                                     {/* Status Badge */}
-                                    {attemptCount > 0 && (
-                                        <div style={{ position: 'absolute', top: '1rem', right: '1rem', padding: '0.25rem 0.75rem', borderRadius: '20px', background: hasPassed ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: hasPassed ? '#10b981' : '#ef4444', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                            {hasPassed ? <><CheckCircle size={14} /> Passed</> : <><XCircle size={14} /> Failed</>}
-                                        </div>
-                                    )}
+                                    <div style={{ position: 'absolute', top: '1rem', right: '1rem', padding: '0.25rem 0.75rem', borderRadius: '20px', background: statusLabel.bg, color: statusLabel.color, fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                        {statusLabel.icon} {statusLabel.text}
+                                    </div>
 
                                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
                                         <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -2104,20 +2413,25 @@ function GlobalTests({ user }) {
                                     {attemptCount > 0 && submission && (
                                         <div style={{ background: 'var(--bg-tertiary)', borderRadius: '12px', padding: '1rem', marginBottom: '1rem', border: '1px solid var(--border-color)' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Your Score</span>
-                                                <span style={{ fontSize: '1.5rem', fontWeight: 700, color: hasPassed ? '#10b981' : '#ef4444' }}>{submission.overallPercentage}%</span>
+                                                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{locked ? 'Result Status' : 'Your Score'}</span>
+                                                <span style={{ fontSize: '1.5rem', fontWeight: 700, color: locked ? '#f59e0b' : hasPassed ? '#10b981' : '#ef4444' }}>
+                                                    {locked ? 'Locked' : `${submission.overallPercentage}%`}
+                                                </span>
                                             </div>
+                                            {locked && <div style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{resultLockMessage(submission)}</div>}
                                         </div>
                                     )}
 
                                     <div style={{ display: 'flex', gap: '0.75rem' }}>
-                                        {completed ? (
+                                        {inProgress ? (
+                                            <button onClick={() => startTest(t)} style={{ flex: 1, padding: '0.75rem', background: 'linear-gradient(135deg,#f59e0b,#d97706)', border: 'none', borderRadius: '10px', color: 'white', fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'pointer', boxShadow: '0 4px 14px rgba(245,158,11,0.35)' }}><Play size={18} /> Resume Exam</button>
+                                        ) : completed ? (
                                             <button disabled style={{ flex: 1, padding: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '10px', color: '#10b981', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'not-allowed' }}><CheckCircle size={18} /> Completed</button>
                                         ) : canRetry ? (
                                             <button onClick={() => startTest(t)} className="btn-create-new" style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>Retry Test <RefreshCw size={18} /></button>
-                                        ) : t.startTime && new Date(t.startTime) > new Date() ? (
-                                            <div style={{ flex: 1, padding: '0.75rem', background: 'rgba(245, 158, 66, 0.15)', borderRadius: '10px', color: '#f59e42', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}><XCircle size={18} /> Not Yet Started</div>
-                                        ) : t.deadline && new Date(t.deadline) < new Date() ? (
+                                        ) : isUpcoming ? (
+                                            <div style={{ flex: 1, padding: '0.75rem', background: 'rgba(99,102,241,0.12)', borderRadius: '10px', color: '#818cf8', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}><Clock size={18} /> Opens {new Date(t.startTime).toLocaleDateString()}</div>
+                                        ) : isExpired ? (
                                             <div style={{ flex: 1, padding: '0.75rem', background: 'rgba(107, 114, 128, 0.2)', borderRadius: '10px', color: '#6b7280', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}><XCircle size={18} /> Test Expired</div>
                                         ) : (
                                             <button onClick={() => startTest(t)} className="btn-create-new" style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>Start Test <ChevronRight size={18} /></button>
@@ -2136,6 +2450,13 @@ function GlobalTests({ user }) {
                     examTitle={scanGate.test?.title || 'Exam'}
                     onApproved={handleScanApproved}
                     onCancel={handleScanCancel}
+                />
+            )}
+            {showInstructions && (
+                <ExamInstructionsModal
+                    test={showInstructions.test}
+                    onAcknowledge={handleInstructionsAcknowledged}
+                    onCancel={handleInstructionsCancel}
                 />
             )}
         </div>
@@ -2436,6 +2757,7 @@ function AptitudeTests({ user }) {
                 {tests.map(test => {
                     const completed = isTestCompleted(test.id)
                     const submission = getTestSubmission(test.id)
+                    const locked = isResultLocked(submission)
 
                     return (
                         <div
@@ -2455,17 +2777,19 @@ function AptitudeTests({ user }) {
                                     right: '1rem',
                                     padding: '0.25rem 0.75rem',
                                     borderRadius: '20px',
-                                    background: submission?.status === 'passed'
+                                    background: !locked && submission?.status === 'passed'
                                         ? 'rgba(16, 185, 129, 0.2)'
                                         : 'rgba(239, 68, 68, 0.2)',
-                                    color: submission?.status === 'passed' ? '#10b981' : '#ef4444',
+                                    color: locked ? '#f59e0b' : submission?.status === 'passed' ? '#10b981' : '#ef4444',
                                     fontSize: '0.75rem',
                                     fontWeight: 600,
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.25rem'
                                 }}>
-                                    {submission?.status === 'passed' ? (
+                                    {locked ? (
+                                        <><Shield size={14} /> Submitted</>
+                                    ) : submission?.status === 'passed' ? (
                                         <><CheckCircle size={14} /> Passed</>
                                     ) : (
                                         <><XCircle size={14} /> Failed</>
@@ -2583,13 +2907,13 @@ function AptitudeTests({ user }) {
                                         justifyContent: 'space-between',
                                         alignItems: 'center'
                                     }}>
-                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Your Score</span>
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{locked ? 'Result Status' : 'Your Score'}</span>
                                         <span style={{
                                             fontSize: '1.5rem',
                                             fontWeight: 700,
-                                            color: submission.status === 'passed' ? '#10b981' : '#ef4444'
+                                            color: locked ? '#f59e0b' : submission.status === 'passed' ? '#10b981' : '#ef4444'
                                         }}>
-                                            {submission.score}%
+                                            {locked ? 'Locked' : `${submission.score}%`}
                                         </span>
                                     </div>
                                     <div style={{
@@ -2599,7 +2923,7 @@ function AptitudeTests({ user }) {
                                         fontSize: '0.8rem',
                                         color: 'var(--text-muted)'
                                     }}>
-                                        <span>{submission.correctCount}/{submission.totalQuestions} Correct</span>
+                                        <span>{locked ? resultLockMessage(submission) : `${submission.correctCount}/${submission.totalQuestions} Correct`}</span>
                                     </div>
                                 </div>
                             )}
@@ -2669,24 +2993,25 @@ function AptitudeTests({ user }) {
                                 ) : (
                                     <>
                                         <button
-                                            onClick={() => setShowResults(submission)}
+                                            onClick={() => !locked && setShowResults(submission)}
+                                            disabled={locked}
                                             style={{
                                                 flex: 1,
                                                 padding: '0.75rem',
                                                 background: 'rgba(59, 130, 246, 0.1)',
                                                 border: '1px solid rgba(59, 130, 246, 0.3)',
                                                 borderRadius: '10px',
-                                                color: '#3b82f6',
+                                                color: locked ? '#f59e0b' : '#3b82f6',
                                                 fontSize: '0.9rem',
                                                 fontWeight: 600,
-                                                cursor: 'pointer',
+                                                cursor: locked ? 'not-allowed' : 'pointer',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
                                                 gap: '0.5rem'
                                             }}
                                         >
-                                            <Eye size={18} /> View Results
+                                            {locked ? <Shield size={18} /> : <Eye size={18} />} {locked ? 'Results Locked' : 'View Results'}
                                         </button>
                                         {canRetryTest(test) ? (
                                             <button

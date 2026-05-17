@@ -33,8 +33,43 @@ export const ThemeContext = createContext(null)
 export const useAuth = () => useContext(AuthContext)
 export const useTheme = () => useContext(ThemeContext)
 
+const STAFF_WORKSPACE_PERMISSIONS = [
+    '.create',
+    '.assign',
+    '.evaluate',
+    '.manage',
+    'analytics.view',
+    'proctoring.view',
+    'submissions.view',
+    'users.view',
+]
+
+const EXAM_TAKER_PERMISSIONS = [
+    '.attempt',
+    'tests.view_allocated',
+    'results.view_own',
+]
+
+const userPermissions = (u) => (Array.isArray(u?.permissions) ? u.permissions : [])
+
+const hasStaffWorkspaceAccess = (u) => {
+    const perms = userPermissions(u)
+    return perms.some((perm) => STAFF_WORKSPACE_PERMISSIONS.some((key) => (
+        key.startsWith('.') ? perm.endsWith(key) : perm === key
+    )))
+}
+
+const hasExamTakerAccess = (u) => {
+    const perms = userPermissions(u)
+    return u?.role === 'student'
+        || u?.role === 'learner'
+        || perms.some((perm) => EXAM_TAKER_PERMISSIONS.some((key) => (
+            key.startsWith('.') ? perm.endsWith(key) : perm === key
+        )))
+}
+
 // Protected Route Component
-function ProtectedRoute({ children, allowedRoles }) {
+function ProtectedRoute({ children, allowedRoles, requireStaffWorkspace = false, requireExamWorkspace = false }) {
     const { user } = useAuth()
 
     if (!user) {
@@ -47,13 +82,18 @@ function ProtectedRoute({ children, allowedRoles }) {
 
     if (allowedRoles && !allowedRoles.includes(user.role)) {
         if (user.role === 'admin' || user.role === 'organization_admin') return <Navigate to="/admin" replace />
-        if (Array.isArray(user.permissions) && user.permissions.some(p => p.endsWith('.create'))) {
-            return <Navigate to="/mentor" replace />
+        if (hasStaffWorkspaceAccess(user)) {
+            return <Navigate to="/role" replace />
         }
-        // Learner-like roles should land on student portal, but avoid looping
-        // when this guard itself is already protecting /student.
-        if (allowedRoles.includes('student')) return children
         return <Navigate to="/student" replace />
+    }
+
+    if (requireStaffWorkspace && !hasStaffWorkspaceAccess(user)) {
+        return <Navigate to={hasExamTakerAccess(user) ? '/student' : '/login'} replace />
+    }
+
+    if (requireExamWorkspace && !hasExamTakerAccess(user)) {
+        return <Navigate to={hasStaffWorkspaceAccess(user) ? '/role' : '/login'} replace />
     }
 
     return children
@@ -96,10 +136,8 @@ function App() {
     const getHomePath = (u) => {
         if (!u) return '/login'
         if (u.role === 'admin' || u.role === 'organization_admin') return '/admin'
-        const perms = Array.isArray(u.permissions) ? u.permissions : []
-        if (perms.includes('tests.create') || perms.includes('coding.create') || perms.includes('aptitude.create')) {
-            return '/mentor'
-        }
+        if (hasStaffWorkspaceAccess(u)) return '/role'
+        if (hasExamTakerAccess(u)) return '/student'
         return '/student'
     }
 
@@ -343,13 +381,13 @@ function App() {
                     } />
 
                     <Route path="/student/*" element={
-                        <ProtectedRoute allowedRoles={['student', 'org_user', 'learner']}>
+                        <ProtectedRoute allowedRoles={['student', 'org_user', 'learner']} requireExamWorkspace>
                             <StudentPortal />
                         </ProtectedRoute>
                     } />
 
                     <Route path="/mentor/*" element={
-                        <ProtectedRoute allowedRoles={['mentor', 'org_user']}>
+                        <ProtectedRoute allowedRoles={['mentor']}>
                             <MentorPortal />
                         </ProtectedRoute>
                     } />
@@ -360,10 +398,16 @@ function App() {
                         </ProtectedRoute>
                     } />
 
+                    <Route path="/role/*" element={
+                        <ProtectedRoute allowedRoles={['org_user']} requireStaffWorkspace>
+                            <AdminPortal />
+                        </ProtectedRoute>
+                    } />
+
                     {/* Environment scan routes (public — token-based auth for mobile) */}
                     <Route path="/scan/mobile" element={<ScanMobilePage />} />
                     <Route path="/scan/desktop" element={
-                        <ProtectedRoute allowedRoles={['student', 'mentor', 'admin']}>
+                        <ProtectedRoute allowedRoles={['student', 'learner', 'org_user', 'mentor', 'admin', 'organization_admin']}>
                             <ScanDesktopPage />
                         </ProtectedRoute>
                     } />

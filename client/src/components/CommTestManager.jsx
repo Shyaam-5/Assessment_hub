@@ -74,6 +74,7 @@ export default function CommTestManager() {
     const [attempts, setAttempts] = useState([]);
     const [creating, setCreating] = useState(false);
     const [error, setError] = useState('');
+    const [postCreateAction, setPostCreateAction] = useState(null);
     const [generating, setGenerating] = useState({});
     const [viewDetail, setViewDetail] = useState(null); // attempt object for detail view
 
@@ -106,7 +107,12 @@ export default function CommTestManager() {
         if (!form.title.trim()) return setError('Title is required');
         setError(''); setCreating(true);
         try {
-            await axios.post(`${API}/api/communication/tests/create`, form);
+            const { data } = await axios.post(`${API}/api/communication/tests/create`, form);
+            setPostCreateAction({
+                id: data?.id,
+                title: form.title,
+                message: 'Communication test created. Next step: allocate learners with communication.assign access before candidates can start.'
+            });
             setShowCreate(false);
             setForm({ ...defaultForm });
             loadTests();
@@ -215,6 +221,23 @@ export default function CommTestManager() {
                 }}>
                     <span><XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />{error}</span>
                     <button onClick={() => setError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fca5a5', padding: '4px' }}><X size={16} /></button>
+                </div>
+            )}
+
+            {postCreateAction && (
+                <div style={{ background: '#1e293b', border: '1px solid #22c55e', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <div>
+                            <div style={{ color: '#f1f5f9', fontWeight: 800 }}>Communication Test Created: {postCreateAction.title}</div>
+                            <div style={{ color: '#94a3b8', fontSize: 13 }}>{postCreateAction.message}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button onClick={() => document.getElementById(`comm-test-${postCreateAction.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })} style={{ background: '#2563eb', color: 'white', border: 'none', padding: '9px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Users size={16} /> Allocation Shortcut
+                            </button>
+                            <button onClick={() => setPostCreateAction(null)} style={{ background: '#475569', color: 'white', border: 'none', padding: '9px 12px', borderRadius: 8, cursor: 'pointer' }}>Dismiss</button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -499,7 +522,7 @@ export default function CommTestManager() {
                         {tests.length} assessment{tests.length !== 1 ? 's' : ''}
                     </div>
                     {tests.map(test => (
-                        <div key={test.id} style={{
+                        <div key={test.id} id={`comm-test-${test.id}`} style={{
                             background: '#1e293b', border: '1px solid #334155', borderRadius: '14px',
                             padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
                             borderLeft: `4px solid ${test.is_active ? '#3b82f6' : '#475569'}`,

@@ -67,8 +67,11 @@ class Settings:
         )
 
         # --- CORS ---
+        self.APP_ENV: str = os.getenv("APP_ENV", "development").strip().lower()
         _origins = os.getenv("ALLOWED_ORIGINS", "")
         self.ALLOWED_ORIGINS: list[str] = [o.strip() for o in _origins.split(",") if o.strip()] if _origins.strip() else []
+        _socket_origins = os.getenv("SOCKET_ALLOWED_ORIGINS", "")
+        self.SOCKET_ALLOWED_ORIGINS: list[str] = [o.strip() for o in _socket_origins.split(",") if o.strip()] if _socket_origins.strip() else list(self.ALLOWED_ORIGINS)
 
         # --- Groq Vision (for image analysis - must be a vision-capable model) ---
         self.GROQ_VISION_MODEL: str = os.getenv(

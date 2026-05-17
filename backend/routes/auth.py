@@ -26,6 +26,15 @@ router = APIRouter(prefix="/api", tags=["auth"])
 logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
+LEGACY_EXAM_TAKER_PERMISSIONS = {
+    "tests.view_allocated",
+    "tests.attempt",
+    "aptitude.attempt",
+    "coding.attempt",
+    "communication.attempt",
+    "results.view_own",
+}
+
 
 # ---------- Helpers ----------
 
@@ -213,6 +222,8 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
             row = await cur.fetchone()
             if row and row.get("role") == "admin":
                 return True
+            if row and row.get("role") in ("student", "learner"):
+                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
             fmt = ",".join(["%s"] * len(permissions))
             await cur.execute(
                 f"""
@@ -225,6 +236,32 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
                 [user_id, *permissions],
             )
             return bool(await cur.fetchone())
+
+
+async def _actor_scope(user_id: str) -> dict:
+    """Return actor role + org for tenant-scoped authorization."""
+    if not user_id:
+        return {"role": "", "organization_id": None}
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role, organization_id FROM users WHERE id = %s", (user_id,))
+            row = await cur.fetchone() or {}
+            org_id = row.get("organization_id")
+            if not org_id:
+                await cur.execute(
+                    """
+                    SELECT organization_id
+                    FROM user_role_assignments
+                    WHERE user_id = %s
+                    ORDER BY is_primary DESC, id ASC
+                    LIMIT 1
+                    """,
+                    (user_id,),
+                )
+                primary = await cur.fetchone() or {}
+                org_id = primary.get("organization_id")
+    return {"role": row.get("role") or "", "organization_id": org_id}
 
 
 # ---------- Routes ----------
@@ -616,6 +653,7 @@ async def get_user(user_id: str, request: Request):
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["users.view"]):
         raise HTTPException(status_code=403, detail="Permission denied")
+    actor_scope = await _actor_scope(actor)
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -624,6 +662,9 @@ async def get_user(user_id: str, request: Request):
 
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    if actor_scope["role"] != "admin":
+        if not actor_scope["organization_id"] or row.get("organization_id") != actor_scope["organization_id"]:
+            raise HTTPException(status_code=403, detail="Cross-organization user access denied")
 
     return await _attach_rbac_context(_clean_user(row))
 
@@ -633,30 +674,44 @@ async def list_users(request: Request, role: str | None = None):
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["users.view"]):
         raise HTTPException(status_code=403, detail="Permission denied")
+    actor_scope = await _actor_scope(actor)
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            where_clauses = []
+            params: list = []
+            if role:
+                where_clauses.append("u.role = %s")
+                params.append(role)
+            if actor_scope["role"] != "admin":
+                if not actor_scope["organization_id"]:
+                    raise HTTPException(status_code=403, detail="Missing actor organization scope")
+                where_clauses.append("u.organization_id = %s")
+                params.append(actor_scope["organization_id"])
+            where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             if role:
                 await cur.execute(
-                    """
+                    f"""
                     SELECT u.*, GROUP_CONCAT(msa.student_id) AS allocated_students
                     FROM users u
                     LEFT JOIN mentor_student_allocations msa ON u.id = msa.mentor_id
-                    WHERE u.role = %s
+                    {where_sql}
                     GROUP BY u.id
                     ORDER BY u.created_at DESC
                     """,
-                    (role,),
+                    tuple(params),
                 )
             else:
                 await cur.execute(
-                    """
+                    f"""
                     SELECT u.*, GROUP_CONCAT(msa.student_id) AS allocated_students
                     FROM users u
                     LEFT JOIN mentor_student_allocations msa ON u.id = msa.mentor_id
+                    {where_sql}
                     GROUP BY u.id
                     ORDER BY u.created_at DESC
-                    """
+                    """,
+                    tuple(params),
                 )
             rows = await cur.fetchall()
 
@@ -676,13 +731,22 @@ async def get_mentor_students(mentor_id: str, request: Request):
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["users.view"]):
         raise HTTPException(status_code=403, detail="Permission denied")
+    actor_scope = await _actor_scope(actor)
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute(
-                'SELECT * FROM users WHERE role = "student" AND mentor_id = %s',
-                (mentor_id,),
-            )
+            if actor_scope["role"] == "admin":
+                await cur.execute(
+                    'SELECT * FROM users WHERE role = "student" AND mentor_id = %s',
+                    (mentor_id,),
+                )
+            else:
+                if not actor_scope["organization_id"]:
+                    raise HTTPException(status_code=403, detail="Missing actor organization scope")
+                await cur.execute(
+                    'SELECT * FROM users WHERE role = "student" AND mentor_id = %s AND organization_id = %s',
+                    (mentor_id, actor_scope["organization_id"]),
+                )
             rows = await cur.fetchall()
 
     return [_clean_user(r) for r in rows]

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio, json, re, datetime as _dt
 from datetime import datetime, timezone
 from typing import Any
+import pymysql.err
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
 from database import get_pool, get_primary_pool
 from services.ai_service import (
@@ -19,6 +20,18 @@ from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/skill-tests", tags=["skill-tests"])
 audit_logger = get_audit_logger()
+LEGACY_EXAM_TAKER_PERMISSIONS = {
+    "tests.view_allocated",
+    "tests.attempt",
+    "aptitude.attempt",
+    "coding.attempt",
+    "communication.attempt",
+    "results.view_own",
+}
+
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    return isinstance(exc, pymysql.err.ProgrammingError) and len(exc.args) > 0 and exc.args[0] == 1146
 
 
 async def _insert_unified_proctor_event(
@@ -81,6 +94,22 @@ async def _require_skill_permission(request: Request, permissions: list[str]) ->
     if not await _has_any_permission(actor, permissions):
         raise HTTPException(status_code=403, detail="Permission denied")
     return actor
+
+
+async def _load_attempt_for_actor(request: Request, attempt_id: int) -> dict:
+    actor = await _require_actor(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT * FROM skill_test_attempts WHERE id=%s", (attempt_id,))
+            attempt = await cur.fetchone()
+            if not attempt:
+                raise HTTPException(404, "Attempt not found")
+    can_assign = await _has_any_permission(actor, ["coding.assign"])
+    can_attempt = await _has_any_permission(actor, ["coding.attempt"])
+    if not (can_assign or (can_attempt and actor == (attempt.get("student_id") or ""))):
+        raise HTTPException(403, "Permission denied")
+    return attempt
 
 
 router.dependencies.append(Depends(_log_read_access))
@@ -175,7 +204,7 @@ def _calc_sql_stats(attempt: dict) -> dict:
 
 @router.post("/create")
 async def create_test(request: Request, body: dict = Body(...)):
-    await _require_skill_permission(request, ["coding.assign"])
+    await _require_skill_permission(request, ["coding.create", "coding.assign"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -202,17 +231,22 @@ async def create_test(request: Request, body: dict = Body(...)):
 
 @router.get("/all")
 async def get_all_tests(request: Request):
-    await _require_skill_permission(request, ["coding.assign"])
+    await _require_skill_permission(request, ["coding.create", "coding.assign", "coding.evaluate"])
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM skill_tests ORDER BY created_at DESC")
-            rows = await cur.fetchall()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT * FROM skill_tests ORDER BY created_at DESC")
+                rows = await cur.fetchall()
+    except Exception as exc:
+        if _is_missing_table_error(exc):
+            return []
+        raise
     return [dict(r, skills=_safe_json(r.get("skills"))) for r in rows]
 
 @router.put("/{test_id}/toggle")
 async def toggle_test(test_id: int, request: Request):
-    await _require_skill_permission(request, ["coding.assign"])
+    await _require_skill_permission(request, ["coding.create", "coding.assign"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -222,7 +256,7 @@ async def toggle_test(test_id: int, request: Request):
 
 @router.delete("/{test_id}")
 async def delete_test(test_id: int, request: Request):
-    await _require_skill_permission(request, ["coding.assign"])
+    await _require_skill_permission(request, ["coding.create", "coding.assign"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -247,7 +281,7 @@ async def delete_test(test_id: int, request: Request):
 
 @router.get("/{test_id}/attempts")
 async def get_test_attempts(test_id: int, request: Request):
-    await _require_skill_permission(request, ["coding.assign"])
+    await _require_skill_permission(request, ["coding.assign", "coding.evaluate"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -346,7 +380,8 @@ async def start_attempt(test_id: int, request: Request, body: dict = Body(...)):
     return {"success": True, "attemptId": aid}
 
 @router.get("/attempt/{attempt_id}")
-async def get_attempt(attempt_id: int):
+async def get_attempt(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -360,7 +395,8 @@ async def get_attempt(attempt_id: int):
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/mcq/start/{attempt_id}")
-async def mcq_start(attempt_id: int):
+async def mcq_start(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -386,9 +422,10 @@ async def mcq_start(attempt_id: int):
     return {"questions": questions, "end_time": end.isoformat()}
 
 @router.post("/mcq/submit")
-async def mcq_submit(body: dict = Body(...)):
+async def mcq_submit(request: Request, body: dict = Body(...)):
     attempt_id = body["attemptId"]
     answers = body.get("answers", {})
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -440,7 +477,8 @@ async def mcq_submit(body: dict = Body(...)):
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/coding/start/{attempt_id}")
-async def coding_start(attempt_id: int):
+async def coding_start(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -534,7 +572,8 @@ async def coding_submit(request: Request, body: dict = Body(...)):
     return {"success": True, "all_passed": bool(all_passed), "test_results": test_results}
 
 @router.post("/coding/finish/{attempt_id}")
-async def coding_finish(attempt_id: int):
+async def coding_finish(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -570,7 +609,8 @@ async def coding_finish(attempt_id: int):
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/sql/start/{attempt_id}")
-async def sql_start(attempt_id: int):
+async def sql_start(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -617,7 +657,7 @@ async def sql_regenerate(attempt_id: int):
     return {"success": True, "problems": problems}
 
 @router.post("/sql/run")
-async def sql_run(body: dict = Body(...)):
+async def sql_run(request: Request, body: dict = Body(...)):
     sql_query = (body.get("query") or "").strip()
     attempt_id = body.get("attemptId")
     if not sql_query:
@@ -626,6 +666,7 @@ async def sql_run(body: dict = Body(...)):
         return {"success": False, "error": "Only SELECT queries are allowed in this test environment."}
     allowed: list[str] = []
     if attempt_id:
+        await _load_attempt_for_actor(request, int(attempt_id))
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
@@ -651,12 +692,13 @@ async def sql_run(body: dict = Body(...)):
         return {"success": False, "error": str(e)}
 
 @router.post("/sql/evaluate")
-async def sql_evaluate_ep(body: dict = Body(...)):
+async def sql_evaluate_ep(request: Request, body: dict = Body(...)):
     attempt_id = body.get("attemptId")
     problem_id = body.get("problemId")
     sql_query = (body.get("query") or "").strip()
     if not attempt_id or not problem_id:
         raise HTTPException(400, "attemptId and problemId are required")
+    await _load_attempt_for_actor(request, int(attempt_id))
     if not sql_query:
         raise HTTPException(400, "Query is required")
     if not sql_query.upper().startswith("SELECT"):
@@ -685,7 +727,8 @@ async def sql_evaluate_ep(body: dict = Body(...)):
     return {"success": True, "passed": passed, "feedback": feedback}
 
 @router.post("/sql/finish/{attempt_id}")
-async def sql_finish(attempt_id: int):
+async def sql_finish(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -722,7 +765,8 @@ async def sql_finish(attempt_id: int):
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/interview/start/{attempt_id}")
-async def interview_start(attempt_id: int):
+async def interview_start(attempt_id: int, request: Request):
+    await _load_attempt_for_actor(request, attempt_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -739,11 +783,13 @@ async def interview_start(attempt_id: int):
     return {"finished": False, "question": question_data, "current": len(existing_qa) + 1, "total": total, "previous_qa": existing_qa, "duration_minutes": attempt.get("interview_duration_minutes")}
 
 @router.post("/interview/answer")
-async def interview_answer(body: dict = Body(...)):
+async def interview_answer(request: Request, body: dict = Body(...)):
     attempt_id = body.get("attemptId")
     answer = body.get("answer", "")
     question = body.get("question", "")
     key_points = body.get("key_points", [])
+    if attempt_id:
+        await _load_attempt_for_actor(request, int(attempt_id))
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -986,7 +1032,7 @@ async def terminate_attempt(attempt_id: int, request: Request, body: dict = Body
 
 @router.get("/admin/all-submissions")
 async def admin_all_submissions(request: Request):
-    await _require_skill_permission(request, ["coding.assign"])
+    await _require_skill_permission(request, ["coding.assign", "coding.evaluate"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -1025,6 +1071,8 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
             u = await cur.fetchone()
             if u and u.get("role") == "admin":
                 return True
+            if u and u.get("role") in ("student", "learner"):
+                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
             fmt = ",".join(["%s"] * len(permissions))
             await cur.execute(
                 f"""

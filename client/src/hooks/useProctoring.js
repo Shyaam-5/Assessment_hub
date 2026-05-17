@@ -309,9 +309,13 @@ export function useBehaviorTracking(enabled, userId, testId) {
         const batch = [...eventsBuffer.current]
         eventsBuffer.current = []
         try {
+            const token = localStorage.getItem('authToken') || ''
             await fetch(`${API_BASE}/behavior/log-events`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ session_id: behaviorSessionId.current, user_id: userId, events: batch }),
             })
         } catch { /* ignore flush errors */ }

@@ -126,17 +126,6 @@ a,
 input[type="checkbox"],
 input[type="radio"],
 select {
-    position: relative;
-}
-
-/* Ensure minimum 44x44 touch target */
-button::after,
-[role="button"]::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
     min-width: 44px;
     min-height: 44px;
 }

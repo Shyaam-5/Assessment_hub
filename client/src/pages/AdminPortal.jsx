@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { LayoutDashboard, Users, Trophy, Award, List, Search, Send, Activity, CheckCircle, Check, TrendingUp, Clock, Globe, FileCode, Plus, X, Code, ChevronRight, Upload, AlertTriangle, Zap, Target, Sparkles, Bot, Wand2, Eye, FileText, BarChart2, RefreshCw, Calendar, HelpCircle, Trash2, Save, Brain, XCircle, Shield, Download, ClipboardList, Settings, Database, Mail, MessageSquare, Github, ExternalLink, BarChart3 } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts'
 import DashboardLayout from '../components/DashboardLayout'
@@ -23,6 +23,7 @@ import SkillSubmissions from '../components/SkillSubmissions'
 import { useAuth } from '../App'
 import { useI18n } from '../services/i18n.jsx'
 import axios from 'axios'
+import readXlsxFile from 'read-excel-file/browser'
 import GlobalReportModal from '../components/GlobalReportModal'
 import './Portal.css'
 
@@ -30,6 +31,131 @@ const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/a
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b']
 const ADMIN_ID = 'admin-001'
+const ASSESSMENT_IMPORT_ACCEPT = '.csv,.xlsx'
+
+const normalizeImportHeader = (header) => String(header || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+
+const getImportValue = (row, aliases) => {
+    for (const alias of aliases) {
+        const value = row[normalizeImportHeader(alias)]
+        if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim()
+    }
+    return ''
+}
+
+const stripImportExtension = (name) => String(name || 'Assessment').replace(/\.(csv|xls|xlsx)$/i, '')
+
+const parseCsvRows = (text) => {
+    const rows = []
+    let row = []
+    let cell = ''
+    let inQuotes = false
+
+    for (let i = 0; i < text.length; i += 1) {
+        const char = text[i]
+        const next = text[i + 1]
+        if (char === '"') {
+            if (inQuotes && next === '"') {
+                cell += '"'
+                i += 1
+            } else {
+                inQuotes = !inQuotes
+            }
+        } else if (char === ',' && !inQuotes) {
+            row.push(cell)
+            cell = ''
+        } else if ((char === '\n' || char === '\r') && !inQuotes) {
+            if (char === '\r' && next === '\n') i += 1
+            row.push(cell)
+            rows.push(row)
+            row = []
+            cell = ''
+        } else {
+            cell += char
+        }
+    }
+
+    if (cell || row.length) {
+        row.push(cell)
+        rows.push(row)
+    }
+    return rows
+}
+
+const readAssessmentImportRows = async (file) => {
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    let matrix
+    if (ext === 'xlsx') {
+        matrix = await readXlsxFile(file)
+    } else if (ext === 'csv') {
+        const text = await file.text()
+        matrix = parseCsvRows(text)
+    } else {
+        throw new Error('Unsupported file type. Upload CSV or XLSX. For legacy XLS, save the file as XLSX first.')
+    }
+
+    const rows = matrix
+        .map((row) => row.map((cell) => String(cell ?? '').trim()))
+        .filter((row) => row.some(Boolean))
+
+    if (rows.length < 2) throw new Error('File must have a header row and at least one question row.')
+
+    const headers = rows[0].map(normalizeImportHeader)
+    return rows.slice(1).map((cells, index) => {
+        const row = { __rowNumber: index + 2 }
+        headers.forEach((header, cellIndex) => {
+            if (header) row[header] = cells[cellIndex] || ''
+        })
+        return row
+    })
+}
+
+const parseCorrectAnswerIndex = (value, options) => {
+    const answer = String(value || '').trim()
+    if (!answer) return -1
+
+    const letterIndex = ['a', 'b', 'c', 'd'].indexOf(answer.toLowerCase())
+    if (letterIndex >= 0) return letterIndex
+
+    if (/^\d+$/.test(answer)) {
+        const numeric = Number(answer)
+        if (numeric === 0) return 0
+        if (numeric >= 1 && numeric <= 4) return numeric - 1
+        if (numeric >= 0 && numeric <= 3) return numeric
+    }
+
+    return options.findIndex((option) => option.trim().toLowerCase() === answer.toLowerCase())
+}
+
+const normalizeImportedMcq = (row, { includeSection = false } = {}) => {
+    const section = getImportValue(row, ['section', 'category_section']) || 'aptitude'
+    const question = getImportValue(row, ['question', 'question_text', 'prompt'])
+    const options = [
+        getImportValue(row, ['option1', 'option_1', 'option a', 'a']),
+        getImportValue(row, ['option2', 'option_2', 'option b', 'b']),
+        getImportValue(row, ['option3', 'option_3', 'option c', 'c']),
+        getImportValue(row, ['option4', 'option_4', 'option d', 'd']),
+    ]
+    const correctAnswer = parseCorrectAnswerIndex(
+        getImportValue(row, ['correctanswer', 'correct_answer', 'correct option', 'answer', 'correct']),
+        options,
+    )
+
+    if (!question || options.some((option) => !option) || correctAnswer < 0 || correctAnswer > 3) {
+        return null
+    }
+
+    const item = {
+        question,
+        options,
+        correctAnswer,
+        category: getImportValue(row, ['category', 'topic']) || 'general',
+        explanation: getImportValue(row, ['explanation', 'solution']) || '',
+    }
+
+    if (includeSection) item.section = section.toLowerCase()
+    return item
+}
 
 
 function AdminPortal() {
@@ -37,10 +163,36 @@ function AdminPortal() {
     const { t } = useI18n()
     const location = useLocation()
     const isSuperAdmin = user?.role === 'admin'
+    const isOrgAdmin = user?.role === 'organization_admin'
+    const isRoleBasedUser = user?.role === 'org_user'
+    const basePath = isRoleBasedUser ? '/role' : '/admin'
     const [title, setTitle] = useState('')
     const [subtitle, setSubtitle] = useState('')
     const perms = Array.isArray(user?.permissions) ? user.permissions : []
     const can = (perm) => user?.role === 'admin' || perms.includes(perm)
+    const canViewAllSubmissions = user?.role === 'admin' || user?.role === 'organization_admin'
+    const canCreateAssessments = !isOrgAdmin
+    const canCreateFeature = (perm) => canCreateAssessments && can(perm)
+    const link = (path) => `${basePath}${path}`
+    const featureAccess = {
+        globalProblems: canCreateFeature('coding.create'),
+        aptitudeTests: canCreateFeature('aptitude.create'),
+        globalTests: canCreateFeature('tests.create'),
+        skillTests: canCreateFeature('coding.create'),
+        communicationTests: canCreateFeature('communication.create'),
+        globalAssign: can('tests.assign'),
+        aptitudeAssign: can('aptitude.assign'),
+        skillAssign: can('coding.assign'),
+        communicationAssign: can('communication.assign'),
+        skillSubmissions: can('coding.assign') || can('coding.evaluate'),
+        submissions: canViewAllSubmissions || can('submissions.view'),
+        proctoring: can('proctoring.view'),
+        analytics: can('analytics.view'),
+        users: can('users.view'),
+    }
+    const gated = (allowed, element, label) => (
+        allowed ? element : <AccessNotice title="Access not enabled" message={`${label} is not enabled for this admin workspace.`} />
+    )
 
 
     useEffect(() => {
@@ -112,23 +264,37 @@ function AdminPortal() {
                 setTitle('Behavior Analysis Agent')
                 setSubtitle('AI-powered behavioral profiling & trust scoring')
                 break
+            case 'audit-logs':
+                setTitle('Audit Log')
+                setSubtitle('Security events, access logs, and admin actions')
+                break
+            case 'error-monitoring':
+                setTitle('Error Monitoring')
+                setSubtitle('System errors, access denials, and health overview')
+                break
             default:
                 setTitle(t('dashboard'))
-                setSubtitle(t('system_administration'))
+                setSubtitle(
+                    isSuperAdmin
+                        ? 'Platform-level controls and organization governance'
+                        : isOrgAdmin
+                            ? 'Organization operations and monitoring overview'
+                            : 'Role-based workspace with enabled feature access'
+                )
         }
-    }, [location, t])
+    }, [location, t, isSuperAdmin, isOrgAdmin])
 
     const navItems = [
-        { path: '/admin', label: t('dashboard'), icon: <LayoutDashboard size={20} /> },
+        { path: basePath, label: isOrgAdmin ? 'Admin Workspace' : t('dashboard'), icon: <LayoutDashboard size={20} /> },
         {
             label: 'Content Management',
             icon: <FileCode size={20} />,
             defaultExpanded: false,
             children: [
-                can('aptitude.create') && { path: '/admin/aptitude-tests', label: t('aptitude_tests'), icon: <Target size={20} /> },
-                can('tests.create') && { path: '/admin/global-tests', label: t('global_complete_tests'), icon: <ClipboardList size={20} /> },
-                can('coding.create') && { path: '/admin/skill-tests', label: 'Skill Tests', icon: <Brain size={20} /> },
-                can('communication.create') && { path: '/admin/communication-tests', label: 'Communication Tests', icon: <MessageSquare size={20} /> }
+                featureAccess.aptitudeTests && { path: link('/aptitude-tests'), label: t('aptitude_tests'), icon: <Target size={20} /> },
+                featureAccess.globalTests && { path: link('/global-tests'), label: t('global_complete_tests'), icon: <ClipboardList size={20} /> },
+                featureAccess.skillTests && { path: link('/skill-tests'), label: 'Skill Tests', icon: <Brain size={20} /> },
+                featureAccess.communicationTests && { path: link('/communication-tests'), label: 'Communication Tests', icon: <MessageSquare size={20} /> }
             ].filter(Boolean)
         },
 
@@ -137,12 +303,12 @@ function AdminPortal() {
             icon: <Activity size={20} />,
             defaultExpanded: false,
             children: [
-                can('tests.view') && { path: '/admin/all-submissions', label: t('all_submissions'), icon: <List size={20} /> },
-                can('tests.view') && { path: '/admin/skill-submissions', label: 'Skill Submissions', icon: <Brain size={20} /> },
-                can('proctoring.view') && { path: '/admin/live-monitoring', label: t('live_monitoring'), icon: <Activity size={20} /> },
-                can('proctoring.view') && { path: '/admin/proctor-agent', label: 'Proctoring Agent', icon: <Shield size={20} /> },
-                can('proctoring.view') && { path: '/admin/behavior-analysis', label: 'Behavior Analysis', icon: <Shield size={20} /> },
-                can('analytics.view') && { path: '/admin/analytics', label: t('analytics'), icon: <TrendingUp size={20} /> }
+                featureAccess.submissions && { path: link('/all-submissions'), label: t('all_submissions'), icon: <List size={20} /> },
+                featureAccess.skillSubmissions && { path: link('/skill-submissions'), label: 'Skill Submissions', icon: <Brain size={20} /> },
+                featureAccess.proctoring && { path: link('/live-monitoring'), label: t('live_monitoring'), icon: <Activity size={20} /> },
+                featureAccess.proctoring && { path: link('/proctor-agent'), label: 'Proctoring Agent', icon: <Shield size={20} /> },
+                featureAccess.proctoring && { path: link('/behavior-analysis'), label: 'Behavior Analysis', icon: <Shield size={20} /> },
+                featureAccess.analytics && { path: link('/analytics'), label: t('analytics'), icon: <TrendingUp size={20} /> }
             ].filter(Boolean)
         },
         {
@@ -150,7 +316,10 @@ function AdminPortal() {
             icon: <Settings size={20} />,
             defaultExpanded: false,
             children: [
-                can('users.view') && { path: '/admin/user-management', label: 'User Management', icon: <Shield size={20} /> },
+                featureAccess.users && { path: link('/user-management'), label: 'User Management', icon: <Shield size={20} /> },
+                featureAccess.analytics && { path: link('/org-analytics'), label: 'Organization Analytics', icon: <BarChart3 size={20} /> },
+                (can('admin.view') || can('audit.view')) && { path: link('/audit-logs'), label: 'Audit Logs', icon: <Database size={20} /> },
+                (can('admin.view') || can('audit.view')) && { path: link('/error-monitoring'), label: 'Error Monitoring', icon: <AlertTriangle size={20} /> },
             ].filter(Boolean)
         }
     ]
@@ -164,23 +333,20 @@ function AdminPortal() {
         return (
             <DashboardLayout navItems={superNavItems} title={title || 'Super Admin'} subtitle={subtitle || 'Organization controls and analytics'}>
                 <Routes>
-                    <Route path="/" element={<TenantRBACManager user={user} superAdminOnly={true} />} />
+                    <Route
+                        path="/"
+                        element={
+                            <AdminWorkspaceShell
+                                role="Super Admin"
+                                heading="Organization Management"
+                                description="Manage organizations, activate/deactivate tenants, and maintain platform-wide governance."
+                            >
+                                <TenantRBACManager user={user} superAdminOnly={true} />
+                            </AdminWorkspaceShell>
+                        }
+                    />
                     <Route path="/org-analytics" element={<OrganizationAnalyticsPanel user={user} />} />
-                </Routes>
-            </DashboardLayout>
-        )
-    }
-
-    if (user?.role === 'organization_admin') {
-        const orgNavItems = [
-            { path: '/admin', label: 'Role & User Management', icon: <Shield size={20} /> },
-            { path: '/admin/org-analytics', label: 'Organization Analytics', icon: <BarChart3 size={20} /> },
-        ]
-        return (
-            <DashboardLayout navItems={orgNavItems} title={title || 'Organization Admin'} subtitle={subtitle || 'Tenant role, users, and analytics'}>
-                <Routes>
-                    <Route path="/" element={<TenantRBACManager user={user} orgAdminOnly={true} />} />
-                    <Route path="/org-analytics" element={<OrgTenantAnalyticsPanel user={user} />} />
+                    <Route path="*" element={<Navigate to="/admin" replace />} />
                 </Routes>
             </DashboardLayout>
         )
@@ -189,42 +355,292 @@ function AdminPortal() {
     return (
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>
             <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/global-problems" element={<GlobalProblems />} />
-                <Route path="/aptitude-tests" element={<AptitudeTestsAdmin />} />
-                <Route path="/global-tests" element={<GlobalTestsAdmin />} />
-                <Route path="/skill-tests" element={<SkillTestManager />} />
-                <Route path="/communication-tests" element={<CommTestManager />} />
-                <Route path="/skill-submissions" element={<SkillSubmissions user={user} isAdmin={true} />} />
+                <Route
+                    path="/"
+                    element={
+                        isOrgAdmin ? (
+                            <AdminWorkspaceShell
+                                role="Organization Admin"
+                                heading="Admin Workspace"
+                                description="Configure tenant database access, manage roles, and onboard users for your organization."
+                            >
+                                <TenantRBACManager user={user} orgAdminOnly={true} />
+                            </AdminWorkspaceShell>
+                        ) : isRoleBasedUser ? (
+                            <RoleWorkspaceHome featureAccess={featureAccess} link={link} user={user} />
+                        ) : <Dashboard />
+                    }
+                />
+                <Route path="/global-problems" element={gated(featureAccess.globalProblems, <GlobalProblems />, 'Global problems')} />
+                <Route path="/aptitude-tests" element={gated(featureAccess.aptitudeTests, <AptitudeTestsAdmin />, 'Aptitude test creation')} />
+                <Route path="/global-tests" element={gated(featureAccess.globalTests, <GlobalTestsAdmin />, 'Global test creation')} />
+                <Route path="/skill-tests" element={gated(featureAccess.skillTests, <SkillTestManager />, 'Skill test creation')} />
+                <Route path="/communication-tests" element={gated(featureAccess.communicationTests, <CommTestManager />, 'Communication test creation')} />
+                <Route path="/skill-submissions" element={gated(featureAccess.skillSubmissions, <SkillSubmissions user={user} isAdmin={true} />, 'Skill submissions')} />
                 <Route path="/student-leaderboard" element={<StudentLeaderboard />} />
 
-                <Route path="/all-submissions" element={<AllSubmissions />} />
-                <Route path="/live-monitoring" element={<AdminLiveMonitoring user={user} />} />
-                <Route path="/analytics" element={<AdminAnalyticsDashboard />} />
-                <Route path="/proctor-agent" element={<ProctorAgentDashboard />} />
-                <Route path="/behavior-analysis" element={<BehaviorAnalysisDashboard />} />
-                <Route path="/user-management" element={<TenantRBACManager user={user} />} />
+                <Route path="/all-submissions" element={gated(featureAccess.submissions, <AllSubmissions />, 'Submission monitoring')} />
+                <Route path="/live-monitoring" element={gated(featureAccess.proctoring, <AdminLiveMonitoring user={user} />, 'Live monitoring')} />
+                <Route path="/analytics" element={gated(featureAccess.analytics, <AdminAnalyticsDashboard />, 'Analytics')} />
+                <Route path="/proctor-agent" element={gated(featureAccess.proctoring, <ProctorAgentDashboard />, 'Proctoring agent')} />
+                <Route path="/behavior-analysis" element={gated(featureAccess.proctoring, <BehaviorAnalysisDashboard />, 'Behavior analysis')} />
+                <Route path="/audit-logs" element={gated(can('admin.view') || can('audit.view'), <AuditLogViewer user={user} />, 'Audit logs')} />
+                <Route path="/error-monitoring" element={gated(can('admin.view') || can('audit.view'), <ErrorMonitoringDashboard user={user} />, 'Error monitoring')} />
+                <Route
+                    path="/user-management"
+                    element={gated(
+                        featureAccess.users,
+                        <AdminWorkspaceShell
+                            role="Organization Admin"
+                            heading="User Management"
+                            description="Create users, assign roles, and keep your organization access clean and up to date."
+                        >
+                            <TenantRBACManager user={user} orgAdminOnly={user?.role === 'organization_admin'} />
+                        </AdminWorkspaceShell>,
+                        'User management',
+                    )}
+                />
+                <Route path="/org-analytics" element={gated(featureAccess.analytics, <OrgTenantAnalyticsPanel user={user} />, 'Organization analytics')} />
+                <Route path="*" element={<Navigate to={basePath} replace />} />
             </Routes>
         </DashboardLayout>
     )
 }
 
-function Dashboard() {
-    const [stats, setStats] = useState(null)
-    const [loading, setLoading] = useState(true)
-    const [selectedPeriod, setSelectedPeriod] = useState('7d')
+function AdminWorkspaceShell({ role, heading, description, children }) {
+    return (
+        <section className="admin-workspace-shell">
+            <div className="admin-workspace-header">
+                <div>
+                    <p className="admin-workspace-role">{role}</p>
+                    <h2>{heading}</h2>
+                    <p>{description}</p>
+                </div>
+            </div>
+            <div className="admin-workspace-body">
+                {children}
+            </div>
+        </section>
+    )
+}
+
+function AccessNotice({ title, message }) {
+    return (
+        <div className="dashboard-panel admin-access-notice">
+            <Shield size={32} />
+            <h3>{title}</h3>
+            <p>{message}</p>
+        </div>
+    )
+}
+
+function RoleWorkspaceHome({ featureAccess, link, user }) {
+    const [recentActivity, setRecentActivity] = useState([])
+    const [activityLoading, setActivityLoading] = useState(false)
+    const permissions = Array.isArray(user?.permissions) ? user.permissions : []
+    const permissionGroups = permissions.reduce((acc, perm) => {
+        const [moduleName] = String(perm).split('.')
+        const key = moduleName || 'other'
+        acc[key] = acc[key] || []
+        acc[key].push(perm)
+        return acc
+    }, {})
+    const actions = [
+        featureAccess.aptitudeTests && { title: 'Create Aptitude Tests', description: 'Build or import MCQ assessments.', path: link('/aptitude-tests'), icon: <Target size={22} /> },
+        featureAccess.globalTests && { title: 'Create Global Tests', description: 'Manage complete multi-section exams.', path: link('/global-tests'), icon: <ClipboardList size={22} /> },
+        featureAccess.skillTests && { title: 'Create Skill Tests', description: 'Configure coding, SQL, MCQ, and interview rounds.', path: link('/skill-tests'), icon: <Brain size={22} /> },
+        featureAccess.communicationTests && { title: 'Create Communication Tests', description: 'Set up speaking, listening, and grammar checks.', path: link('/communication-tests'), icon: <MessageSquare size={22} /> },
+        featureAccess.aptitudeAssign && { title: 'Allocate Aptitude Tests', description: 'After creating a test, assign it to learners from the test page.', path: link('/aptitude-tests'), icon: <Users size={22} /> },
+        featureAccess.globalAssign && { title: 'Allocate Global Tests', description: 'Use this shortcut after creating a global assessment.', path: link('/global-tests'), icon: <Users size={22} /> },
+        featureAccess.skillAssign && { title: 'Allocate Skill Tests', description: 'Jump back to skill tests after creation to assign learners.', path: link('/skill-tests'), icon: <Users size={22} /> },
+        featureAccess.communicationAssign && { title: 'Allocate Communication Tests', description: 'Jump back to communication tests after creation to assign learners.', path: link('/communication-tests'), icon: <Users size={22} /> },
+        featureAccess.submissions && { title: 'Review Submissions', description: 'Monitor learner attempts and reports.', path: link('/all-submissions'), icon: <List size={22} /> },
+        featureAccess.skillSubmissions && { title: 'Skill Submissions', description: 'Review skill-test outcomes and proctoring signals.', path: link('/skill-submissions'), icon: <FileText size={22} /> },
+        featureAccess.proctoring && { title: 'Live Monitoring', description: 'Watch active exam integrity events.', path: link('/live-monitoring'), icon: <Activity size={22} /> },
+        featureAccess.analytics && { title: 'Analytics', description: 'Track performance and operational trends.', path: link('/analytics'), icon: <TrendingUp size={22} /> },
+        featureAccess.users && { title: 'User Management', description: 'Create users and assign organization roles.', path: link('/user-management'), icon: <Users size={22} /> },
+    ].filter(Boolean)
+
+    const stats = [
+        { label: 'Enabled Modules', value: actions.length, icon: <Shield size={20} /> },
+        { label: 'Creation Access', value: actions.filter((a) => a.title.startsWith('Create')).length, icon: <Plus size={20} /> },
+        { label: 'Monitoring Access', value: actions.filter((a) => ['Review Submissions', 'Skill Submissions', 'Live Monitoring'].includes(a.title)).length, icon: <Activity size={20} /> },
+    ]
 
     useEffect(() => {
+        let active = true
+        const loadActivity = async () => {
+            setActivityLoading(true)
+            const requests = []
+            if (featureAccess.globalTests) requests.push(axios.get(`${API_BASE}/global-tests`).then((res) => (res.data || []).slice(0, 4).map((item) => ({ type: 'Global test', title: item.title, time: item.createdAt || item.created_at, status: item.status }))))
+            if (featureAccess.aptitudeTests) requests.push(axios.get(`${API_BASE}/aptitude`).then((res) => (res.data || []).slice(0, 4).map((item) => ({ type: 'Aptitude test', title: item.title, time: item.createdAt || item.created_at, status: item.status }))))
+            if (featureAccess.skillTests) requests.push(axios.get(`${API_BASE}/skill-tests/all`).then((res) => (res.data || []).slice(0, 4).map((item) => ({ type: 'Skill test', title: item.title, time: item.created_at || item.createdAt, status: item.is_active ? 'active' : 'inactive' }))))
+            if (featureAccess.submissions) {
+                requests.push(axios.get(`${API_BASE}/global-test-submissions`).then((res) => (res.data || []).slice(0, 4).map((item) => ({ type: 'Global submission', title: item.testTitle || item.test_title || 'Global test submission', time: item.submittedAt || item.submitted_at, status: item.status }))))
+                requests.push(axios.get(`${API_BASE}/aptitude-submissions`).then((res) => (res.data || []).slice(0, 4).map((item) => ({ type: 'Aptitude submission', title: item.testTitle || item.test_title || 'Aptitude submission', time: item.submittedAt || item.submitted_at, status: item.status }))))
+            }
+            if (featureAccess.skillSubmissions) requests.push(axios.get(`${API_BASE}/skill-tests/admin/all-submissions`).then((res) => (res.data || []).slice(0, 4).map((item) => ({ type: 'Skill submission', title: item.test_title || item.testTitle || 'Skill test attempt', time: item.created_at || item.createdAt, status: item.overall_status }))))
+
+            const settled = await Promise.allSettled(requests)
+            const events = settled
+                .filter((result) => result.status === 'fulfilled')
+                .flatMap((result) => result.value)
+                .filter((item) => item.title)
+                .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
+                .slice(0, 6)
+            if (active) {
+                setRecentActivity(events)
+                setActivityLoading(false)
+            }
+        }
+        loadActivity().catch(() => {
+            if (active) setActivityLoading(false)
+        })
+        return () => { active = false }
+    }, [featureAccess.aptitudeTests, featureAccess.globalTests, featureAccess.skillTests, featureAccess.skillSubmissions, featureAccess.submissions])
+
+    if (actions.length === 0) {
+        return (
+            <AccessNotice
+                title="No workspace features enabled"
+                message="Ask your organization admin to assign a role with create, monitoring, analytics, or user-management permissions."
+            />
+        )
+    }
+
+    return (
+        <div className="animate-fadeIn">
+            <section className="admin-workspace-shell">
+                <div className="admin-workspace-header">
+                    <div>
+                        <p className="admin-workspace-role">{user?.roleName || 'Role-Based Workspace'}</p>
+                        <h2>Welcome, {user?.name || 'Team Member'}</h2>
+                        <p>Your dashboard only shows the features enabled for your assigned role.</p>
+                    </div>
+                </div>
+            </section>
+
+            <div className="dashboard-stats-grid" style={{ marginBottom: '1.5rem' }}>
+                {stats.map((item) => (
+                    <div key={item.label} className="dashboard-stat-card">
+                        <div className="stat-card-inner">
+                            <div className="stat-icon-box" style={{ background: 'linear-gradient(135deg, #1e40af, #3b82f6)' }}>
+                                {item.icon}
+                            </div>
+                            <div className="stat-content">
+                                <div className="stat-number">{item.value}</div>
+                                <div className="stat-label-text">{item.label}</div>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+                {actions.map((action) => (
+                    <button
+                        key={action.path}
+                        type="button"
+                        onClick={() => { window.location.href = action.path }}
+                        className="dashboard-panel"
+                        style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border-color)' }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>
+                            {action.icon}
+                            <h3 style={{ margin: 0 }}>{action.title}</h3>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-muted)' }}>{action.description}</p>
+                    </button>
+                ))}
+            </div>
+
+            <div className="dashboard-panel" style={{ marginTop: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                    <div>
+                        <h3 style={{ margin: 0 }}>My Permissions</h3>
+                        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)' }}>Exact permissions enabled by your assigned role.</p>
+                    </div>
+                    <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{permissions.length} permissions</span>
+                </div>
+                {permissions.length === 0 ? (
+                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>No permissions are attached to this role yet. Ask your organization admin to enable the modules you need.</p>
+                ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                        {Object.entries(permissionGroups).map(([moduleName, items]) => (
+                            <div key={moduleName} style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: '0.85rem 1rem' }}>
+                                <div style={{ fontWeight: 800, textTransform: 'capitalize', marginBottom: '0.5rem' }}>{moduleName.replaceAll('_', ' ')}</div>
+                                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                    {items.map((perm) => (
+                                        <span key={perm} style={{ fontSize: '0.78rem', padding: '0.25rem 0.55rem', borderRadius: 999, background: 'rgba(37,99,235,0.12)', color: 'var(--primary)' }}>
+                                            {perm}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div className="dashboard-panel" style={{ marginTop: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
+                    <div>
+                        <h3 style={{ margin: 0 }}>Recent Workspace Activity</h3>
+                        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)' }}>Latest activity from the modules enabled for this role.</p>
+                    </div>
+                    {activityLoading && <div className="loading-spinner" style={{ width: 24, height: 24 }} />}
+                </div>
+                {recentActivity.length === 0 && !activityLoading ? (
+                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>No recent activity is available for your enabled modules yet.</p>
+                ) : (
+                    <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        {recentActivity.map((item, index) => (
+                            <div key={`${item.type}-${item.title}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', border: '1px solid var(--border-color)', borderRadius: 10, padding: '0.85rem 1rem', flexWrap: 'wrap' }}>
+                                <div>
+                                    <div style={{ fontWeight: 700 }}>{item.title}</div>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{item.type} - {item.status || 'recent'}</div>
+                                </div>
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                    {item.time ? new Date(item.time).toLocaleString() : 'Recently'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
+function Dashboard() {
+    const { user } = useAuth()
+    const [stats, setStats] = useState(null)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+    const [selectedPeriod, setSelectedPeriod] = useState('7d')
+    const perms = Array.isArray(user?.permissions) ? user.permissions : []
+    const canViewAnalytics = user?.role === 'admin' || user?.role === 'organization_admin' || perms.includes('analytics.view')
+
+    useEffect(() => {
+        if (!canViewAnalytics) {
+            setLoading(false)
+            setError('You do not have analytics permission to view dashboard metrics.')
+            return
+        }
         axios.get(`${API_BASE}/analytics/admin`)
             .then(res => {
                 setStats(res.data)
                 setLoading(false)
             })
-            .catch(err => setLoading(false))
-    }, [])
+            .catch(err => {
+                setError(err?.response?.data?.detail || 'Failed to load dashboard metrics')
+                setLoading(false)
+            })
+    }, [canViewAnalytics])
 
     if (loading) return <div className="loading-spinner"></div>
-    if (!stats) return <div>Error loading stats</div>
+    if (error) return <div className="dashboard-panel">{error}</div>
+    if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
 
     // Calculate additional metrics
     const avgSubmissionsPerStudent = stats.totalStudents > 0
@@ -232,6 +648,35 @@ function Dashboard() {
         : 0
     const totalMentors = stats.mentorCount || Math.ceil(stats.totalStudents / 15)
     const activeToday = stats.recentSubmissions?.length || 0
+    const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+    const deltaPct = (current, previous) => {
+        const c = toNum(current)
+        const p = toNum(previous)
+        if (p <= 0) return c > 0 ? 100 : 0
+        return ((c - p) / p) * 100
+    }
+    const fmtDelta = (value) => {
+        const rounded = Math.round(value * 10) / 10
+        if (rounded > 0) return `+${rounded}%`
+        if (rounded < 0) return `${rounded}%`
+        return '0.0%'
+    }
+
+    const trendSeries = Array.isArray(stats.submissionTrends) ? stats.submissionTrends : []
+    const half = Math.max(1, Math.floor(trendSeries.length / 2))
+    const currentWindow = trendSeries.slice(-half).reduce((sum, i) => sum + toNum(i.count), 0)
+    const previousWindow = trendSeries.slice(-2 * half, -half).reduce((sum, i) => sum + toNum(i.count), 0)
+    const submissionsDelta = deltaPct(currentWindow, previousWindow)
+    const activeDelta = deltaPct(activeToday, Math.max(1, Math.round(toNum(stats.totalStudents) * 0.08)))
+    const qualityDelta = deltaPct(toNum(stats.successRate), 75)
+    const mentorLoadDelta = deltaPct(avgSubmissionsPerStudent, 3)
+
+    const kpiCards = [
+        { label: 'Platform Submission Velocity', value: `${currentWindow}`, delta: submissionsDelta, meta: 'current vs previous window' },
+        { label: 'Active Participation Delta', value: `${activeToday}`, delta: activeDelta, meta: 'today vs expected active baseline' },
+        { label: 'Quality Trend Delta', value: `${stats.successRate || 0}%`, delta: qualityDelta, meta: 'against 75% success baseline' },
+        { label: 'Mentor Load Delta', value: `${avgSubmissionsPerStudent}`, delta: mentorLoadDelta, meta: 'submissions per student benchmark' },
+    ]
 
     return (
         <div className="animate-fadeIn">
@@ -574,6 +1019,19 @@ function Dashboard() {
                         <Activity size={12} /> Live
                     </div>
                 </div>
+            </div>
+
+            <div className="kpi-trend-grid">
+                {kpiCards.map((kpi) => (
+                    <div key={kpi.label} className="kpi-trend-card">
+                        <div className="kpi-trend-label">{kpi.label}</div>
+                        <div className="kpi-trend-value">{kpi.value}</div>
+                        <div className="kpi-trend-meta">{kpi.meta}</div>
+                        <div className={`kpi-trend-delta ${kpi.delta > 0 ? 'up' : kpi.delta < 0 ? 'down' : 'flat'}`}>
+                            {fmtDelta(kpi.delta)}
+                        </div>
+                    </div>
+                ))}
             </div>
 
             {/* Charts Section */}
@@ -2859,6 +3317,7 @@ function GlobalTestsAdmin() {
     const [tests, setTests] = useState([])
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
+    const [postCreateAction, setPostCreateAction] = useState(null)
     const [modalStep, setModalStep] = useState(1)
     const [editingId, setEditingId] = useState(null)
     const [sectionTab, setSectionTab] = useState('aptitude')
@@ -2874,6 +3333,7 @@ function GlobalTestsAdmin() {
         deadline: '',
         maxAttempts: 1,
         maxTabSwitches: 3,
+        resultVisibility: 'immediate',
         status: 'live',
         sectionConfig: {
             sections: [
@@ -2943,32 +3403,19 @@ function GlobalTestsAdmin() {
         if (!file) return
         setUploading(true)
         try {
-            const text = await file.text()
-            const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-            if (lines.length < 2) { alert('CSV must have header + at least one row'); return }
-            const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
-            const questions = []
-            for (let i = 1; i < lines.length; i++) {
-                const vals = lines[i].match(/(".*?"|[^,]+)/g)?.map(v => v.trim().replace(/^"|"$/g, '')) || []
-                const row = {}
-                headers.forEach((h, idx) => row[h] = vals[idx] || '')
-                const section = (row.section || 'aptitude').toLowerCase()
-                if (!['aptitude', 'verbal', 'logical'].includes(section)) continue
-                questions.push({
-                    section,
-                    question: row.question || '',
-                    options: [row.option1 || row.option_1 || '', row.option2 || row.option_2 || '', row.option3 || row.option_3 || '', row.option4 || row.option_4 || ''],
-                    correctAnswer: parseInt(row.correctanswer || row.correct_answer || row.answer || '0'),
-                    category: row.category || 'general',
-                    explanation: row.explanation || ''
-                })
+            const rows = await readAssessmentImportRows(file)
+            const questions = rows
+                .map((row) => normalizeImportedMcq(row, { includeSection: true }))
+                .filter((question) => question && ['aptitude', 'verbal', 'logical'].includes(question.section))
+            if (questions.length === 0) {
+                alert('No valid MCQ rows found. File needs: section, question, option1, option2, option3, option4, correctAnswer. Correct answer can be A-D, 1-4, 0-3, or exact option text.')
+                return
             }
-            if (questions.length === 0) { alert('No valid MCQ rows found. CSV needs: section,question,option1,option2,option3,option4,correctAnswer'); setUploading(false); return }
             // Create a test with default config
             const testPayload = {
-                title: file.name.replace('.csv', '') + ' - CSV Import',
+                title: stripImportExtension(file.name) + ' - File Import',
                 type: 'comprehensive', difficulty: 'Medium', duration: 180, passingScore: 60,
-                status: 'draft', createdBy: ADMIN_ID,
+                status: 'draft', createdBy: ADMIN_ID, resultVisibility: 'manual',
                 sectionConfig: {
                     sections: [
                         { id: 'aptitude', enabled: true, order: 1, questionsCount: questions.filter(q => q.section === 'aptitude').length, timeMinutes: 30 },
@@ -2988,10 +3435,11 @@ function GlobalTestsAdmin() {
                 if (secQs.length === 0) continue
                 await axios.post(`${API_BASE}/global-tests/${testId}/questions`, { section: sec, questions: secQs })
             }
-            alert(`Created test with ${questions.length} questions from CSV!`)
+            setPostCreateAction({ type: 'Global test', title: testPayload.title, testId, message: `Created with ${questions.length} questions from ${file.name}` })
+            alert(`Created test with ${questions.length} questions from ${file.name}!`)
             fetchTests()
         } catch (err) {
-            alert('CSV upload failed: ' + (err.response?.data?.error || err.message))
+            alert('Question upload failed: ' + (err.response?.data?.error || err.message))
         } finally {
             setUploading(false)
             e.target.value = ''
@@ -3240,6 +3688,7 @@ function GlobalTestsAdmin() {
             } else {
                 const res = await axios.post(`${API_BASE}/global-tests`, payload)
                 testId = res.data.id
+                setPostCreateAction({ type: 'Global test', title: payload.title, testId, message: 'Test created. Next step: allocate learners or keep it draft until ready.' })
             }
             for (const section of GLOBAL_SECTIONS) {
                 const list = questionsBySection[section.id] || []
@@ -3253,7 +3702,8 @@ function GlobalTestsAdmin() {
             setQuestionsBySection({ aptitude: [], verbal: [], logical: [], coding: [], sql: [] })
             setNewTest({
                 title: '', type: 'comprehensive', difficulty: 'Medium', duration: 180, passingScore: 60,
-                description: '', startTime: '', deadline: '', maxAttempts: 1, maxTabSwitches: 3, status: 'live',
+                description: '', startTime: '', deadline: '', maxAttempts: 1, maxTabSwitches: 3,
+                resultVisibility: 'immediate', status: 'live',
                 sectionConfig: newTest.sectionConfig
             })
             setProctoringSettings(defaultProctoringSettings)
@@ -3343,6 +3793,7 @@ function GlobalTestsAdmin() {
                 deadline: t.deadline ? t.deadline.slice(0, 16) : '',
                 maxAttempts: t.maxAttempts ?? 1,
                 maxTabSwitches: t.maxTabSwitches ?? 3,
+                resultVisibility: t.resultVisibility || 'immediate',
                 status: t.status || 'draft',
                 sectionConfig: t.sectionConfig || newTest.sectionConfig
             })
@@ -3466,14 +3917,14 @@ function GlobalTestsAdmin() {
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                        <input type="file" accept=".csv" ref={csvInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} />
+                        <input type="file" accept={ASSESSMENT_IMPORT_ACCEPT} ref={csvInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} />
                         <button
                             onClick={() => csvInputRef.current?.click()}
                             disabled={uploading}
                             className="btn-create-new premium-btn"
                             style={{ padding: '0.75rem 1.25rem', background: 'linear-gradient(135deg, #10b981, #059669)', borderRadius: '1rem', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                         >
-                            <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV Upload'}
+                            <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV / Excel Upload'}
                         </button>
                         <button
                             type="button"
@@ -3486,6 +3937,26 @@ function GlobalTestsAdmin() {
                     </div>
                 </div>
             </div>
+
+            {postCreateAction && (
+                <div className="dashboard-panel" style={{ marginBottom: '1.5rem', border: '1px solid var(--success)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div>
+                            <h3 style={{ margin: 0 }}>{postCreateAction.type} Created</h3>
+                            <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)' }}>{postCreateAction.message}</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <button className="btn-create-new" onClick={() => document.getElementById(`global-test-${postCreateAction.testId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                                <Users size={18} /> Allocation Shortcut
+                            </button>
+                            <button className="btn-reset" onClick={() => setPostCreateAction(null)}>Dismiss</button>
+                        </div>
+                    </div>
+                    <p style={{ margin: '0.75rem 0 0', color: 'var(--text-muted)' }}>
+                        Use the test list below to verify status, then allocate students from the assignment controls when enabled for this module.
+                    </p>
+                </div>
+            )}
 
             {/* Stats grid – like Global Problems */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -3522,7 +3993,7 @@ function GlobalTestsAdmin() {
             ) : (
                 <div className="problem-list-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))' }}>
                     {tests.map(t => (
-                        <div key={t.id} className="problem-card card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                        <div key={t.id} id={`global-test-${t.id}`} className="problem-card card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                 <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2))', color: '#10b981', fontWeight: 700 }}>GLOBAL TEST</span>
                                 <span style={{
@@ -3674,6 +4145,17 @@ function GlobalTestsAdmin() {
                                     <div className="form-group" style={{ marginBottom: '1rem' }}>
                                         <label className="form-label">Max Attempts</label>
                                         <input type="number" min="1" max="10" value={newTest.maxAttempts} onChange={e => setNewTest({ ...newTest, maxAttempts: parseInt(e.target.value) || 1 })} />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                                        <label className="form-label">Result Visibility</label>
+                                        <select value={newTest.resultVisibility || 'immediate'} onChange={e => setNewTest({ ...newTest, resultVisibility: e.target.value })}>
+                                            <option value="immediate">Show immediately after submission</option>
+                                            <option value="after_deadline">Show after deadline</option>
+                                            <option value="manual">Hide until admin release</option>
+                                        </select>
+                                        <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                            Production-safe default: use “after deadline” or “manual” for high-stakes exams.
+                                        </small>
                                     </div>
                                     {/* Enhanced Proctoring Settings */}
                                     <div style={{ marginBottom: '1.5rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(239,68,68,0.05), rgba(251,191,36,0.05))', borderRadius: '16px', border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -4287,6 +4769,7 @@ function AptitudeTestsAdmin() {
     const [tests, setTests] = useState([])
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
+    const [postCreateAction, setPostCreateAction] = useState(null)
     const [showQuestionsModal, setShowQuestionsModal] = useState(false)
     const [selectedTest, setSelectedTest] = useState(null)
     const [isGenerating, setIsGenerating] = useState(false)
@@ -4305,6 +4788,7 @@ function AptitudeTestsAdmin() {
         maxAttempts: 1,
         startTime: '',
         deadline: '',
+        resultVisibility: 'immediate',
         description: '',
         status: 'live',
         questions: []
@@ -4398,7 +4882,8 @@ function AptitudeTestsAdmin() {
                 if (!isNaN(date.getTime())) testPayload.deadline = date.toISOString()
             }
 
-            await axios.post(`${API_BASE}/aptitude`, testPayload)
+            const res = await axios.post(`${API_BASE}/aptitude`, testPayload)
+            setPostCreateAction({ type: 'Aptitude test', title: testPayload.title, testId: res.data?.id, message: 'Test created. Next step: allocate students before making it live.' })
             setShowModal(false)
             setNewTest({
                 title: '',
@@ -4409,6 +4894,7 @@ function AptitudeTestsAdmin() {
                 maxAttempts: 1,
                 startTime: '',
                 deadline: '',
+                resultVisibility: 'immediate',
                 description: '',
                 status: 'live',
                 questions: []
@@ -4425,36 +4911,26 @@ function AptitudeTestsAdmin() {
         if (!file) return
         setUploading(true)
         try {
-            const text = await file.text()
-            const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-            if (lines.length < 2) { alert('CSV must have header + at least one row'); return }
-            const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
-            const questions = []
-            for (let i = 1; i < lines.length; i++) {
-                const vals = lines[i].match(/(".*?"|[^,]+)/g)?.map(v => v.trim().replace(/^"|"$/g, '')) || []
-                const row = {}
-                headers.forEach((h, idx) => row[h] = vals[idx] || '')
-                if (!row.question) continue
-                questions.push({
-                    question: row.question,
-                    options: [row.option1 || row.option_1 || '', row.option2 || row.option_2 || '', row.option3 || row.option_3 || '', row.option4 || row.option_4 || ''],
-                    correctAnswer: parseInt(row.correctanswer || row.correct_answer || row.answer || '0'),
-                    category: row.category || 'general',
-                    explanation: row.explanation || ''
-                })
+            const rows = await readAssessmentImportRows(file)
+            const questions = rows
+                .map((row) => normalizeImportedMcq(row))
+                .filter(Boolean)
+            if (questions.length === 0) {
+                alert('No valid rows. File needs: question, option1, option2, option3, option4, correctAnswer. Correct answer can be A-D, 1-4, 0-3, or exact option text.')
+                return
             }
-            if (questions.length === 0) { alert('No valid rows. CSV needs: question,option1,option2,option3,option4,correctAnswer'); setUploading(false); return }
             const payload = {
-                title: file.name.replace('.csv', '') + ' - CSV Import',
+                title: stripImportExtension(file.name) + ' - File Import',
                 difficulty: 'Medium', duration: Math.max(30, questions.length * 2),
                 passingScore: 60, maxTabSwitches: 3, maxAttempts: 1,
-                status: 'draft', createdBy: ADMIN_ID, questions
+                resultVisibility: 'manual', status: 'draft', createdBy: ADMIN_ID, questions
             }
-            await axios.post(`${API_BASE}/aptitude`, payload)
-            alert(`Created aptitude test with ${questions.length} questions from CSV!`)
+            const res = await axios.post(`${API_BASE}/aptitude`, payload)
+            setPostCreateAction({ type: 'Aptitude test', title: payload.title, testId: res.data?.id, message: `Created with ${questions.length} imported questions. Allocate students next.` })
+            alert(`Created aptitude test with ${questions.length} questions from ${file.name}!`)
             fetchTests()
         } catch (err) {
-            alert('CSV upload failed: ' + (err.response?.data?.error || err.message))
+            alert('Question upload failed: ' + (err.response?.data?.error || err.message))
         } finally {
             setUploading(false)
             e.target.value = ''
@@ -4472,6 +4948,15 @@ function AptitudeTestsAdmin() {
             } catch (error) {
                 alert('Error updating test status')
             }
+        }
+    }
+
+    const handleResultVisibility = async (test, resultVisibility) => {
+        try {
+            await axios.patch(`${API_BASE}/aptitude/${test.id}/status`, { resultVisibility })
+            fetchTests()
+        } catch (error) {
+            alert(error.response?.data?.detail || 'Error updating result visibility')
         }
     }
 
@@ -4529,7 +5014,7 @@ function AptitudeTestsAdmin() {
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    <input type="file" accept=".csv" ref={csvInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} />
+                    <input type="file" accept={ASSESSMENT_IMPORT_ACCEPT} ref={csvInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} />
                     <button
                         onClick={() => csvInputRef.current?.click()}
                         disabled={uploading}
@@ -4545,7 +5030,7 @@ function AptitudeTestsAdmin() {
                             gap: '0.5rem'
                         }}
                     >
-                        <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV Upload'}
+                        <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV / Excel Upload'}
                     </button>
                     <button
                         onClick={() => setShowModal(true)}
@@ -4565,6 +5050,23 @@ function AptitudeTestsAdmin() {
                     </button>
                 </div>
             </div>
+
+            {postCreateAction && (
+                <div className="dashboard-panel" style={{ marginBottom: '1.5rem', border: '1px solid var(--success)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div>
+                            <h3 style={{ margin: 0 }}>{postCreateAction.type} Created</h3>
+                            <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)' }}>{postCreateAction.message}</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <button className="btn-create-new" onClick={() => document.getElementById(`aptitude-test-${postCreateAction.testId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                                <Users size={18} /> Go to Allocation
+                            </button>
+                            <button className="btn-reset" onClick={() => setPostCreateAction(null)}>Dismiss</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Stats */}
             <div style={{
@@ -4630,12 +5132,13 @@ function AptitudeTestsAdmin() {
                                 <th>Duration</th>
                                 <th>Pass %</th>
                                 <th>Status</th>
+                                <th>Results</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {tests.map(test => (
-                                <tr key={test.id}>
+                                <tr key={test.id} id={`aptitude-test-${test.id}`}>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                             <div style={{
@@ -4679,6 +5182,17 @@ function AptitudeTestsAdmin() {
                                         }}>
                                             {test.status}
                                         </span>
+                                    </td>
+                                    <td>
+                                        <select
+                                            value={test.resultVisibility || 'immediate'}
+                                            onChange={(e) => handleResultVisibility(test, e.target.value)}
+                                            style={{ minWidth: 150 }}
+                                        >
+                                            <option value="immediate">Immediate</option>
+                                            <option value="after_deadline">After deadline</option>
+                                            <option value="manual">Manual release</option>
+                                        </select>
                                     </td>
                                     <td>
                                         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -4846,7 +5360,7 @@ function AptitudeTestsAdmin() {
                                     </select>
                                 </div>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                                 <div className="form-group">
                                     <label className="form-label">Passing Score (%)</label>
                                     <input
@@ -4856,6 +5370,18 @@ function AptitudeTestsAdmin() {
                                         value={newTest.passingScore}
                                         onChange={e => setNewTest({ ...newTest, passingScore: parseInt(e.target.value) })}
                                     />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label"><Eye size={14} style={{ marginRight: '0.5rem' }} /> Result Visibility</label>
+                                    <select
+                                        value={newTest.resultVisibility || 'immediate'}
+                                        onChange={e => setNewTest({ ...newTest, resultVisibility: e.target.value })}
+                                    >
+                                        <option value="immediate">Immediate</option>
+                                        <option value="after_deadline">After deadline</option>
+                                        <option value="manual">Manual release</option>
+                                    </select>
+                                    <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Controls what students can see after submitting.</small>
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label"><Settings size={14} style={{ marginRight: '0.5rem' }} /> Test Status</label>
@@ -5733,6 +6259,213 @@ function AdminAnalyticsDashboard() {
                         </div>
                     </div>
                 </div>
+            )}
+        </div>
+    )
+}
+
+// ==================== AUDIT LOG VIEWER ====================
+function AuditLogViewer({ user }) {
+    const [logs, setLogs] = useState([])
+    const [total, setTotal] = useState(0)
+    const [loading, setLoading] = useState(true)
+    const [page, setPage] = useState(0)
+    const [eventTypeFilter, setEventTypeFilter] = useState('')
+    const [userIdFilter, setUserIdFilter] = useState('')
+    const PAGE_SIZE = 50
+
+    const fetchLogs = async (p = 0, etf = eventTypeFilter, uf = userIdFilter) => {
+        setLoading(true)
+        try {
+            const params = { limit: PAGE_SIZE, offset: p * PAGE_SIZE }
+            if (etf) params.event_type = etf
+            if (uf) params.userId = uf
+            const res = await axios.get(`${API_BASE}/analytics/audit-logs`, { params })
+            setLogs(res.data.logs || [])
+            setTotal(res.data.total || 0)
+        } catch (e) {
+            console.error(e)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    useEffect(() => { fetchLogs(0) }, [])
+
+    const handleFilter = () => { setPage(0); fetchLogs(0, eventTypeFilter, userIdFilter) }
+
+    const EVENT_CATEGORIES = [
+        '', 'LOGIN_SUCCESS', 'LOGIN_FAILURE', 'LOGOUT', 'GOOGLE_SIGNIN',
+        'ADMIN_USER_CREATED', 'ADMIN_USER_MODIFIED', 'ADMIN_USER_DELETED', 'ADMIN_TEST_CREATED',
+        'ACCESS_DENIED', 'PERMISSION_DENIED', 'SUBMISSION_CREATED', 'TEST_STARTED', 'TEST_COMPLETED',
+        'PROCTOR_VIOLATION', 'PROCTOR_ACTION_TAKEN', 'SYSTEM_ERROR', 'DATABASE_QUERY_ERROR',
+    ]
+
+    const severityColor = (type) => {
+        if (['SYSTEM_ERROR', 'DATABASE_QUERY_ERROR', 'ACCESS_DENIED', 'PERMISSION_DENIED'].includes(type)) return '#ef4444'
+        if (['PROCTOR_VIOLATION', 'PROCTOR_ACTION_TAKEN', 'LOGIN_FAILURE'].includes(type)) return '#f59e0b'
+        if (['LOGIN_SUCCESS', 'GOOGLE_SIGNIN', 'TEST_COMPLETED', 'SUBMISSION_CREATED'].includes(type)) return '#10b981'
+        return '#8b5cf6'
+    }
+
+    return (
+        <div className="animate-fadeIn">
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Event Type</label>
+                    <select value={eventTypeFilter} onChange={e => setEventTypeFilter(e.target.value)} style={{ padding: '0.5rem 0.75rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white', minWidth: 200 }}>
+                        {EVENT_CATEGORIES.map(c => <option key={c} value={c}>{c || 'All Types'}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>User ID</label>
+                    <input value={userIdFilter} onChange={e => setUserIdFilter(e.target.value)} placeholder="Filter by user ID..." style={{ padding: '0.5rem 0.75rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white', width: 220 }} />
+                </div>
+                <button onClick={handleFilter} style={{ padding: '0.5rem 1.25rem', background: 'var(--primary)', border: 'none', borderRadius: 8, color: 'white', fontWeight: 600, cursor: 'pointer' }}>Apply</button>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', alignSelf: 'center' }}>{total.toLocaleString()} total records</span>
+            </div>
+
+            {loading ? <div className="loading-spinner" /> : (
+                <div className="table-container card glass">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Event Type</th>
+                                <th>User ID</th>
+                                <th>IP</th>
+                                <th>Resource</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {logs.length === 0 ? (
+                                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>No audit logs found</td></tr>
+                            ) : logs.map(log => (
+                                <tr key={log.id}>
+                                    <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(log.created_at).toLocaleString()}</td>
+                                    <td>
+                                        <span style={{ padding: '2px 8px', borderRadius: 4, background: `${severityColor(log.event_type)}22`, color: severityColor(log.event_type), fontSize: '0.75rem', fontWeight: 600 }}>
+                                            {log.event_type}
+                                        </span>
+                                    </td>
+                                    <td style={{ fontSize: '0.8rem', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.user_id || '—'}</td>
+                                    <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{log.ip_address || '—'}</td>
+                                    <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{log.resource_type || '—'}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{log.action || '—'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', marginTop: '1rem' }}>
+                <button onClick={() => { const p = Math.max(0, page - 1); setPage(p); fetchLogs(p) }} disabled={page === 0} style={{ padding: '0.5rem 1rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white', cursor: page === 0 ? 'not-allowed' : 'pointer' }}>Prev</button>
+                <span style={{ alignSelf: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
+                <button onClick={() => { const p = page + 1; setPage(p); fetchLogs(p) }} disabled={(page + 1) * PAGE_SIZE >= total} style={{ padding: '0.5rem 1rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white', cursor: (page + 1) * PAGE_SIZE >= total ? 'not-allowed' : 'pointer' }}>Next</button>
+            </div>
+        </div>
+    )
+}
+
+// ==================== ERROR MONITORING DASHBOARD ====================
+function ErrorMonitoringDashboard({ user }) {
+    const [data, setData] = useState(null)
+    const [loading, setLoading] = useState(true)
+    const [hours, setHours] = useState(24)
+
+    const fetchErrors = async (h = hours) => {
+        setLoading(true)
+        try {
+            const res = await axios.get(`${API_BASE}/analytics/system-errors`, { params: { hours: h } })
+            setData(res.data)
+        } catch (e) {
+            console.error(e)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    useEffect(() => { fetchErrors() }, [])
+
+    const colorMap = {
+        SYSTEM_ERROR: '#ef4444',
+        DATABASE_QUERY_ERROR: '#f97316',
+        ACCESS_DENIED: '#f59e0b',
+        PERMISSION_DENIED: '#a78bfa',
+    }
+
+    return (
+        <div className="animate-fadeIn">
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={hours} onChange={e => { const h = Number(e.target.value); setHours(h); fetchErrors(h) }} style={{ padding: '0.5rem 0.75rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white' }}>
+                    <option value={1}>Last 1 hour</option>
+                    <option value={6}>Last 6 hours</option>
+                    <option value={24}>Last 24 hours</option>
+                    <option value={48}>Last 48 hours</option>
+                    <option value={168}>Last 7 days</option>
+                </select>
+                <button onClick={() => fetchErrors()} style={{ padding: '0.5rem 1rem', background: 'var(--primary)', border: 'none', borderRadius: 8, color: 'white', fontWeight: 600, cursor: 'pointer' }}>Refresh</button>
+                {data && <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{data.total_errors} errors in last {hours}h</span>}
+            </div>
+
+            {loading ? <div className="loading-spinner" /> : !data ? <p style={{ color: 'var(--text-muted)' }}>No data available.</p> : (
+                <>
+                    <div className="dashboard-stats-grid" style={{ marginBottom: '1.5rem' }}>
+                        {(data.summary || []).map(s => (
+                            <div key={s.event_type} className="dashboard-stat-card" style={{ background: `${colorMap[s.event_type] || '#8b5cf6'}18`, border: `1px solid ${colorMap[s.event_type] || '#8b5cf6'}44` }}>
+                                <div className="stat-card-inner">
+                                    <div className="stat-icon-box" style={{ background: colorMap[s.event_type] || '#8b5cf6' }}>
+                                        <AlertTriangle size={20} color="#fff" />
+                                    </div>
+                                    <div className="stat-content">
+                                        <div className="stat-number" style={{ color: colorMap[s.event_type] || '#8b5cf6' }}>{s.count}</div>
+                                        <div className="stat-label-text" style={{ fontSize: '0.72rem' }}>{s.event_type.replace(/_/g, ' ')}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        {(data.summary || []).length === 0 && (
+                            <div className="dashboard-stat-card" style={{ gridColumn: '1/-1', textAlign: 'center', color: '#10b981', padding: '2rem' }}>
+                                No errors in this time window
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="table-container card glass">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Type</th>
+                                    <th>User ID</th>
+                                    <th>IP</th>
+                                    <th>Resource</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(data.recent_errors || []).length === 0 ? (
+                                    <tr><td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>No recent errors</td></tr>
+                                ) : (data.recent_errors || []).map((err, idx) => (
+                                    <tr key={err.id || idx}>
+                                        <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(err.created_at).toLocaleString()}</td>
+                                        <td>
+                                            <span style={{ padding: '2px 8px', borderRadius: 4, background: `${colorMap[err.event_type] || '#8b5cf6'}22`, color: colorMap[err.event_type] || '#8b5cf6', fontSize: '0.75rem', fontWeight: 600 }}>
+                                                {err.event_type}
+                                            </span>
+                                        </td>
+                                        <td style={{ fontSize: '0.8rem' }}>{err.user_id || '—'}</td>
+                                        <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{err.ip_address || '—'}</td>
+                                        <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{err.resource_type || '—'}</td>
+                                        <td style={{ fontSize: '0.82rem' }}>{err.action || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
             )}
         </div>
     )

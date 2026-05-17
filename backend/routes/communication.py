@@ -37,6 +37,14 @@ from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/communication", tags=["communication"])
 audit_logger = get_audit_logger()
+LEGACY_EXAM_TAKER_PERMISSIONS = {
+    "tests.view_allocated",
+    "tests.attempt",
+    "aptitude.attempt",
+    "coding.attempt",
+    "communication.attempt",
+    "results.view_own",
+}
 
 
 async def _insert_unified_proctor_event(
@@ -73,6 +81,8 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
             u = await cur.fetchone()
             if u and u.get("role") == "admin":
                 return True
+            if u and u.get("role") in ("student", "learner"):
+                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
             fmt = ",".join(["%s"] * len(permissions))
             await cur.execute(
                 f"""

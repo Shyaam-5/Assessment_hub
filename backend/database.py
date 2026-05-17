@@ -44,6 +44,464 @@ _tenant_pools: dict[str, "PyMySQLPool"] = {}
 _active_request_pool: ContextVar["PyMySQLPool | None"] = ContextVar("active_request_pool", default=None)
 _tenant_schema_checked: set[str] = set()
 
+_REQUIRED_TENANT_DOMAIN_TABLES = [
+    # Coding / content
+    "problems",
+    "tasks",
+    "submissions",
+    "problem_completions",
+    "task_completions",
+    "mentor_student_allocations",
+    # Aptitude
+    "aptitude_tests",
+    "aptitude_questions",
+    "aptitude_submissions",
+    "aptitude_question_results",
+    "test_student_allocations",
+    "student_completed_aptitude",
+    # Communication
+    "comm_tests",
+    "comm_test_attempts",
+    "comm_test_allocations",
+    # Skill / SQL flow
+    "skill_tests",
+    "skill_test_attempts",
+    "skill_test_allocations",
+    # Global tests
+    "global_tests",
+    "test_questions",
+    "global_test_allocations",
+    "global_test_submissions",
+    "question_results",
+    "section_results",
+    # Proctoring / analysis surfaces
+    "proctoring_events_unified",
+    "proctor_agent_analyses",
+    "proctor_integrity_reports",
+    "behavior_analyses",
+]
+
+_CORE_DOMAIN_TABLES_SQL = [
+    """
+    CREATE TABLE IF NOT EXISTS problems (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        title VARCHAR(255) NULL,
+        description TEXT NULL,
+        expected_output TEXT NULL,
+        sample_input TEXT NULL,
+        difficulty VARCHAR(20) NULL,
+        type VARCHAR(50) NULL,
+        language VARCHAR(50) NULL,
+        mentor_id VARCHAR(50) NULL,
+        status VARCHAR(20) NULL,
+        created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        live_coding VARCHAR(10) NULL,
+        enable_proctoring VARCHAR(10) NULL,
+        enable_video_audio VARCHAR(10) NULL,
+        disable_copy_paste VARCHAR(10) NULL,
+        track_tab_switches VARCHAR(10) NULL,
+        max_tab_switches INT NULL,
+        sql_schema TEXT NULL,
+        expected_query_result TEXT NULL,
+        enable_face_detection VARCHAR(10) NULL,
+        detect_multiple_faces VARCHAR(10) NULL,
+        track_face_lookaway VARCHAR(10) NULL,
+        attempt_limit INT NULL,
+        max_attempts INT NULL,
+        deadline DATETIME NULL,
+        INDEX idx_problems_mentor (mentor_id),
+        INDEX idx_problems_status (status),
+        INDEX idx_problems_created_at (created_at)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tasks (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        mentor_id VARCHAR(50) NULL,
+        title VARCHAR(255) NULL,
+        description TEXT NULL,
+        requirements TEXT NULL,
+        status VARCHAR(20) NULL,
+        deadline DATETIME NULL,
+        created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_tasks_mentor (mentor_id),
+        INDEX idx_tasks_status (status)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS submissions (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        student_id VARCHAR(50) NULL,
+        problem_id VARCHAR(50) NULL,
+        mentor_id VARCHAR(50) NULL,
+        code LONGTEXT NULL,
+        language VARCHAR(50) NULL,
+        output LONGTEXT NULL,
+        score INT NULL,
+        max_score INT NULL,
+        test_cases_total INT NULL,
+        test_cases_passed INT NULL,
+        status VARCHAR(30) NULL,
+        submitted_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        execution_time_ms INT NULL,
+        memory_kb INT NULL,
+        plagiarism_score DECIMAL(5,2) NULL,
+        INDEX idx_submissions_student (student_id),
+        INDEX idx_submissions_problem (problem_id),
+        INDEX idx_submissions_mentor (mentor_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS problem_completions (
+        problem_id VARCHAR(50) NOT NULL,
+        student_id VARCHAR(50) NOT NULL,
+        completed_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (problem_id, student_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS aptitude_submissions (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(50) NULL,
+        test_title VARCHAR(255) NULL,
+        student_id VARCHAR(50) NULL,
+        correct_count INT NULL,
+        total_questions INT NULL,
+        score INT NULL,
+        status VARCHAR(20) NULL,
+        time_spent INT NULL,
+        tab_switches INT NULL,
+        submitted_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_apt_sub_test (test_id),
+        INDEX idx_apt_sub_student (student_id),
+        INDEX idx_apt_sub_status (status)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS task_completions (
+        task_id VARCHAR(50) NOT NULL,
+        student_id VARCHAR(50) NOT NULL,
+        PRIMARY KEY (task_id, student_id),
+        INDEX idx_task_completions_student (student_id),
+        INDEX idx_task_completions_task (task_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS mentor_student_allocations (
+        mentor_id VARCHAR(50) NOT NULL,
+        student_id VARCHAR(50) NOT NULL,
+        PRIMARY KEY (mentor_id, student_id),
+        INDEX idx_alloc_mentor (mentor_id),
+        INDEX idx_alloc_student (student_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS aptitude_tests (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        title VARCHAR(255) NULL,
+        type VARCHAR(50) NULL,
+        difficulty VARCHAR(20) NULL,
+        duration INT NULL,
+        total_questions INT NULL,
+        start_time DATETIME NULL,
+        passing_score INT NULL,
+        status VARCHAR(20) NULL,
+        created_by VARCHAR(50) NULL,
+        created_at DATETIME NULL,
+        max_tab_switches INT NULL DEFAULT 3,
+        max_attempts INT NULL DEFAULT 1,
+        deadline DATETIME NULL,
+        description TEXT NULL,
+        result_visibility VARCHAR(32) NULL DEFAULT 'immediate',
+        INDEX idx_apt_tests_created_by (created_by),
+        INDEX idx_apt_tests_created_at (created_at)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS aptitude_questions (
+        test_id VARCHAR(50) NOT NULL,
+        question_id VARCHAR(50) NOT NULL,
+        question TEXT NULL,
+        option_1 TEXT NULL,
+        option_2 TEXT NULL,
+        option_3 TEXT NULL,
+        option_4 TEXT NULL,
+        correct_answer TEXT NULL,
+        explanation TEXT NULL,
+        category VARCHAR(100) NULL,
+        PRIMARY KEY (test_id, question_id),
+        INDEX idx_apt_q_test (test_id),
+        INDEX idx_apt_q_qid (question_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS aptitude_question_results (
+        submission_id VARCHAR(50) NULL,
+        question_id VARCHAR(50) NULL,
+        question TEXT NULL,
+        user_answer TEXT NULL,
+        correct_answer TEXT NULL,
+        is_correct VARCHAR(10) NULL,
+        explanation TEXT NULL,
+        category VARCHAR(100) NULL,
+        INDEX idx_apt_qr_submission (submission_id),
+        INDEX idx_apt_qr_qid (question_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS test_student_allocations (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(50) NOT NULL,
+        student_id VARCHAR(50) NOT NULL,
+        assigned_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_test_student (test_id, student_id),
+        INDEX idx_tsa_test_id (test_id),
+        INDEX idx_tsa_student_id (student_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS student_completed_aptitude (
+        student_id VARCHAR(50) NOT NULL,
+        aptitude_test_id VARCHAR(50) NOT NULL,
+        PRIMARY KEY (student_id, aptitude_test_id),
+        INDEX idx_sca_test_id (aptitude_test_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS global_tests (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL,
+        difficulty VARCHAR(20) NULL,
+        duration INT NULL,
+        total_questions INT NULL,
+        passing_score INT NULL DEFAULT 60,
+        status VARCHAR(20) NULL DEFAULT 'draft',
+        created_by VARCHAR(50) NULL,
+        created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        description TEXT NULL,
+        start_time DATETIME NULL,
+        deadline DATETIME NULL,
+        max_attempts INT NULL DEFAULT 1,
+        max_tab_switches INT NULL DEFAULT 3,
+        section_config JSON NULL,
+        proctoring_config JSON NULL,
+        result_visibility VARCHAR(32) NULL DEFAULT 'immediate',
+        INDEX idx_global_tests_created_by (created_by),
+        INDEX idx_global_tests_status (status)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS test_questions (
+        question_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(50) NULL,
+        section VARCHAR(32) NOT NULL,
+        question_type VARCHAR(32) NULL DEFAULT 'mcq',
+        question TEXT NOT NULL,
+        option_1 TEXT NULL,
+        option_2 TEXT NULL,
+        option_3 TEXT NULL,
+        option_4 TEXT NULL,
+        correct_answer TEXT NULL,
+        test_cases JSON NULL,
+        starter_code TEXT NULL,
+        solution_code TEXT NULL,
+        explanation TEXT NULL,
+        category VARCHAR(100) NULL,
+        difficulty VARCHAR(20) NULL,
+        points INT NULL DEFAULT 1,
+        time_limit INT NULL,
+        INDEX idx_test_questions_test_id (test_id),
+        INDEX idx_test_questions_section (section)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS global_test_submissions (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(50) NULL,
+        test_title VARCHAR(255) NULL,
+        student_id VARCHAR(50) NULL,
+        aptitude_score INT NULL DEFAULT 0,
+        verbal_score INT NULL DEFAULT 0,
+        logical_score INT NULL DEFAULT 0,
+        coding_score INT NULL DEFAULT 0,
+        sql_score INT NULL DEFAULT 0,
+        total_score INT NULL DEFAULT 0,
+        overall_percentage DECIMAL(5,2) NULL,
+        status VARCHAR(20) NULL DEFAULT 'pending',
+        time_spent INT NULL,
+        tab_switches INT NULL DEFAULT 0,
+        submitted_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_gts_student_id (student_id),
+        INDEX idx_gts_test_id (test_id),
+        INDEX idx_gts_status (status)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS question_results (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        submission_id VARCHAR(50) NULL,
+        question_id VARCHAR(50) NULL,
+        section VARCHAR(50) NULL,
+        user_answer TEXT NULL,
+        correct_answer TEXT NULL,
+        is_correct TINYINT(1) NULL DEFAULT 0,
+        points_earned INT NULL DEFAULT 0,
+        time_taken INT NULL,
+        explanation TEXT NULL,
+        INDEX idx_qr_submission_id (submission_id),
+        INDEX idx_qr_question_id (question_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS section_results (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        submission_id VARCHAR(50) NULL,
+        section VARCHAR(32) NOT NULL,
+        correct_count INT NULL DEFAULT 0,
+        total_questions INT NULL DEFAULT 0,
+        score INT NULL DEFAULT 0,
+        percentage DECIMAL(5,2) NULL,
+        time_spent INT NULL,
+        INDEX idx_sr_submission_id (submission_id),
+        INDEX idx_sr_section (section)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS personalized_reports (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        student_id VARCHAR(50) NULL,
+        test_id VARCHAR(50) NULL,
+        submission_id VARCHAR(50) NULL,
+        report_data JSON NULL,
+        generated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pr_student_id (student_id),
+        INDEX idx_pr_test_id (test_id),
+        INDEX idx_pr_submission_id (submission_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS skill_tests (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NULL,
+        skills JSON NOT NULL,
+        mcq_count INT NULL DEFAULT 10,
+        coding_count INT NULL DEFAULT 3,
+        sql_count INT NULL DEFAULT 3,
+        interview_count INT NULL DEFAULT 5,
+        attempt_limit INT NULL DEFAULT 1,
+        mcq_duration_minutes INT NULL DEFAULT 30,
+        coding_duration_minutes INT NULL DEFAULT 30,
+        sql_duration_minutes INT NULL DEFAULT 30,
+        interview_duration_minutes INT NULL DEFAULT 30,
+        mcq_passing_score INT NULL DEFAULT 60,
+        coding_passing_score INT NULL DEFAULT 50,
+        sql_passing_score INT NULL DEFAULT 50,
+        interview_passing_score INT NULL DEFAULT 6,
+        is_active TINYINT(1) NULL DEFAULT 1,
+        created_by VARCHAR(100) NULL,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        difficulty_level VARCHAR(20) NULL DEFAULT 'mixed',
+        proctoring_enabled TINYINT(1) NULL DEFAULT 1,
+        proctoring_config JSON NULL,
+        company_name VARCHAR(100) NULL,
+        is_company_test TINYINT(1) NULL DEFAULT 0,
+        target_company VARCHAR(100) NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS skill_test_attempts (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        test_id INT NOT NULL,
+        student_id VARCHAR(100) NOT NULL,
+        student_name VARCHAR(255) NULL,
+        attempt_number INT NULL DEFAULT 1,
+        current_stage VARCHAR(50) NULL DEFAULT 'mcq',
+        overall_status VARCHAR(50) NULL DEFAULT 'in_progress',
+        mcq_questions JSON NULL,
+        mcq_answers JSON NULL,
+        mcq_score DECIMAL(5,2) NULL DEFAULT 0,
+        mcq_status VARCHAR(20) NULL DEFAULT 'pending',
+        mcq_start_time TIMESTAMP NULL DEFAULT NULL,
+        mcq_end_time TIMESTAMP NULL DEFAULT NULL,
+        mcq_violations INT NULL DEFAULT 0,
+        coding_problems JSON NULL,
+        coding_submissions JSON NULL,
+        coding_score DECIMAL(5,2) NULL DEFAULT 0,
+        coding_status VARCHAR(20) NULL DEFAULT 'pending',
+        sql_problems JSON NULL,
+        sql_submissions JSON NULL,
+        sql_score DECIMAL(5,2) NULL DEFAULT 0,
+        sql_status VARCHAR(20) NULL DEFAULT 'pending',
+        interview_qa JSON NULL,
+        interview_current_index INT NULL DEFAULT 0,
+        interview_score DECIMAL(5,2) NULL DEFAULT 0,
+        interview_status VARCHAR(20) NULL DEFAULT 'pending',
+        interview_violations INT NULL DEFAULT 0,
+        report JSON NULL,
+        started_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP NULL DEFAULT NULL,
+        last_activity_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        total_violations INT NULL DEFAULT 0,
+        risk_level VARCHAR(20) NULL DEFAULT 'low',
+        processing_time_seconds INT NULL DEFAULT 0,
+        fairness_score DECIMAL(5,2) NULL DEFAULT 100.00,
+        ai_confidence_score DECIMAL(5,2) NULL DEFAULT 0.00,
+        final_recommendation VARCHAR(20) NULL DEFAULT 'pending',
+        INDEX idx_sta_test_student (test_id, student_id),
+        INDEX idx_sta_overall_status (overall_status),
+        INDEX idx_sta_last_activity (last_activity_at)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS code_feedback (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        submission_id VARCHAR(36) NOT NULL,
+        mentor_id VARCHAR(100) NOT NULL,
+        student_id VARCHAR(100) NOT NULL,
+        line_number INT NOT NULL,
+        end_line INT NULL,
+        comment TEXT NOT NULL,
+        feedback_type VARCHAR(20) NULL DEFAULT 'suggestion',
+        is_resolved TINYINT(1) NULL DEFAULT 0,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_cf_submission (submission_id),
+        INDEX idx_cf_mentor (mentor_id),
+        INDEX idx_cf_student (student_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS direct_messages (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        sender_id VARCHAR(100) NOT NULL,
+        receiver_id VARCHAR(100) NOT NULL,
+        message TEXT NOT NULL,
+        message_type VARCHAR(20) NULL DEFAULT 'text',
+        file_url VARCHAR(500) NULL,
+        is_read TINYINT(1) NULL DEFAULT 0,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_dm_sender (sender_id),
+        INDEX idx_dm_receiver (receiver_id),
+        INDEX idx_dm_conversation (sender_id, receiver_id),
+        INDEX idx_dm_created (created_at)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS prescan_users (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        hashed_password VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255) NOT NULL,
+        role VARCHAR(20) NOT NULL DEFAULT 'candidate',
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_prescan_users_email (email)
+    )
+    """,
+]
+
 
 class _AsyncCursorWrapper:
     """Wraps a synchronous pymysql cursor so callers can ``await`` its methods."""
@@ -268,21 +726,50 @@ async def get_tenant_pool_by_db_url(db_url: str) -> "PyMySQLPool":
     return pool
 
 
+def resolve_tenant_db_url(*, db_url: str | None, db_secret_ref: str | None) -> str | None:
+    """
+    Resolve tenant DB connection URL from direct URL or external secret reference.
+
+    Supported reference formats:
+    - env://VAR_NAME  -> reads process environment variable VAR_NAME
+    """
+    direct = (db_url or "").strip()
+    if direct:
+        return direct
+    ref = (db_secret_ref or "").strip()
+    if not ref:
+        return None
+    if ref.lower().startswith("env://"):
+        env_key = ref[6:].strip()
+        if not env_key:
+            raise RuntimeError("Invalid tenant DB secret reference: missing env key")
+        value = (os.getenv(env_key, "") or "").strip()
+        if not value:
+            raise RuntimeError(f"Tenant DB secret env var '{env_key}' is empty")
+        return value
+    raise RuntimeError("Unsupported tenant DB secret reference. Use env://VAR_NAME")
+
+
 async def get_tenant_pool_by_org_id(org_id: str | None) -> "PyMySQLPool | None":
     if not org_id:
         return None
     primary = await get_primary_pool()
     async with primary.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT db_url FROM organizations WHERE id = %s AND is_active = 1", (org_id,))
+            await cur.execute("SELECT db_url, db_secret_ref FROM organizations WHERE id = %s AND is_active = 1", (org_id,))
             row = await cur.fetchone()
-    db_url = (row or {}).get("db_url")
+    db_url = resolve_tenant_db_url(
+        db_url=(row or {}).get("db_url"),
+        db_secret_ref=(row or {}).get("db_secret_ref"),
+    )
     if not db_url:
         return None
     # Ensure tenant schema is ready at first touch for this org.
     if org_id not in _tenant_schema_checked:
         try:
             await asyncio.to_thread(_bootstrap_missing_tables_into_tenant, db_url)
+            tenant_pool = await get_tenant_pool_by_db_url(db_url)
+            await ensure_core_domain_tables(tenant_pool)
             _tenant_schema_checked.add(org_id)
         except Exception as exc:
             raise RuntimeError(f"Tenant schema bootstrap failed for org {org_id}: {exc}")
@@ -381,6 +868,32 @@ async def close_db() -> None:
             pass
     _tenant_pools.clear()
     _tenant_schema_checked.clear()
+
+
+async def ensure_core_domain_tables(pool: "PyMySQLPool | None" = None) -> None:
+    target_pool = pool or _pool
+    if target_pool is None:
+        return
+    async with target_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for sql in _CORE_DOMAIN_TABLES_SQL:
+                await cur.execute(sql)
+            for table_name in ("aptitude_tests", "global_tests"):
+                await cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = %s
+                      AND COLUMN_NAME = 'result_visibility'
+                    LIMIT 1
+                    """,
+                    (table_name,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute(
+                        f"ALTER TABLE `{table_name}` ADD COLUMN result_visibility VARCHAR(32) NULL DEFAULT 'immediate'"
+                    )
 
 
 # â"€â"€â"€ Prescan table DDL â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -727,6 +1240,7 @@ async def ensure_rbac_schema() -> None:
             code VARCHAR(64) NOT NULL UNIQUE,
             type ENUM('institutional','corporate') NOT NULL DEFAULT 'institutional',
             db_url TEXT NULL,
+            db_secret_ref VARCHAR(255) NULL,
             is_active TINYINT(1) NOT NULL DEFAULT 1,
             created_by VARCHAR(64) NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -785,6 +1299,15 @@ async def ensure_rbac_schema() -> None:
                 )
                 if not await cur.fetchone():
                     await cur.execute("ALTER TABLE users ADD COLUMN organization_id CHAR(36) NULL")
+                await cur.execute(
+                    """
+                    SELECT 1 FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'organizations' AND COLUMN_NAME = 'db_secret_ref'
+                    """,
+                    (settings.DB_NAME,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute("ALTER TABLE organizations ADD COLUMN db_secret_ref VARCHAR(255) NULL")
         print("[OK] RBAC schema verified.")
     except Exception as exc:
         print(f"[WARNING] RBAC schema migration (non-fatal): {exc}")
@@ -962,7 +1485,7 @@ async def run_startup_db_preflight(check_tenants: bool = True) -> dict:
     ]
     required_columns = {
         "users": ["id", "email", "password", "role", "organization_id", "status"],
-        "organizations": ["id", "name", "code", "db_url", "is_active"],
+        "organizations": ["id", "name", "code", "db_url", "db_secret_ref", "is_active"],
     }
 
     missing_tables: list[str] = []
@@ -1011,19 +1534,58 @@ async def run_startup_db_preflight(check_tenants: bool = True) -> dict:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT id, name, db_url FROM organizations WHERE is_active = 1 AND db_url IS NOT NULL AND TRIM(db_url) != ''"
+                    """
+                    SELECT id, name, db_url, db_secret_ref
+                    FROM organizations
+                    WHERE is_active = 1
+                      AND (
+                        (db_url IS NOT NULL AND TRIM(db_url) != '')
+                        OR (db_secret_ref IS NOT NULL AND TRIM(db_secret_ref) != '')
+                      )
+                    """
                 )
                 orgs = await cur.fetchall() or []
 
         for org in orgs:
             org_id = str(org.get("id") or "")
             org_name = str(org.get("name") or "")
-            db_url = str(org.get("db_url") or "").strip()
+            db_url = resolve_tenant_db_url(
+                db_url=org.get("db_url"),
+                db_secret_ref=org.get("db_secret_ref"),
+            ) or ""
             if not db_url:
                 continue
             try:
                 _ = await get_tenant_pool_by_db_url(db_url)
-                summary["tenants"].append({"org_id": org_id, "org_name": org_name, "ok": True})
+                # Verify tenant functional tables for aptitude/sql/communication/coding/submissions.
+                missing_tables: list[str] = []
+                pool = await get_tenant_pool_by_db_url(db_url)
+                async with pool.acquire() as tconn:
+                    async with tconn.cursor() as tcur:
+                        for table_name in _REQUIRED_TENANT_DOMAIN_TABLES:
+                            await tcur.execute(
+                                """
+                                SELECT 1
+                                FROM information_schema.tables
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+                                LIMIT 1
+                                """,
+                                (table_name,),
+                            )
+                            if not await tcur.fetchone():
+                                missing_tables.append(table_name)
+                ok = len(missing_tables) == 0
+                summary["tenants"].append(
+                    {
+                        "org_id": org_id,
+                        "org_name": org_name,
+                        "ok": ok,
+                        "missing_tables": missing_tables,
+                    }
+                )
+                if not ok:
+                    summary["ok"] = False
+                    summary["tenant_ok"] = False
             except Exception as exc:
                 summary["tenants"].append({"org_id": org_id, "org_name": org_name, "ok": False, "error": str(exc)})
                 summary["ok"] = False
@@ -1108,7 +1670,15 @@ async def reconcile_active_tenant_schemas() -> list[dict]:
     async with primary.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, name, db_url FROM organizations WHERE is_active = 1 AND db_url IS NOT NULL AND TRIM(db_url) != ''"
+                """
+                SELECT id, name, db_url, db_secret_ref
+                FROM organizations
+                WHERE is_active = 1
+                  AND (
+                    (db_url IS NOT NULL AND TRIM(db_url) != '')
+                    OR (db_secret_ref IS NOT NULL AND TRIM(db_secret_ref) != '')
+                  )
+                """
             )
             orgs = await cur.fetchall() or []
 
@@ -1116,7 +1686,10 @@ async def reconcile_active_tenant_schemas() -> list[dict]:
     for org in orgs:
         org_id = str(org.get("id") or "")
         org_name = str(org.get("name") or "")
-        db_url = str(org.get("db_url") or "").strip()
+        db_url = resolve_tenant_db_url(
+            db_url=org.get("db_url"),
+            db_secret_ref=org.get("db_secret_ref"),
+        ) or ""
         if not db_url:
             continue
         try:

@@ -4,10 +4,9 @@ environment_scan.py
 REST API router for the environment scan (preScan) feature.
 Adapted from preScan/backend/routers/{sessions,scans,mobile_link}.py.
 
-Auth pattern follows the main backend convention: userId is passed in the
-request body (or as a query param for GET endpoints). No JWT; the caller is
-responsible for supplying a valid userId from the session stored in the
-browser.
+Auth pattern is JWT-backed via middleware in ``main.py``.
+Client-supplied ``userId`` is treated as optional legacy input and is validated
+against the authenticated actor to prevent IDOR.
 """
 from __future__ import annotations
 
@@ -89,6 +88,20 @@ async def _get_user(user_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+async def _effective_user(request: Request, requested_user_id: str | None = None) -> dict:
+    """Resolve actor identity from JWT middleware and block userId spoofing."""
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authenticated user")
+    user = await _get_user(actor_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    requested = (requested_user_id or "").strip()
+    if requested and requested != actor_id and user.get("role") not in ("admin", "organization_admin", "mentor"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User mismatch")
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -107,8 +120,9 @@ class RetryBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/exams")
-async def list_exams(userId: str = Query(...)):
+async def list_exams(request: Request, userId: str | None = Query(default=None)):
     """Return all active exams."""
+    await _effective_user(request, userId)
     db = get_prescan_db()
     rows = await db.fetchall("SELECT * FROM prescan_exams WHERE is_active = 1 ORDER BY title")
     return [dict(r) for r in rows]
@@ -126,9 +140,8 @@ async def create_session(body: CreateSessionBody, request: Request):
     """
     db = get_prescan_db()
 
-    user = await _get_user(body.userId)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    user = await _effective_user(request, body.userId)
+    actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
     # Verify exam exists and is active
     exam = await db.fetchone(
@@ -141,7 +154,7 @@ async def create_session(body: CreateSessionBody, request: Request):
         )
 
     try:
-        session = await create_exam_session(db, body.userId, body.exam_id)
+        session = await create_exam_session(db, actor_id, body.exam_id)
     except Exception as exc:
         logger.error("Failed to create exam session: %s", exc)
         raise HTTPException(
@@ -166,11 +179,11 @@ async def create_session(body: CreateSessionBody, request: Request):
 
     logger.info(
         "Exam session created: id=%d candidate=%s exam=%d scan=%d",
-        session["id"], body.userId, body.exam_id, scan["id"],
+        session["id"], actor_id, body.exam_id, scan["id"],
     )
     _audit.log_proctor_event(
         event_type=AuditEventType.PROCTOR_SESSION_STARTED,
-        student_id=body.userId,
+        student_id=actor_id,
         ip_address=request.client.host if request.client else None,
         session_id=str(session["id"]),
         details={"exam_id": body.exam_id, "room_scan_id": scan["id"]},
@@ -178,7 +191,7 @@ async def create_session(body: CreateSessionBody, request: Request):
 
     return {
         "id": session["id"],
-        "candidate_id": body.userId,
+        "candidate_id": actor_id,
         "exam_id": body.exam_id,
         "session_token": session_token,
         "mobile_token": mobile_token,
@@ -191,13 +204,12 @@ async def create_session(body: CreateSessionBody, request: Request):
 
 
 @router.get("/sessions")
-async def list_sessions(userId: str = Query(...)):
+async def list_sessions(request: Request, userId: str | None = Query(default=None)):
     """List exam sessions for the given user."""
     db = get_prescan_db()
 
-    user = await _get_user(userId)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    user = await _effective_user(request, userId)
+    actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
     role = user.get("role", "")
 
@@ -239,7 +251,7 @@ async def list_sessions(userId: str = Query(...)):
             WHERE es.candidate_id = %s
             ORDER BY es.created_at DESC
             """,
-            (userId,),
+            (actor_id,),
         )
 
     result = []
@@ -252,13 +264,12 @@ async def list_sessions(userId: str = Query(...)):
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: int, userId: str = Query(...)):
+async def get_session(request: Request, session_id: int, userId: str | None = Query(default=None)):
     """Get session status and the latest scan result."""
     db = get_prescan_db()
 
-    user = await _get_user(userId)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    user = await _effective_user(request, userId)
+    actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
     session = await db.fetchone(
         """
@@ -273,7 +284,7 @@ async def get_session(session_id: int, userId: str = Query(...)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found")
 
     role = user.get("role", "")
-    if role not in ("admin", "mentor") and str(session["candidate_id"]) != str(userId):
+    if role not in ("admin", "mentor", "organization_admin") and str(session["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     scan = await db.fetchone(
@@ -297,13 +308,12 @@ async def get_session(session_id: int, userId: str = Query(...)):
 # ---------------------------------------------------------------------------
 
 @router.get("/scans/{scan_id}")
-async def get_scan(scan_id: int, userId: str = Query(...)):
+async def get_scan(request: Request, scan_id: int, userId: str | None = Query(default=None)):
     """Get scan details including per-angle frame summary."""
     db = get_prescan_db()
 
-    user = await _get_user(userId)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    user = await _effective_user(request, userId)
+    actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
     scan = await db.fetchone(
         """
@@ -320,7 +330,7 @@ async def get_scan(scan_id: int, userId: str = Query(...)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Scan {scan_id} not found")
 
     role = user.get("role", "")
-    if role not in ("admin", "mentor") and str(scan["candidate_id"]) != str(userId):
+    if role not in ("admin", "mentor", "organization_admin") and str(scan["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     scan_dict = _serialize_scan(dict(scan))
@@ -354,13 +364,12 @@ async def get_scan(scan_id: int, userId: str = Query(...)):
 
 
 @router.post("/scans/{scan_id}/retry", status_code=status.HTTP_201_CREATED)
-async def retry_scan(scan_id: int, body: RetryBody):
+async def retry_scan(scan_id: int, body: RetryBody, request: Request):
     """Create a new room_scan for the same session (only if previous was incomplete/rejected)."""
     db = get_prescan_db()
 
-    user = await _get_user(body.userId)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    user = await _effective_user(request, body.userId)
+    actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
     old_scan = await db.fetchone(
         """
@@ -375,7 +384,7 @@ async def retry_scan(scan_id: int, body: RetryBody):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Scan {scan_id} not found")
 
     role = user.get("role", "")
-    if role not in ("admin", "mentor") and str(old_scan["candidate_id"]) != str(body.userId):
+    if role not in ("admin", "mentor", "organization_admin") and str(old_scan["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     allowed_verdicts = {"incomplete", "rejected", None}
@@ -398,8 +407,9 @@ async def retry_scan(scan_id: int, body: RetryBody):
 
 @router.get("/scans/{scan_id}/frames")
 async def list_frames(
+    request: Request,
     scan_id: int,
-    userId: str = Query(...),
+    userId: str | None = Query(default=None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     flagged_only: bool = Query(False),
@@ -407,9 +417,8 @@ async def list_frames(
     """Paginated frame list for proctor review."""
     db = get_prescan_db()
 
-    user = await _get_user(userId)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    user = await _effective_user(request, userId)
+    actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
     scan = await db.fetchone(
         """
@@ -424,7 +433,7 @@ async def list_frames(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Scan {scan_id} not found")
 
     role = user.get("role", "")
-    if role not in ("admin", "mentor") and str(scan["candidate_id"]) != str(userId):
+    if role not in ("admin", "mentor", "organization_admin") and str(scan["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     offset = (page - 1) * page_size

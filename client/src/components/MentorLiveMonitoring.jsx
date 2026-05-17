@@ -1,212 +1,202 @@
-import { useState, useEffect } from 'react'
-import { AlertTriangle, Activity, CheckCircle, Clock, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Activity, CheckCircle, Clock, RefreshCw, Pause, Play, Trash2, Wifi, WifiOff } from 'lucide-react'
 import socketService from '../services/socketService'
+
+const MAX_UPDATES = 60
+const MAX_ALERTS = 40
+
+const formatLabel = (value = '') => String(value).replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+
+const formatTime = (date) => {
+    if (!date) return 'Unknown time'
+    const d = new Date(date)
+    if (Number.isNaN(d.getTime())) return 'Unknown time'
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 
 function MentorLiveMonitoring({ user }) {
     const [liveUpdates, setLiveUpdates] = useState([])
     const [liveAlerts, setLiveAlerts] = useState([])
+    const [activeSubmissions, setActiveSubmissions] = useState(new Set())
     const [isMonitoring, setIsMonitoring] = useState(false)
-    const [activeSubmissions, setActiveSubmissions] = useState(new Set()) // Track students currently submitting
-    const [alertCount, setAlertCount] = useState(0)
+    const [lastEventAt, setLastEventAt] = useState(null)
+    const [feedPaused, setFeedPaused] = useState(false)
+    const [severityFilter, setSeverityFilter] = useState('all')
+    const feedPausedRef = useRef(false)
 
     useEffect(() => {
-        // Join monitoring room as mentor
-        socketService.joinMonitoring(user.id, 'mentor')
+        feedPausedRef.current = feedPaused
+    }, [feedPaused])
+
+    useEffect(() => {
+        socketService.connect()
+        socketService.joinMonitoring(user.id, 'mentor', user.id)
         setIsMonitoring(true)
 
-        // Listen for monitoring connected
-        socketService.onMonitoringConnected((data) => {
-            console.log('✅ Joined live monitoring:', data)
-        })
+        const handleConnected = () => setIsMonitoring(true)
+        const handleDisconnected = () => setIsMonitoring(false)
 
-        // Listen for live updates
-        socketService.onLiveUpdate((update) => {
-            setLiveUpdates(prev => [update, ...prev.slice(0, 49)]) // Keep last 50 updates
-            
-            // Track active submissions
-            setActiveSubmissions(prev => {
-                const updated = new Set(prev)
-                if (update.type === 'submission_started') {
-                    updated.add(update.studentId)
-                    console.log(`📊 Student ${update.studentName} started - Total working: ${updated.size}`)
-                } else if (update.type === 'submission_completed') {
-                    updated.delete(update.studentId)
-                    console.log(`✅ Student ${update.studentName} completed - Total working: ${updated.size}`)
-                }
-                return updated
+        const handleUpdate = (rawUpdate = {}) => {
+            const update = {
+                ...rawUpdate,
+                type: rawUpdate.type || 'activity',
+                studentName: rawUpdate.studentName || (rawUpdate.studentId ? `Student ${rawUpdate.studentId}` : 'Student'),
+                timestamp: rawUpdate.timestamp || new Date().toISOString(),
+            }
+            setLastEventAt(update.timestamp)
+
+            setActiveSubmissions((prev) => {
+                const next = new Set(prev)
+                if (update.type === 'submission_started' && update.studentId) next.add(update.studentId)
+                if (update.type === 'submission_completed' && update.studentId) next.delete(update.studentId)
+                return next
             })
-        })
 
-        // Listen for live alerts
-        socketService.onLiveAlert((alert) => {
-            setLiveAlerts(prev => [alert, ...prev.slice(0, 29)]) // Keep last 30 alerts
-            setAlertCount(prev => prev + 1)
-        })
+            if (feedPausedRef.current) return
+            setLiveUpdates((prev) => [update, ...prev.slice(0, MAX_UPDATES - 1)])
+        }
+
+        const handleAlert = (rawAlert = {}) => {
+            const alert = {
+                ...rawAlert,
+                severity: rawAlert.severity || 'warning',
+                studentName: rawAlert.studentName || (rawAlert.studentId ? `Student ${rawAlert.studentId}` : 'Student'),
+                violationType: rawAlert.violationType || 'unknown',
+                timestamp: rawAlert.timestamp || new Date().toISOString(),
+            }
+            setLastEventAt(alert.timestamp)
+            if (feedPausedRef.current) return
+            setLiveAlerts((prev) => [alert, ...prev.slice(0, MAX_ALERTS - 1)])
+        }
+
+        socketService.onMonitoringConnected(handleConnected)
+        socketService.on('disconnect', handleDisconnected)
+        socketService.onLiveUpdate(handleUpdate)
+        socketService.onLiveAlert(handleAlert)
 
         return () => {
-            socketService.disconnect()
+            socketService.removeListener('monitoring_connected')
+            socketService.removeListener('disconnect')
+            socketService.removeListener('live_update')
+            socketService.removeListener('live_alert')
             setIsMonitoring(false)
         }
     }, [user.id])
 
-    const dismissAlert = (index) => {
-        setLiveAlerts(prev => prev.filter((_, i) => i !== index))
+    const filteredAlerts = useMemo(() => {
+        if (severityFilter === 'all') return liveAlerts
+        return liveAlerts.filter((a) => (a.severity || '').toLowerCase() === severityFilter)
+    }, [liveAlerts, severityFilter])
+
+    const clearFeed = () => {
+        const ok = window.confirm('Clear monitoring feed items? This only clears your local view.')
+        if (!ok) return
+        setLiveAlerts([])
+        setLiveUpdates([])
     }
 
     const getUpdateIcon = (type) => {
-        switch (type) {
-            case 'submission_started':
-                return <Activity className="w-4 h-4 text-blue-500" />
-            case 'submission_completed':
-                return <CheckCircle className="w-4 h-4 text-green-500" />
-            case 'progress_update':
-                return <Clock className="w-4 h-4 text-yellow-500" />
-            case 'test_failed':
-                return <AlertTriangle className="w-4 h-4 text-orange-500" />
-            default:
-                return <Activity className="w-4 h-4 text-gray-500" />
-        }
-    }
-
-    const formatTime = (date) => {
-        return new Date(date).toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit' 
-        })
+        if (type === 'submission_started') return <Activity size={15} />
+        if (type === 'submission_completed') return <CheckCircle size={15} />
+        if (type === 'progress_update') return <Clock size={15} />
+        return <Activity size={15} />
     }
 
     return (
-        <div className="live-monitoring-container">
-            <h2 className="text-2xl font-bold mb-6">📊 Live Student Monitoring</h2>
-
-            {/* Status Bar */}
-            <div className="status-bar">
-                <div className={`status-item ${isMonitoring ? 'active' : 'inactive'}`}>
-                    <div className="status-dot"></div>
-                    <span>{isMonitoring ? 'Live Monitoring Active' : 'Not Monitoring'}</span>
+        <div className="live-monitoring-container dashboard-panel">
+            <div className="monitoring-topbar">
+                <div>
+                    <h2 className="panel-title" style={{ marginBottom: '0.4rem' }}>
+                        <Activity size={20} color="#3b82f6" />
+                        Live Student Monitoring
+                    </h2>
+                    <p className="monitoring-subtitle">
+                        Follow student exam activity in real time and triage proctoring alerts quickly.
+                    </p>
                 </div>
-                <div className="status-item">
-                    <span className="font-semibold text-blue-600">{activeSubmissions.size}</span>
-                    <span className="ml-2">Students Working</span>
-                </div>
-                <div className="status-item">
-                    <span className="font-semibold text-red-600">{alertCount}</span>
-                    <span className="ml-2">Alerts</span>
+                <div className="monitoring-actions">
+                    <button className="view-all-btn" onClick={() => setFeedPaused((p) => !p)}>
+                        {feedPaused ? <Play size={14} /> : <Pause size={14} />}
+                        {feedPaused ? 'Resume Feed' : 'Pause Feed'}
+                    </button>
+                    <button className="view-all-btn" onClick={clearFeed}>
+                        <Trash2 size={14} />
+                        Clear Feed
+                    </button>
                 </div>
             </div>
 
-            <div className="flex gap-6 mt-6">
-                {/* Live Alerts Section */}
-                <div className="flex-1 max-w-md">
-                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <AlertTriangle size={20} className="text-red-500" />
-                        Proctoring Alerts
-                    </h3>
-                    
-                    <div className="alerts-list">
-                        {liveAlerts.length === 0 ? (
-                            <div className="empty-state">No alerts</div>
-                        ) : (
-                            liveAlerts.map((alert, idx) => (
-                                <div 
-                                    key={idx} 
-                                    className={`alert-item severity-${alert.severity}`}
-                                >
-                                    <div className="alert-header">
-                                        <span className="font-semibold">
-                                            {alert.studentName || `Student ${alert.studentId}`}
-                                        </span>
-                                        <button 
-                                            className="dismiss-btn"
-                                            onClick={() => dismissAlert(idx)}
-                                            title="Dismiss"
-                                        >
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-                                    <div className="alert-body">
-                                        <div className="violation-type">
-                                            {alert.violationType.replace(/_/g, ' ').toUpperCase()}
-                                        </div>
-                                        <div className="severity-badge">
-                                            {alert.severity.toUpperCase()}
-                                        </div>
-                                    </div>
-                                    <div className="alert-time">
-                                        {formatTime(alert.timestamp)}
-                                    </div>
-                                    {alert.requiresAction && (
-                                        <div className="requires-action">
-                                            ⚠️ Requires immediate action
-                                        </div>
-                                    )}
-                                </div>
-                            ))
-                        )}
-                    </div>
+            <div className="status-bar">
+                {feedPaused && <div className="status-item inactive"><span>Feed Paused</span></div>}
+                <div className={`status-item ${isMonitoring ? 'active' : 'inactive'}`}>
+                    <div className="status-dot"></div>
+                    {isMonitoring ? <Wifi size={14} /> : <WifiOff size={14} />}
+                    <span>{isMonitoring ? 'Monitoring Connected' : 'Connection Lost'}</span>
                 </div>
+                <div className="status-item">
+                    <RefreshCw size={14} />
+                    <span>Last Event: {lastEventAt ? formatTime(lastEventAt) : 'Waiting'}</span>
+                </div>
+                <div className="status-item"><span>{activeSubmissions.size}</span><span>Students Working</span></div>
+                <div className="status-item"><span>{liveAlerts.length}</span><span>Total Alerts</span></div>
+            </div>
 
-                {/* Live Updates Section */}
-                <div className="flex-1">
-                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <Activity size={20} className="text-blue-500" />
-                        Live Activity Feed
-                    </h3>
-                    
+            <div className="monitoring-grid">
+                <section className="monitoring-card">
+                    <div className="monitoring-card-header">
+                        <h3><AlertTriangle size={18} color="#ef4444" /> Proctoring Alerts</h3>
+                        <select
+                            value={severityFilter}
+                            onChange={(e) => setSeverityFilter(e.target.value)}
+                            className="monitoring-select"
+                        >
+                            <option value="all">All Severity</option>
+                            <option value="critical">Critical</option>
+                            <option value="warning">Warning</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div className="alerts-list">
+                        {filteredAlerts.length === 0 ? (
+                            <div className="empty-state-small">No alerts for selected filter</div>
+                        ) : filteredAlerts.map((alert, idx) => (
+                            <div key={`${alert.timestamp}-${idx}`} className={`alert-item severity-${alert.severity}`}>
+                                <div className="alert-header">
+                                    <span className="font-semibold">{alert.studentName}</span>
+                                    <span className={`severity-badge severity-${alert.severity}`}>{alert.severity}</span>
+                                </div>
+                                <div className="alert-body">
+                                    <div className="violation-type">{formatLabel(alert.violationType)}</div>
+                                </div>
+                                <div className="alert-time">{formatTime(alert.timestamp)}</div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                <section className="monitoring-card">
+                    <div className="monitoring-card-header">
+                        <h3><Activity size={18} color="#3b82f6" /> Activity Feed</h3>
+                        <span className="monitoring-count">{liveUpdates.length} events</span>
+                    </div>
                     <div className="updates-list">
                         {liveUpdates.length === 0 ? (
-                            <div className="empty-state">Waiting for activity...</div>
-                        ) : (
-                            liveUpdates.map((update, idx) => (
-                                <div key={idx} className={`update-item type-${update.type}`}>
-                                    <div className="update-icon">
-                                        {getUpdateIcon(update.type)}
-                                    </div>
-                                    <div className="update-content">
-                                        <div className="update-title">
-                                            {update.type === 'submission_started' && (
-                                                <span>
-                                                    <strong>{update.studentName || `Student ${update.studentId}`}</strong> started {update.problemTitle}
-                                                    {update.isProctored && <span className="badge-proctored">Proctored</span>}
-                                                </span>
-                                            )}
-                                            {update.type === 'submission_completed' && (
-                                                <span>
-                                                    <strong>{update.studentName || `Student ${update.studentId}`}</strong> completed {update.problemTitle}
-                                                    <span className={`badge-status status-${update.status}`}>
-                                                        {update.status.toUpperCase()}
-                                                    </span>
-                                                    {update.score !== undefined && (
-                                                        <span className="badge-score">
-                                                            Score: {update.score}%
-                                                        </span>
-                                                    )}
-                                                </span>
-                                            )}
-                                            {update.type === 'progress_update' && (
-                                                <span>
-                                                    <strong>{update.studentName || `Student ${update.studentId}`}</strong> - {update.problemId}
-                                                    <span className="badge-progress">
-                                                        {update.progress}% complete
-                                                    </span>
-                                                </span>
-                                            )}
-                                            {update.type === 'test_failed' && (
-                                                <span>
-                                                    <strong>{update.studentName || `Student ${update.studentId}`}</strong> - Test failed: {update.testname}
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="update-time">
-                                        {formatTime(update.timestamp)}
+                            <div className="empty-state-small">Waiting for activity events...</div>
+                        ) : liveUpdates.map((update, idx) => (
+                            <div key={`${update.timestamp}-${idx}`} className={`update-item type-${update.type}`}>
+                                <div className="update-icon">{getUpdateIcon(update.type)}</div>
+                                <div className="update-content">
+                                    <div className="update-title">
+                                        <strong>{update.studentName}</strong> {formatLabel(update.type)}
+                                        {update.problemTitle ? <span> - {update.problemTitle}</span> : null}
+                                        {update.status ? <span className={`badge-status status-${update.status}`}>{update.status}</span> : null}
                                     </div>
                                 </div>
-                            ))
-                        )}
+                                <div className="update-time">{formatTime(update.timestamp)}</div>
+                            </div>
+                        ))}
                     </div>
-                </div>
+                </section>
             </div>
         </div>
     )

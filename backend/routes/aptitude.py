@@ -23,6 +23,14 @@ audit_logger = get_audit_logger()
 _aptitude_agent_counter: dict[str, int] = {}
 _APT_AGENT_COUNTER_MAX = 1000
 _APT_AGENT_INTERVAL = 5
+LEGACY_EXAM_TAKER_PERMISSIONS = {
+    "tests.view_allocated",
+    "tests.attempt",
+    "aptitude.attempt",
+    "coding.attempt",
+    "communication.attempt",
+    "results.view_own",
+}
 
 
 async def _insert_unified_proctor_event(
@@ -116,6 +124,7 @@ class AptitudeTestCreate(BaseModel):
     status: str = "live"
     questions: List[QuestionCreate]
     createdBy: str = ""
+    resultVisibility: str = "immediate"
 
 
 class AptitudeSubmit(BaseModel):
@@ -126,7 +135,8 @@ class AptitudeSubmit(BaseModel):
 
 
 class StatusUpdate(BaseModel):
-    status: str
+    status: Optional[str] = None
+    resultVisibility: Optional[str] = None
 
 
 class AllocateStudents(BaseModel):
@@ -154,7 +164,60 @@ def _clean_test(t: dict) -> dict:
         "createdBy": t.get("created_by"),
         "createdAt": str(t.get("created_at", "")),
         "questionCount": t.get("total_questions"),
+        "resultVisibility": t.get("result_visibility") or "immediate",
     }
+
+
+def _normalize_result_visibility(value: Optional[str]) -> str:
+    visibility = (value or "immediate").strip().lower()
+    if visibility not in {"immediate", "after_deadline", "manual"}:
+        raise HTTPException(400, "resultVisibility must be immediate, after_deadline, or manual")
+    return visibility
+
+
+def _as_utc(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _result_visibility_status(test_row: dict, *, can_manage: bool = False) -> dict:
+    visibility = _normalize_result_visibility(test_row.get("result_visibility") or "immediate")
+    if can_manage or visibility == "immediate":
+        return {"visible": True, "visibility": visibility, "reason": None}
+    if visibility == "after_deadline":
+        deadline = _as_utc(test_row.get("deadline"))
+        if deadline and datetime.now(timezone.utc) >= deadline:
+            return {"visible": True, "visibility": visibility, "reason": None}
+        return {
+            "visible": False,
+            "visibility": visibility,
+            "reason": "Results will be released after the test deadline.",
+        }
+    return {
+        "visible": False,
+        "visibility": visibility,
+        "reason": "Results are pending admin release.",
+    }
+
+
+def _mask_aptitude_submission(row: dict, visibility_state: dict) -> dict:
+    if visibility_state.get("visible"):
+        return row
+    locked = dict(row)
+    for key in ("score", "correctCount", "questionResults"):
+        if key in locked:
+            locked[key] = [] if key == "questionResults" else None
+    locked["resultsVisible"] = False
+    locked["resultVisibility"] = visibility_state.get("visibility")
+    locked["resultVisibilityReason"] = visibility_state.get("reason")
+    return locked
 
 
 def _fmt_dt(iso: Optional[str]) -> Optional[str]:
@@ -188,7 +251,9 @@ async def list_aptitude_tests(
     status: Optional[str] = None,
 ):
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
-    if not await _has_any_permission(actor, ["aptitude.create", "aptitude.assign", "aptitude.attempt"]):
+    can_manage = await _has_any_permission(actor, ["aptitude.create", "aptitude.assign", "aptitude.evaluate"])
+    can_attempt = await _has_any_permission(actor, ["aptitude.attempt"])
+    if not (can_manage or can_attempt):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     query = "SELECT * FROM aptitude_tests WHERE 1=1"
@@ -204,6 +269,9 @@ async def list_aptitude_tests(
     if status:
         query += " AND status = %s"
         params.append(status)
+    if can_attempt and not can_manage:
+        query += " AND id IN (SELECT test_id FROM test_student_allocations WHERE student_id = %s)"
+        params.append(actor)
 
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -258,6 +326,9 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
     pool = await get_pool()
     test_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
+    if body.maxAttempts == 0 or body.maxAttempts < -1:
+        raise HTTPException(400, "maxAttempts must be greater than 0, or -1 for unlimited")
+    result_visibility = _normalize_result_visibility(body.resultVisibility)
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -265,14 +336,16 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
                 """INSERT INTO aptitude_tests
                    (id, title, type, difficulty, duration, total_questions,
                     passing_score, max_tab_switches, max_attempts,
-                    start_time, deadline, description, status, created_by, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    start_time, deadline, description, status, created_by, created_at,
+                    result_visibility)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     test_id, body.title, "aptitude", body.difficulty,
                     body.duration, len(body.questions), body.passingScore,
                     body.maxTabSwitches, body.maxAttempts,
                     _fmt_dt(body.startTime), _fmt_dt(body.deadline),
                     body.description, body.status, actor, created_at,
+                    result_visibility,
                 ),
             )
 
@@ -312,6 +385,7 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
         "deadline": body.deadline,
         "description": body.description,
         "status": body.status,
+        "resultVisibility": result_visibility,
         "createdBy": actor,
         "createdAt": str(created_at),
     }
@@ -351,7 +425,7 @@ async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Requ
             row = await cur.fetchone()
             attempts_used = int((row or {}).get("cnt") or 0)
             max_attempts = int(test.get("max_attempts") or 1)
-            if attempts_used >= max_attempts:
+            if max_attempts != -1 and attempts_used >= max_attempts:
                 raise HTTPException(409, "Attempt limit reached")
 
             await cur.execute("SELECT * FROM aptitude_questions WHERE test_id = %s", (test_id,))
@@ -427,18 +501,38 @@ async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Requ
         action="Aptitude test submitted",
         details={"testId": test_id, "score": score, "status": status},
     )
+    visibility_state = _result_visibility_status(test, can_manage=can_assign)
+    submission_payload = {
+        "id": sub_id,
+        "score": score,
+        "status": status,
+        "correctCount": correct_count,
+        "totalQuestions": len(questions),
+        "tabSwitches": body.tabSwitches,
+        "timeSpent": body.timeSpent,
+        "questionResults": question_results,
+    }
+    if not visibility_state["visible"]:
+        submission_payload.update(
+            {
+                "score": None,
+                "correctCount": None,
+                "questionResults": [],
+                "resultsVisible": False,
+                "resultVisibility": visibility_state["visibility"],
+                "resultVisibilityReason": visibility_state["reason"],
+            }
+        )
+    else:
+        submission_payload["resultsVisible"] = True
+        submission_payload["resultVisibility"] = visibility_state["visibility"]
     return {
-        "submission": {
-            "id": sub_id,
-            "score": score,
-            "status": status,
-            "correctCount": correct_count,
-            "totalQuestions": len(questions),
-            "tabSwitches": body.tabSwitches,
-            "timeSpent": body.timeSpent,
-            "questionResults": question_results,
-        },
-        "message": "Congratulations! You passed the test!" if status == "passed" else "Keep practicing!",
+        "submission": submission_payload,
+        "message": (
+            "Your response was submitted. Results will be released by your organization."
+            if not visibility_state["visible"]
+            else ("Congratulations! You passed the test!" if status == "passed" else "Keep practicing!")
+        ),
     }
 
 
@@ -449,13 +543,25 @@ async def update_aptitude_status(test_id: str, body: StatusUpdate, request: Requ
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["aptitude.create"]):
         raise HTTPException(403, "Permission denied")
-    if body.status not in ("live", "ended"):
+    if body.status is not None and body.status not in ("live", "ended"):
         raise HTTPException(400, 'Invalid status. Must be "live" or "ended"')
+    result_visibility = _normalize_result_visibility(body.resultVisibility) if body.resultVisibility is not None else None
+    if body.status is None and result_visibility is None:
+        raise HTTPException(400, "No fields to update")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE aptitude_tests SET status = %s WHERE id = %s", (body.status, test_id))
+            updates = []
+            params = []
+            if body.status is not None:
+                updates.append("status = %s")
+                params.append(body.status)
+            if result_visibility is not None:
+                updates.append("result_visibility = %s")
+                params.append(result_visibility)
+            params.append(test_id)
+            await cur.execute(f"UPDATE aptitude_tests SET {', '.join(updates)} WHERE id = %s", params)
             if cur.rowcount == 0:
                 raise HTTPException(404, "Test not found")
         await conn.commit()
@@ -467,9 +573,9 @@ async def update_aptitude_status(test_id: str, body: StatusUpdate, request: Requ
         resource_id=test_id,
         resource_type="aptitude_test",
         action="Aptitude test status updated",
-        details={"status": body.status},
+        details={"status": body.status, "resultVisibility": result_visibility},
     )
-    return {"success": True, "status": body.status}
+    return {"success": True, "status": body.status, "resultVisibility": result_visibility}
 
 
 # ---------- Delete test ----------
@@ -533,9 +639,12 @@ async def list_aptitude_submissions(
     if not (can_assign or can_eval or (studentId and can_attempt and actor == studentId)):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
-    query = """SELECT s.*, u.name AS student_name
+    query = """SELECT s.*, u.name AS student_name,
+                      t.result_visibility AS test_result_visibility,
+                      t.deadline AS test_deadline
                FROM aptitude_submissions s
                JOIN users u ON s.student_id = u.id
+               LEFT JOIN aptitude_tests t ON t.id = s.test_id
                WHERE 1=1"""
     params: list = []
 
@@ -556,8 +665,17 @@ async def list_aptitude_submissions(
             await cur.execute(query, params)
             rows = await cur.fetchall()
 
-    return [
-        {
+    can_manage = can_assign or can_eval
+    output = []
+    for s in rows:
+        visibility_state = _result_visibility_status(
+            {
+                "result_visibility": s.get("test_result_visibility"),
+                "deadline": s.get("test_deadline"),
+            },
+            can_manage=can_manage,
+        )
+        item = {
             "id": s["id"],
             "testId": s["test_id"],
             "testTitle": s["test_title"],
@@ -571,8 +689,13 @@ async def list_aptitude_submissions(
             "timeSpent": s.get("time_spent"),
             "submittedAt": str(s.get("submitted_at", "")),
         }
-        for s in rows
-    ]
+        if visibility_state["visible"]:
+            item["resultsVisible"] = True
+            item["resultVisibility"] = visibility_state["visibility"]
+        else:
+            item = _mask_aptitude_submission(item, visibility_state)
+        output.append(item)
+    return output
 
 
 # ---------- Get single submission with question results ----------
@@ -585,9 +708,12 @@ async def get_aptitude_submission(submission_id: str, request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                """SELECT s.*, u.name AS student_name
+                """SELECT s.*, u.name AS student_name,
+                          t.result_visibility AS test_result_visibility,
+                          t.deadline AS test_deadline
                    FROM aptitude_submissions s
                    JOIN users u ON s.student_id = u.id
+                   LEFT JOIN aptitude_tests t ON t.id = s.test_id
                    WHERE s.id = %s""",
                 (submission_id,),
             )
@@ -606,7 +732,14 @@ async def get_aptitude_submission(submission_id: str, request: Request):
             )
             qr_rows = await cur.fetchall()
 
-    return {
+    visibility_state = _result_visibility_status(
+        {
+            "result_visibility": s.get("test_result_visibility"),
+            "deadline": s.get("test_deadline"),
+        },
+        can_manage=can_assign or can_eval,
+    )
+    item = {
         "id": s["id"],
         "testId": s["test_id"],
         "testTitle": s["test_title"],
@@ -632,6 +765,11 @@ async def get_aptitude_submission(submission_id: str, request: Request):
             for qr in qr_rows
         ],
     }
+    if visibility_state["visible"]:
+        item["resultsVisible"] = True
+        item["resultVisibility"] = visibility_state["visibility"]
+        return item
+    return _mask_aptitude_submission(item, visibility_state)
 
 
 # â”€â”€â”€ Test-Student Allocation routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -798,6 +936,8 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
             u = await cur.fetchone()
             if u and u.get("role") == "admin":
                 return True
+            if u and u.get("role") in ("student", "learner"):
+                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
             fmt = ",".join(["%s"] * len(permissions))
             await cur.execute(
                 f"""

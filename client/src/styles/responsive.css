@@ -108,13 +108,8 @@
     .live-monitoring-container {
         padding: 1rem !important;
     }
-    .live-monitoring-container .flex {
-        flex-direction: column !important;
-    }
-    .live-monitoring-container .max-w-lg,
-    .live-monitoring-container .max-w-md {
-        max-width: 100% !important;
-    }
+    .monitoring-grid { grid-template-columns: 1fr !important; }
+    .monitoring-topbar { flex-direction: column; align-items: stretch; }
     .status-bar {
         grid-template-columns: repeat(2, 1fr) !important;
         gap: 0.75rem !important;

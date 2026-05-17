@@ -101,6 +101,7 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                                         className="nav-group-header"
                                         onClick={() => toggleGroup(item.label)}
                                         aria-expanded={isExpanded}
+                                        data-expanded={isExpanded ? 'true' : 'false'}
                                     >
                                         <span className="nav-group-left">
                                             {item.icon}
@@ -115,14 +116,14 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                                         />
                                     </button>
                                     {isExpanded && (
-                                        <div className="nav-group-items">
+                                        <div className="nav-group-items" data-expanded={isExpanded ? 'true' : 'false'}>
                                             {item.children.map((child, idx) => (
                                                 <NavLink
                                                     key={idx}
                                                     to={child.path}
+                                                    end={child.end ?? true}
                                                     className={({ isActive }) => `nav-item nav-sub-item ${isActive ? 'active' : ''}`}
                                                     onClick={() => setSidebarOpen(false)}
-                                                    aria-current={({ isActive }) => isActive ? 'page' : undefined}
                                                 >
                                                     {child.icon}
                                                     <span>{child.label}</span>
@@ -139,9 +140,9 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                             <NavLink
                                 key={item.path}
                                 to={item.path}
+                                end={item.end ?? true}
                                 className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
                                 onClick={() => setSidebarOpen(false)}
-                                aria-current={({ isActive }) => isActive ? 'page' : undefined}
                             >
                                 {item.icon}
                                 <span>{item.label}</span>

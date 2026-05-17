@@ -22,6 +22,7 @@ from services.behavior_agent import (
     clear_behavior_data,
 )
 from database import get_pool
+import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/behavior", tags=["behavior-agent"])
@@ -48,6 +49,34 @@ async def _log_read_access(request: Request):
 
 
 router.dependencies.append(Depends(_log_read_access))
+
+
+async def _get_actor(request: Request) -> dict:
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor_id:
+        raise HTTPException(status_code=401, detail="Missing user context")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id, role FROM users WHERE id = %s LIMIT 1", (actor_id,))
+            actor = await cur.fetchone()
+            if not actor:
+                raise HTTPException(status_code=401, detail="Invalid user context")
+            return actor
+
+
+async def _require_behavior_view(request: Request) -> dict:
+    actor = await _get_actor(request)
+    if (actor.get("role") or "").lower() in {"admin", "organization_admin", "mentor", "org_user"}:
+        return actor
+    raise HTTPException(status_code=403, detail="Permission denied")
+
+
+async def _require_behavior_manage(request: Request) -> dict:
+    actor = await _get_actor(request)
+    if (actor.get("role") or "").lower() in {"admin", "organization_admin"}:
+        return actor
+    raise HTTPException(status_code=403, detail="Admin role required")
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -84,12 +113,20 @@ async def log_behavior_events(req: LogEventsRequest, request: Request):
 
     Called periodically (every ~15s) by the ProctoredCodeEditor.
     """
+    actor = await _get_actor(request)
+    actor_id = str(actor.get("id") or "")
+    actor_role = (actor.get("role") or "").lower()
+    privileged = actor_role in {"admin", "organization_admin", "mentor"}
+    requested_user_id = (req.user_id or "").strip()
+    if requested_user_id and requested_user_id != actor_id and not privileged:
+        raise HTTPException(status_code=403, detail="Cannot log behavior events for another user")
+    effective_user_id = requested_user_id if privileged and requested_user_id else actor_id
     try:
-        count = await save_behavior_events(req.session_id, req.user_id, req.events)
+        count = await save_behavior_events(req.session_id, effective_user_id, req.events)
         logger.info("Behavior events logged session=%s count=%d", req.session_id, count)
         audit_logger.log_event(
             AuditEventType.RESOURCE_ACCESSED,
-            user_id=req.user_id,
+            user_id=effective_user_id,
             ip_address=_client_ip(request),
             resource_id=req.session_id,
             resource_type="behavior_session",
@@ -107,6 +144,7 @@ async def analyze_session_behavior(req: AnalyzeRequest, request: Request):
 
     Returns trust score, component scores, anomalies, and AI insights.
     """
+    await _require_behavior_view(request)
     try:
         result = await agent_analyze_behavior(
             req.session_id,
@@ -128,8 +166,9 @@ async def analyze_session_behavior(req: AnalyzeRequest, request: Request):
 
 
 @router.post("/report")
-async def generate_behavior_report(req: ReportRequest):
+async def generate_behavior_report(req: ReportRequest, request: Request):
     """Generate a comprehensive AI-powered behavior report."""
+    await _require_behavior_view(request)
     try:
         report = await agent_generate_behavior_report(
             req.session_id,
@@ -143,8 +182,9 @@ async def generate_behavior_report(req: ReportRequest):
 
 
 @router.get("/sessions")
-async def list_behavior_sessions(limit: int = Query(50, ge=1, le=200)):
+async def list_behavior_sessions(request: Request, limit: int = Query(50, ge=1, le=200)):
     """List sessions with behavior events. Admin can select one to analyze."""
+    await _require_behavior_view(request)
     try:
         sessions = await get_behavior_sessions(limit)
         return {"sessions": sessions}
@@ -153,11 +193,12 @@ async def list_behavior_sessions(limit: int = Query(50, ge=1, le=200)):
 
 
 @router.get("/dashboard")
-async def behavior_dashboard():
+async def behavior_dashboard(request: Request):
     """Aggregate stats for the admin behavior analysis dashboard.
 
     Returns: total analyses, trust distribution, avg score, recently flagged.
     """
+    await _require_behavior_view(request)
     try:
         stats = await get_behavior_dashboard_stats()
         return stats
@@ -166,8 +207,9 @@ async def behavior_dashboard():
 
 
 @router.get("/analyses")
-async def list_behavior_analyses(limit: int = Query(50, ge=1, le=200)):
+async def list_behavior_analyses(request: Request, limit: int = Query(50, ge=1, le=200)):
     """List recent behavior analyses."""
+    await _require_behavior_view(request)
     try:
         analyses = await get_recent_behavior_analyses(limit)
         return {"analyses": analyses, "total": len(analyses)}
@@ -175,16 +217,9 @@ async def list_behavior_analyses(limit: int = Query(50, ge=1, le=200)):
         raise HTTPException(500, detail=f"Failed to fetch analyses: {e}")
 
 @router.delete("/clear")
-async def clear_all_behavior_data(adminId: str = Query(..., description="Admin user ID for authorization")):
+async def clear_all_behavior_data(request: Request):
     """Clear all behavior events and analyses (admin only)."""
-    # Validate admin role
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (adminId,))
-            user = await cur.fetchone()
-            if not user or user.get("role") != "admin":
-                raise HTTPException(403, detail="Admin role required")
+    await _require_behavior_manage(request)
     try:
         await clear_behavior_data()
         return {"status": "ok", "message": "All behavior data cleared."}
@@ -193,8 +228,9 @@ async def clear_all_behavior_data(adminId: str = Query(..., description="Admin u
 
 
 @router.get("/analysis/{analysis_id}")
-async def get_behavior_analysis(analysis_id: int):
+async def get_behavior_analysis(analysis_id: int, request: Request):
     """Get a single behavior analysis by ID with full details."""
+    await _require_behavior_view(request)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -223,8 +259,9 @@ async def get_behavior_analysis(analysis_id: int):
 
 
 @router.get("/session/{session_id}")
-async def get_session_behavior(session_id: str):
+async def get_session_behavior(session_id: str, request: Request):
     """Get all behavior analyses for a specific session."""
+    await _require_behavior_view(request)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:

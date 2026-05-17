@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Upload, FileCode, Trophy, List, Users, Medal, Activity, CheckCircle, TrendingUp, Clock, Plus, X, ChevronRight, Code, Trash2, Eye, AlertTriangle, FileText, BarChart2, Zap, Award, Sparkles, Brain, Target, XCircle, Search, Mail, Calendar, BookOpen, Settings, ClipboardList, Shield, Download } from 'lucide-react'
+import { LayoutDashboard, Upload, FileCode, Trophy, List, Users, Medal, Activity, CheckCircle, TrendingUp, Clock, Plus, X, ChevronRight, Code, Trash2, Eye, AlertTriangle, FileText, BarChart2, Zap, Award, Sparkles, Brain, Target, XCircle, Search, Mail, Calendar, BookOpen, Settings, ClipboardList, Shield, Download, MessageSquare, Flag, Star } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import DashboardLayout from '../components/DashboardLayout'
 import { AIChatbot, AIFloatingButton } from '../components/AIChatbot'
@@ -104,15 +104,26 @@ function MentorPortal() {
 function Dashboard({ user }) {
     const [stats, setStats] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+    const perms = Array.isArray(user?.permissions) ? user.permissions : []
+    const canViewAnalytics = user?.role === 'admin' || user?.role === 'organization_admin' || perms.includes('analytics.view')
 
     useEffect(() => {
+        if (!canViewAnalytics) {
+            setLoading(false)
+            setError('You do not have analytics permission to view dashboard metrics.')
+            return
+        }
         axios.get(`${API_BASE}/analytics/mentor/${user.id}`)
             .then(res => {
                 setStats(res.data)
                 setLoading(false)
             })
-            .catch(err => setLoading(false))
-    }, [user.id])
+            .catch(err => {
+                setError(err?.response?.data?.detail || 'Failed to load dashboard metrics')
+                setLoading(false)
+            })
+    }, [user.id, canViewAnalytics])
 
     const formatTimeAgo = (dateStr) => {
         if (!dateStr) return 'Never'
@@ -131,7 +142,42 @@ function Dashboard({ user }) {
     }
 
     if (loading) return <div className="loading-spinner"></div>
-    if (!stats) return <div>Error loading stats</div>
+    if (error) return <div className="dashboard-panel">{error}</div>
+    if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
+
+    const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+    const deltaPct = (current, previous) => {
+        const c = toNum(current)
+        const p = toNum(previous)
+        if (p <= 0) return c > 0 ? 100 : 0
+        return ((c - p) / p) * 100
+    }
+    const fmtDelta = (value) => {
+        const rounded = Math.round(value * 10) / 10
+        if (rounded > 0) return `+${rounded}%`
+        if (rounded < 0) return `${rounded}%`
+        return '0.0%'
+    }
+
+    const trendSeries = Array.isArray(stats.submissionTrends) ? stats.submissionTrends : []
+    const half = Math.max(1, Math.floor(trendSeries.length / 2))
+    const currentWindow = trendSeries.slice(-half).reduce((sum, i) => sum + toNum(i.count), 0)
+    const previousWindow = trendSeries.slice(-2 * half, -half).reduce((sum, i) => sum + toNum(i.count), 0)
+    const submissionsDelta = deltaPct(currentWindow, previousWindow)
+
+    const activity = Array.isArray(stats.recentActivity) ? stats.recentActivity : []
+    const completedNow = activity.slice(0, Math.max(1, Math.floor(activity.length / 2))).filter((a) => (a.status || '').toLowerCase() === 'accepted').length
+    const completedPrev = activity.slice(Math.max(1, Math.floor(activity.length / 2))).filter((a) => (a.status || '').toLowerCase() === 'accepted').length
+    const qualityDelta = deltaPct(completedNow, Math.max(1, completedPrev))
+    const codeDelta = deltaPct(toNum(stats.codeSubmissions), Math.max(1, toNum(stats.aptitudeSubmissions)))
+    const scoreDelta = deltaPct(toNum(stats.avgScore), 70)
+
+    const kpiCards = [
+        { label: 'Submission Velocity', value: `${currentWindow}`, delta: submissionsDelta, meta: 'current vs previous window' },
+        { label: 'Code Focus Delta', value: `${stats.codeSubmissions || 0}`, delta: codeDelta, meta: 'vs aptitude submissions' },
+        { label: 'Group Quality Delta', value: `${stats.avgScore || 0}%`, delta: scoreDelta, meta: 'against 70% baseline' },
+        { label: 'Accepted Runs Delta', value: `${completedNow}`, delta: qualityDelta, meta: 'recent accepted completions' },
+    ]
 
     return (
         <div className="dashboard-container animate-fadeIn">
@@ -201,6 +247,19 @@ function Dashboard({ user }) {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div className="kpi-trend-grid">
+                {kpiCards.map((kpi) => (
+                    <div key={kpi.label} className="kpi-trend-card">
+                        <div className="kpi-trend-label">{kpi.label}</div>
+                        <div className="kpi-trend-value">{kpi.value}</div>
+                        <div className="kpi-trend-meta">{kpi.meta}</div>
+                        <div className={`kpi-trend-delta ${kpi.delta > 0 ? 'up' : kpi.delta < 0 ? 'down' : 'flat'}`}>
+                            {fmtDelta(kpi.delta)}
+                        </div>
+                    </div>
+                ))}
             </div>
 
             {/* Charts Section */}
@@ -1287,6 +1346,163 @@ function Leaderboard({ user }) {
 }
 
 // ==================== ALL SUBMISSIONS WITH AI EVALUATION ====================
+function MentorFeedbackModal({ submission, mentorId, onClose }) {
+    const [comment, setComment] = useState('')
+    const [rating, setRating] = useState(0)
+    const [submitting, setSubmitting] = useState(false)
+    const [existingFeedback, setExistingFeedback] = useState([])
+    const [loadingFeedback, setLoadingFeedback] = useState(true)
+
+    useEffect(() => {
+        axios.get(`${API_BASE}/submissions/${submission.id}/feedback`)
+            .then(r => setExistingFeedback(r.data?.feedback || []))
+            .catch(() => {})
+            .finally(() => setLoadingFeedback(false))
+    }, [submission.id])
+
+    const handleSubmit = async () => {
+        if (!comment.trim()) return
+        setSubmitting(true)
+        try {
+            await axios.post(`${API_BASE}/submissions/${submission.id}/feedback`, { mentor_id: mentorId, comment: comment.trim(), rating: rating || null })
+            const r = await axios.get(`${API_BASE}/submissions/${submission.id}/feedback`)
+            setExistingFeedback(r.data?.feedback || [])
+            setComment('')
+            setRating(0)
+        } catch (e) {
+            alert(e.response?.data?.detail || 'Failed to save feedback')
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+                <div className="modal-header">
+                    <div className="modal-title-with-icon">
+                        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MessageSquare size={20} color="white" />
+                        </div>
+                        <div>
+                            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Feedback</h2>
+                            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{submission.studentName} — {submission.itemTitle || submission.testTitle}</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="modal-close"><X size={20} /></button>
+                </div>
+                <div className="modal-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+                    {!loadingFeedback && existingFeedback.length > 0 && (
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <p style={{ margin: '0 0 0.75rem', fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-muted)' }}>Previous Feedback</p>
+                            {existingFeedback.map(fb => (
+                                <div key={fb.id} style={{ padding: '0.85rem 1rem', background: 'rgba(139,92,246,0.07)', borderRadius: 10, border: '1px solid rgba(139,92,246,0.15)', marginBottom: '0.6rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                                        <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{fb.mentor_name || 'Mentor'}</span>
+                                        <div style={{ display: 'flex', gap: 2 }}>
+                                            {fb.rating && [...Array(5)].map((_, i) => <Star key={i} size={12} fill={i < fb.rating ? '#f59e0b' : 'none'} color={i < fb.rating ? '#f59e0b' : 'rgba(255,255,255,0.2)'} />)}
+                                        </div>
+                                    </div>
+                                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'rgba(255,255,255,0.75)' }}>{fb.comment}</p>
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>{new Date(fb.created_at).toLocaleString()}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div>
+                        <p style={{ margin: '0 0 0.5rem', fontWeight: 600, fontSize: '0.875rem' }}>Add Feedback</p>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: '0.75rem' }}>
+                            {[1,2,3,4,5].map(n => (
+                                <button key={n} type="button" onClick={() => setRating(n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
+                                    <Star size={20} fill={n <= rating ? '#f59e0b' : 'none'} color={n <= rating ? '#f59e0b' : 'rgba(255,255,255,0.2)'} />
+                                </button>
+                            ))}
+                            {rating > 0 && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', alignSelf: 'center' }}>{rating}/5</span>}
+                        </div>
+                        <textarea
+                            value={comment}
+                            onChange={e => setComment(e.target.value)}
+                            placeholder="Write your feedback or comments for the student..."
+                            rows={4}
+                            style={{ width: '100%', padding: '0.75rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.875rem', boxSizing: 'border-box' }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
+                            <button onClick={onClose} style={{ padding: '0.6rem 1.25rem', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'rgba(255,255,255,0.6)', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                            <button onClick={handleSubmit} disabled={!comment.trim() || submitting} style={{ padding: '0.6rem 1.5rem', background: comment.trim() ? 'linear-gradient(135deg,#8b5cf6,#6366f1)' : 'rgba(139,92,246,0.2)', border: 'none', borderRadius: 8, color: comment.trim() ? 'white' : 'rgba(255,255,255,0.3)', fontWeight: 700, cursor: comment.trim() ? 'pointer' : 'not-allowed' }}>
+                                {submitting ? 'Saving...' : 'Submit Feedback'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function EscalateModal({ submission, mentorId, onClose }) {
+    const [reason, setReason] = useState('')
+    const [submitting, setSubmitting] = useState(false)
+    const [done, setDone] = useState(false)
+
+    const handleEscalate = async () => {
+        setSubmitting(true)
+        try {
+            await axios.post(`${API_BASE}/submissions/${submission.id}/escalate`, { mentor_id: mentorId, reason: reason.trim() })
+            setDone(true)
+        } catch (e) {
+            alert(e.response?.data?.detail || 'Failed to escalate')
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+                <div className="modal-header">
+                    <div className="modal-title-with-icon">
+                        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#ef4444,#f97316)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Flag size={20} color="white" />
+                        </div>
+                        <div>
+                            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Escalate to Admin</h2>
+                            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{submission.studentName}</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="modal-close"><X size={20} /></button>
+                </div>
+                <div className="modal-body">
+                    {done ? (
+                        <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                            <CheckCircle size={48} color="#10b981" style={{ marginBottom: '1rem' }} />
+                            <p style={{ fontWeight: 700, margin: '0 0 0.5rem' }}>Escalated Successfully</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>An admin will be notified to review this submission.</p>
+                            <button onClick={onClose} style={{ marginTop: '1rem', padding: '0.6rem 1.5rem', background: 'linear-gradient(135deg,#10b981,#06b6d4)', border: 'none', borderRadius: 8, color: 'white', fontWeight: 700, cursor: 'pointer' }}>Done</button>
+                        </div>
+                    ) : (
+                        <>
+                            <p style={{ margin: '0 0 1rem', color: 'rgba(255,255,255,0.7)', fontSize: '0.875rem' }}>Flag this submission for admin review. Provide a reason to help the admin prioritize.</p>
+                            <textarea
+                                value={reason}
+                                onChange={e => setReason(e.target.value)}
+                                placeholder="Reason for escalation (e.g. plagiarism concern, unusual score drop, integrity violation...)"
+                                rows={4}
+                                style={{ width: '100%', padding: '0.75rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'white', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.875rem', boxSizing: 'border-box' }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+                                <button onClick={onClose} style={{ padding: '0.6rem 1.25rem', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'rgba(255,255,255,0.6)', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                                <button onClick={handleEscalate} disabled={submitting} style={{ padding: '0.6rem 1.5rem', background: 'linear-gradient(135deg,#ef4444,#f97316)', border: 'none', borderRadius: 8, color: 'white', fontWeight: 700, cursor: 'pointer' }}>
+                                    {submitting ? 'Escalating...' : 'Flag for Admin'}
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
 function AllSubmissions({ user }) {
     const [submissions, setSubmissions] = useState([])
     const [aptitudeSubmissions, setAptitudeSubmissions] = useState([])
@@ -1297,6 +1513,8 @@ function AllSubmissions({ user }) {
     const [viewAptitudeResult, setViewAptitudeResult] = useState(null)
     const [viewGlobalReport, setViewGlobalReport] = useState(null)
     const [searchTerm, setSearchTerm] = useState('')
+    const [feedbackModal, setFeedbackModal] = useState(null)
+    const [escalateModal, setEscalateModal] = useState(null)
 
     const fetchSubmissions = () => {
         Promise.all([
@@ -1503,61 +1721,27 @@ function AllSubmissions({ user }) {
                                 </td>
                                 <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{new Date(sub.submittedAt).toLocaleString()}</td>
                                 <td>
-                                    {sub.subType === 'aptitude' ? (
-                                        <button
-                                            onClick={() => setViewAptitudeResult(sub)}
-                                            style={{
-                                                background: 'rgba(139, 92, 246, 0.1)',
-                                                border: 'none',
-                                                color: '#8b5cf6',
-                                                padding: '0.4rem 0.75rem',
-                                                borderRadius: '6px',
-                                                cursor: 'pointer',
-                                                fontSize: '0.8rem',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '4px'
-                                            }}
-                                        >
-                                            <Eye size={14} /> Results
+                                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                        {sub.subType === 'aptitude' ? (
+                                            <button onClick={() => setViewAptitudeResult(sub)} style={{ background: 'rgba(139,92,246,0.1)', border: 'none', color: '#8b5cf6', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                                <Eye size={13} /> Results
+                                            </button>
+                                        ) : sub.subType === 'global' ? (
+                                            <button onClick={() => setViewGlobalReport(sub.id)} style={{ background: 'rgba(59,130,246,0.1)', border: 'none', color: '#3b82f6', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                                <Eye size={13} /> Report
+                                            </button>
+                                        ) : (
+                                            <button onClick={() => setViewReport(sub)} style={{ background: 'rgba(59,130,246,0.1)', border: 'none', color: '#3b82f6', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                                <Eye size={13} /> Report
+                                            </button>
+                                        )}
+                                        <button onClick={() => setFeedbackModal(sub)} style={{ background: 'rgba(139,92,246,0.1)', border: 'none', color: '#a78bfa', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '3px' }} title="Add feedback">
+                                            <MessageSquare size={13} /> Feedback
                                         </button>
-                                    ) : sub.subType === 'global' ? (
-                                        <button
-                                            onClick={() => setViewGlobalReport(sub.id)}
-                                            style={{
-                                                background: 'rgba(59, 130, 246, 0.1)',
-                                                border: 'none',
-                                                color: '#3b82f6',
-                                                padding: '0.4rem 0.75rem',
-                                                borderRadius: '6px',
-                                                cursor: 'pointer',
-                                                fontSize: '0.8rem',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '4px'
-                                            }}
-                                        >
-                                            <Eye size={14} /> Full Report
+                                        <button onClick={() => setEscalateModal(sub)} style={{ background: 'rgba(239,68,68,0.08)', border: 'none', color: '#f87171', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '3px' }} title="Flag for admin review">
+                                            <Flag size={13} /> Escalate
                                         </button>
-                                    ) : (
-                                        <button
-                                            onClick={() => setViewReport(sub)}
-                                            style={{
-                                                background: 'rgba(59, 130, 246, 0.1)',
-                                                border: 'none',
-                                                color: '#3b82f6',
-                                                padding: '0.4rem 0.75rem',
-                                                borderRadius: '6px',
-                                                cursor: 'pointer',
-                                                fontSize: '0.8rem',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '4px'
-                                            }}
-                                        >
-                                            <Eye size={14} /> Report
-                                        </button>
-                                    )}
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -1580,6 +1764,22 @@ function AllSubmissions({ user }) {
                     submissionId={viewGlobalReport}
                     onClose={() => setViewGlobalReport(null)}
                     isStudentView={false}
+                />
+            )}
+
+            {feedbackModal && (
+                <MentorFeedbackModal
+                    submission={feedbackModal}
+                    mentorId={user.id}
+                    onClose={() => setFeedbackModal(null)}
+                />
+            )}
+
+            {escalateModal && (
+                <EscalateModal
+                    submission={escalateModal}
+                    mentorId={user.id}
+                    onClose={() => setEscalateModal(null)}
                 />
             )}
 

@@ -131,13 +131,33 @@ async def list_problems(
 
 @router.get("/students/{student_id}/problems")
 async def student_problems(student_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not actor_id:
+        raise HTTPException(401, "Missing user context")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role FROM users WHERE id = %s", (actor_id,))
+            actor = await cur.fetchone()
+            if not actor:
+                raise HTTPException(401, "Invalid user context")
+
             await cur.execute("SELECT mentor_id FROM users WHERE id = %s", (student_id,))
             stu = await cur.fetchone()
             if not stu:
                 raise HTTPException(404, "Student not found")
+
+            actor_role = (actor.get("role") or "").lower()
+            if actor_id != student_id:
+                # Allow only privileged staff, and mentors only for their own students.
+                if actor_role in {"admin", "organization_admin"}:
+                    pass
+                elif actor_role == "mentor":
+                    if stu.get("mentor_id") != actor_id:
+                        raise HTTPException(403, "Student is not allocated to this mentor")
+                else:
+                    raise HTTPException(403, "Forbidden scope")
 
             mentor_id = stu["mentor_id"]
             await cur.execute(
