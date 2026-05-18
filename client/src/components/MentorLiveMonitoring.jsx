@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Activity, CheckCircle, Clock, RefreshCw, Pause, Play, Trash2, Wifi, WifiOff } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Activity, CheckCircle, Clock, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react'
 import socketService from '../services/socketService'
 
 const MAX_UPDATES = 60
@@ -20,13 +20,7 @@ function MentorLiveMonitoring({ user }) {
     const [activeSubmissions, setActiveSubmissions] = useState(new Set())
     const [isMonitoring, setIsMonitoring] = useState(false)
     const [lastEventAt, setLastEventAt] = useState(null)
-    const [feedPaused, setFeedPaused] = useState(false)
     const [severityFilter, setSeverityFilter] = useState('all')
-    const feedPausedRef = useRef(false)
-
-    useEffect(() => {
-        feedPausedRef.current = feedPaused
-    }, [feedPaused])
 
     useEffect(() => {
         socketService.connect()
@@ -52,7 +46,6 @@ function MentorLiveMonitoring({ user }) {
                 return next
             })
 
-            if (feedPausedRef.current) return
             setLiveUpdates((prev) => [update, ...prev.slice(0, MAX_UPDATES - 1)])
         }
 
@@ -65,7 +58,6 @@ function MentorLiveMonitoring({ user }) {
                 timestamp: rawAlert.timestamp || new Date().toISOString(),
             }
             setLastEventAt(alert.timestamp)
-            if (feedPausedRef.current) return
             setLiveAlerts((prev) => [alert, ...prev.slice(0, MAX_ALERTS - 1)])
         }
 
@@ -115,10 +107,6 @@ function MentorLiveMonitoring({ user }) {
                     </p>
                 </div>
                 <div className="monitoring-actions">
-                    <button className="view-all-btn" onClick={() => setFeedPaused((p) => !p)}>
-                        {feedPaused ? <Play size={14} /> : <Pause size={14} />}
-                        {feedPaused ? 'Resume Feed' : 'Pause Feed'}
-                    </button>
                     <button className="view-all-btn" onClick={clearFeed}>
                         <Trash2 size={14} />
                         Clear Feed
@@ -127,7 +115,6 @@ function MentorLiveMonitoring({ user }) {
             </div>
 
             <div className="status-bar">
-                {feedPaused && <div className="status-item inactive"><span>Feed Paused</span></div>}
                 <div className={`status-item ${isMonitoring ? 'active' : 'inactive'}`}>
                     <div className="status-dot"></div>
                     {isMonitoring ? <Wifi size={14} /> : <WifiOff size={14} />}

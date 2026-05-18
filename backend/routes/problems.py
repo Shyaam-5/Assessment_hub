@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from database import get_pool
+from routes.auth import _has_any_permission
 from services.pagination import paginated_response
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
@@ -79,6 +80,9 @@ async def list_problems(
     limit: int = Query(20, ge=1, le=100),
 ):
     pool = await get_pool()
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.view"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     offset = (page - 1) * limit
     params: list = []
     where: list[str] = []
@@ -149,11 +153,12 @@ async def student_problems(student_id: str, request: Request):
                 raise HTTPException(404, "Student not found")
 
             actor_role = (actor.get("role") or "").lower()
+            can_view = await _has_any_permission(actor_id, ["tests.view"])
             if actor_id != student_id:
                 # Allow only privileged staff, and mentors only for their own students.
-                if actor_role in {"admin", "organization_admin"}:
+                if can_view and actor_role in {"admin", "organization_admin"}:
                     pass
-                elif actor_role == "mentor":
+                elif can_view and actor_role == "mentor":
                     if stu.get("mentor_id") != actor_id:
                         raise HTTPException(403, "Student is not allocated to this mentor")
                 else:
@@ -190,6 +195,9 @@ async def student_problems(student_id: str, request: Request):
 
 @router.post("/problems")
 async def create_problem(body: ProblemCreate, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.create"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     problem_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     pool = await get_pool()
@@ -235,6 +243,9 @@ async def create_problem(body: ProblemCreate, request: Request):
 
 @router.delete("/problems/{problem_id}")
 async def delete_problem(problem_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.delete", "tests.update", "tests.create"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:

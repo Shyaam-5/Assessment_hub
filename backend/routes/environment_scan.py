@@ -18,6 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel
+from routes.auth import _has_any_permission
 
 from audit_logger import get_audit_logger, AuditEventType
 from config import settings
@@ -97,7 +98,8 @@ async def _effective_user(request: Request, requested_user_id: str | None = None
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
     requested = (requested_user_id or "").strip()
-    if requested and requested != actor_id and user.get("role") not in ("admin", "organization_admin", "mentor"):
+    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+    if requested and requested != actor_id and not can_view_proctor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User mismatch")
     return user
 
@@ -211,7 +213,7 @@ async def list_sessions(request: Request, userId: str | None = Query(default=Non
     user = await _effective_user(request, userId)
     actor_id = str(getattr(request.state, "auth_user_id", "")).strip()
 
-    role = user.get("role", "")
+    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
 
     # NOTE: TiDB rejects subqueries in JOIN ON clauses ("ON condition doesn't
     # support subqueries yet"), so we pre-aggregate the latest scan per
@@ -220,7 +222,7 @@ async def list_sessions(request: Request, userId: str | None = Query(default=Non
         "(SELECT exam_session_id, MAX(id) AS max_id "
         " FROM prescan_room_scans GROUP BY exam_session_id) latest"
     )
-    if role in ("admin", "mentor"):
+    if can_view_proctor:
         rows = await db.fetchall(
             f"""
             SELECT es.*, u.name AS candidate_name, u.email AS candidate_email,
@@ -283,8 +285,8 @@ async def get_session(request: Request, session_id: int, userId: str | None = Qu
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found")
 
-    role = user.get("role", "")
-    if role not in ("admin", "mentor", "organization_admin") and str(session["candidate_id"]) != actor_id:
+    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+    if not can_view_proctor and str(session["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     scan = await db.fetchone(
@@ -329,8 +331,8 @@ async def get_scan(request: Request, scan_id: int, userId: str | None = Query(de
     if scan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Scan {scan_id} not found")
 
-    role = user.get("role", "")
-    if role not in ("admin", "mentor", "organization_admin") and str(scan["candidate_id"]) != actor_id:
+    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+    if not can_view_proctor and str(scan["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     scan_dict = _serialize_scan(dict(scan))
@@ -383,8 +385,8 @@ async def retry_scan(scan_id: int, body: RetryBody, request: Request):
     if old_scan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Scan {scan_id} not found")
 
-    role = user.get("role", "")
-    if role not in ("admin", "mentor", "organization_admin") and str(old_scan["candidate_id"]) != actor_id:
+    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+    if not can_view_proctor and str(old_scan["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     allowed_verdicts = {"incomplete", "rejected", None}
@@ -432,8 +434,8 @@ async def list_frames(
     if scan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Scan {scan_id} not found")
 
-    role = user.get("role", "")
-    if role not in ("admin", "mentor", "organization_admin") and str(scan["candidate_id"]) != actor_id:
+    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+    if not can_view_proctor and str(scan["candidate_id"]) != actor_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     offset = (page - 1) * page_size

@@ -64,24 +64,8 @@ async def _require_admin(request: Request) -> None:
     user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not user_id:
         raise HTTPException(status_code=401, detail="Missing user context")
-
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
-            u = await cur.fetchone()
-            if u and (u.get("role") or "").lower() in {"admin", "organization_admin"}:
-                return
-    if await _has_any_permission(user_id, ["analytics.view"]):
-        return
-    primary = await get_primary_pool()
-    async with primary.acquire() as conn:
-        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
-            u = await cur.fetchone()
-            if u and (u.get("role") or "").lower() in {"admin", "organization_admin"}:
-                return
-    raise HTTPException(status_code=403, detail="Admin access required")
+    if not await _has_any_permission(user_id, ["analytics.view"]):
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 
 async def _get_actor_user(request: Request) -> dict:
@@ -102,21 +86,7 @@ async def _get_actor_user(request: Request) -> dict:
 
 
 async def _can_view_all_analytics(user_id: str) -> bool:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute(
-                """
-                SELECT 1
-                FROM user_role_assignments ura
-                JOIN role_permissions rp ON rp.role_id = ura.role_id
-                WHERE ura.user_id = %s
-                  AND rp.permission_key IN ('analytics.view', 'analytics.view_all')
-                LIMIT 1
-                """,
-                (user_id,),
-            )
-            return bool(await cur.fetchone())
+    return await _has_any_permission(user_id, ["analytics.view"])
 
 
 async def _allocated_student_ids(conn, mentor_id: str | None) -> list[str]:
@@ -1765,4 +1735,3 @@ async def get_system_errors(
         "recent_errors": [_fmt(r) for r in recent],
         "total_errors": sum(int(r.get("count") or 0) for r in summary),
     }
-

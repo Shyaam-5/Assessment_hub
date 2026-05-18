@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { GoogleLogin } from '@react-oauth/google'
 import { useAuth } from '../App'
 import {
@@ -170,6 +171,7 @@ function AIIllustration() {
 }
 
 function Login() {
+    const [searchParams] = useSearchParams()
     const [step, setStep] = useState('credentials')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -184,6 +186,8 @@ function Login() {
     const [loading, setLoading] = useState(false)
     const [showLoginPanel, setShowLoginPanel] = useState(false)
     const { login, loginWithGoogle, verifyOtp, completeFirstLogin } = useAuth()
+    const selectedPlan = (searchParams.get('plan') || '').trim()
+    const selectedSubscriptionId = (searchParams.get('subscriptionId') || '').trim()
 
     const FIRST_PW_MIN = 8
 
@@ -319,6 +323,12 @@ function Login() {
                                         </div>
                                         <h2>Welcome Back</h2>
                                         <p>Sign in to access your assessment portal</p>
+                                        {selectedPlan && (
+                                            <p className="google-hint" style={{ marginTop: '0.35rem' }}>
+                                                Selected plan: <strong>{selectedPlan}</strong>
+                                                {selectedSubscriptionId ? ` | Subscription ID: ${selectedSubscriptionId}` : ''}
+                                            </p>
+                                        )}
                                     </div>
 
                                     <form onSubmit={handleSubmit} className="login-form">

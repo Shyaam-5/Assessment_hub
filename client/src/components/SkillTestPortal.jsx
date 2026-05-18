@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Brain, Clock, Target, CheckCircle, XCircle, Play, Eye, ArrowRight, AlertTriangle, RotateCcw, Camera, Maximize, Shield, Monitor, EyeOff, Smartphone, ArrowLeftRight } from 'lucide-react';
+import { Brain, Clock, Target, CheckCircle, XCircle, Eye, ArrowRight, AlertTriangle, RotateCcw, Camera, Maximize, Shield, Monitor, EyeOff, Smartphone, ArrowLeftRight } from 'lucide-react';
 import SkillMCQTest from './SkillMCQTest';
 import SkillCodingTest from './SkillCodingTest';
 import SkillSQLTest from './SkillSQLTest';
@@ -24,7 +24,6 @@ export default function SkillTestPortal({ user }) {
     const [cameraError, setCameraError] = useState('');
     const [showProctoringSetup, setShowProctoringSetup] = useState(false);
     const [pendingTestId, setPendingTestId] = useState(null);
-    const [pendingResumeId, setPendingResumeId] = useState(null);
     const containerRef = useRef(null);
     const videoRef = useRef(null);
 
@@ -461,29 +460,6 @@ export default function SkillTestPortal({ user }) {
             return;
         }
         setPendingTestId(testId);
-        setPendingResumeId(null);
-        setShowProctoringSetup(true);
-        setCameraError('');
-    };
-
-    const initiateResume = (attemptId) => {
-        // Find if proctoring needed
-        let proctoringEnabled = true;
-        for (const t of tests) {
-            const att = t.my_attempts?.find(a => a.id === attemptId);
-            if (att) {
-                if (t.proctoring_enabled === false) proctoringEnabled = false;
-                break;
-            }
-        }
-
-        if (!proctoringEnabled) {
-            resumeTest(attemptId);
-            return;
-        }
-
-        setPendingResumeId(attemptId);
-        setPendingTestId(null);
         setShowProctoringSetup(true);
         setCameraError('');
     };
@@ -531,11 +507,8 @@ export default function SkillTestPortal({ user }) {
 
         if (pendingTestId) {
             await startTest(pendingTestId);
-        } else if (pendingResumeId) {
-            await resumeTest(pendingResumeId);
         }
         setPendingTestId(null);
-        setPendingResumeId(null);
     };
 
     const startTest = async (testId) => {
@@ -553,16 +526,6 @@ export default function SkillTestPortal({ user }) {
                 type: 'skill_test'
             });
             await loadAttemptData(data.attemptId);
-        } catch (err) {
-            setError(err.response?.data?.error || err.message);
-        }
-    };
-
-    const resumeTest = async (attemptId) => {
-        try {
-            setError('');
-            setActiveAttempt(attemptId);
-            await loadAttemptData(attemptId);
         } catch (err) {
             setError(err.response?.data?.error || err.message);
         }
@@ -692,7 +655,7 @@ export default function SkillTestPortal({ user }) {
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => { setShowProctoringSetup(false); setPendingTestId(null); setPendingResumeId(null); }} style={{
+                        <button onClick={() => { setShowProctoringSetup(false); setPendingTestId(null); }} style={{
                             flex: 1, padding: '12px', background: '#334155', color: '#94a3b8', border: 'none',
                             borderRadius: '10px', cursor: 'pointer', fontWeight: 600, fontSize: '14px'
                         }}>Cancel</button>
@@ -1097,8 +1060,7 @@ export default function SkillTestPortal({ user }) {
                                                 <div style={{ display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
                                                     {test.my_attempts.map(a => (
                                                         <button key={a.id} onClick={() => {
-                                                            if (a.overall_status === 'in_progress') initiateResume(a.id);
-                                                            else viewReport(a.id);
+                                                            if (a.overall_status !== 'in_progress') viewReport(a.id);
                                                         }} style={{
                                                             padding: '4px 10px', borderRadius: '16px', fontSize: '11px', cursor: 'pointer',
                                                             border: 'none', fontWeight: 600,
@@ -1116,14 +1078,9 @@ export default function SkillTestPortal({ user }) {
 
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginLeft: '16px' }}>
                                         {hasInProgress && (
-                                            <button onClick={() => initiateResume(inProgressAttempt.id)} style={{
-                                                padding: '10px 20px', background: '#f59e0b', color: 'white',
-                                                border: 'none', borderRadius: '8px', cursor: 'pointer',
-                                                fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px',
-                                                whiteSpace: 'nowrap'
-                                            }}>
-                                                <Play size={16} /> Resume
-                                            </button>
+                                            <span style={{ fontSize: '12px', color: '#fbbf24', fontWeight: 700 }}>
+                                                In Progress
+                                            </span>
                                         )}
                                         {test.can_attempt && (
                                             <button onClick={() => initiateTest(test.id)} style={{

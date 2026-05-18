@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from database import get_pool, get_primary_pool
-from routes.auth import _hash_password
+from routes.auth import _hash_password, _has_any_permission as _auth_has_any_permission
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
 from services.otp_delivery import send_notification_email
@@ -24,27 +24,7 @@ def _client_ip(request: Request) -> str:
 
 
 async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
-    if not user_id:
-        return False
-    pool = await get_primary_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
-            row = await cur.fetchone()
-            if row and row.get("role") == "admin":
-                return True
-            fmt = ",".join(["%s"] * len(permissions))
-            await cur.execute(
-                f"""
-                SELECT 1
-                FROM user_role_assignments ura
-                JOIN role_permissions rp ON rp.role_id = ura.role_id
-                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
-                LIMIT 1
-                """,
-                [user_id, *permissions],
-            )
-            return bool(await cur.fetchone())
+    return await _auth_has_any_permission(user_id, permissions)
 
 
 async def _require_admin_permission(request: Request, permissions: list[str]) -> str:

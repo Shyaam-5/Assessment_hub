@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 import pymysql.cursors
 from database import get_pool, get_primary_pool
+from routes.auth import _has_any_permission as _auth_has_any_permission
 from config import settings
 from services.ai_service import cerebras_chat
 from audit_logger import get_audit_logger, AuditEventType
@@ -1724,28 +1725,6 @@ For CORRECT coding/SQL suggest optimizations. For INCORRECT diagnose the logic g
             raise HTTPException(503, "Global tests not set up.")
         raise HTTPException(500, "Internal server error")
 async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
-    if not user_id:
-        return False
-    pool = await get_primary_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
-            u = await cur.fetchone()
-            if u and u.get("role") == "admin":
-                return True
-            if u and u.get("role") in ("student", "learner"):
-                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
-            fmt = ",".join(["%s"] * len(permissions))
-            await cur.execute(
-                f"""
-                SELECT 1
-                FROM user_role_assignments ura
-                JOIN role_permissions rp ON rp.role_id = ura.role_id
-                WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
-                LIMIT 1
-                """,
-                [user_id, *permissions],
-            )
-            return bool(await cur.fetchone())
+    return await _auth_has_any_permission(user_id, permissions)
 
 

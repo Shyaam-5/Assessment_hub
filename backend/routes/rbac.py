@@ -18,25 +18,20 @@ from database import get_primary_pool, resolve_tenant_db_url
 from routes.auth import _hash_password
 from config import settings
 from services.otp_delivery import send_notification_email
+from services.subscription_access import (
+    PERMISSION_CATALOG,
+    VALID_PERMISSIONS,
+    SUBSCRIPTION_PLANS,
+    DEFAULT_SUBSCRIPTION_TYPE,
+    normalized_subscription_type,
+    allowed_permissions_for_subscription,
+)
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["rbac"])
 audit_logger = get_audit_logger()
 
 
-PERMISSION_CATALOG: dict[str, list[str]] = {
-    "user_mgmt": ["users.create", "users.view", "users.update", "users.delete"],
-    "roles": ["roles.create", "roles.view", "roles.update", "roles.delete"],
-    "tests": ["tests.create", "tests.view", "tests.update", "tests.delete", "tests.assign", "tests.view_allocated", "tests.attempt"],
-    "coding": ["coding.create", "coding.assign", "coding.evaluate", "coding.attempt"],
-    "communication": ["communication.create", "communication.assign", "communication.evaluate", "communication.attempt"],
-    "aptitude": ["aptitude.create", "aptitude.assign", "aptitude.evaluate", "aptitude.attempt"],
-    "analytics": ["analytics.view", "analytics.export"],
-    "proctoring": ["proctoring.view", "proctoring.override", "proctoring.manage"],
-    "submissions": ["submissions.view", "submissions.manage"],
-    "results": ["results.view_own"],
-}
-VALID_PERMISSIONS = {perm for perms in PERMISSION_CATALOG.values() for perm in perms}
 VALID_USER_STATUSES = {"active", "inactive", "suspended"}
 
 
@@ -51,6 +46,38 @@ def _normalized_permissions(permissions: list[str] | None) -> list[str]:
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown permission(s): {', '.join(unknown)}")
     return normalized
+
+
+def _normalized_subscription_type(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    if raw and raw not in SUBSCRIPTION_PLANS:
+        raise HTTPException(status_code=400, detail=f"Invalid subscription type: {raw}")
+    st = normalized_subscription_type(raw)
+    return st
+
+
+def _allowed_permissions_for_subscription(subscription_type: str) -> set[str]:
+    return allowed_permissions_for_subscription(subscription_type)
+
+
+def _validate_permissions_for_subscription(permissions: list[str], subscription_type: str) -> list[str]:
+    allowed = _allowed_permissions_for_subscription(subscription_type)
+    blocked = [p for p in permissions if p not in allowed]
+    if blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Permissions not allowed for subscription '{subscription_type}': {', '.join(blocked)}",
+        )
+    return permissions
+
+
+async def _get_org_subscription_type(org_id: str) -> str:
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT subscription_type FROM organizations WHERE id = %s", (org_id,))
+            row = await cur.fetchone() or {}
+    return _normalized_subscription_type(row.get("subscription_type"))
 
 
 def _request_user_id(request: Request) -> str:
@@ -317,6 +344,9 @@ async def _is_platform_super_admin(user_id: str) -> bool:
 
 
 async def _has_org_permission(user_id: str, org_id: str, permission: str) -> bool:
+    subscription_type = await _get_org_subscription_type(org_id)
+    if permission not in _allowed_permissions_for_subscription(subscription_type):
+        return False
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
@@ -341,6 +371,7 @@ class CreateOrganizationBody(BaseModel):
     adminName: str
     adminEmail: str
     adminPassword: str
+    subscriptionType: str = DEFAULT_SUBSCRIPTION_TYPE
 
 
 class ConfigureTenantDbBody(BaseModel):
@@ -680,6 +711,17 @@ async def list_permissions():
     return PERMISSION_CATALOG
 
 
+@router.get("/rbac/subscription-plans")
+async def list_subscription_plans():
+    return {
+        plan: {
+            "label": meta["label"],
+            "allowedPermissions": sorted(meta["allowed_permissions"]),
+        }
+        for plan, meta in SUBSCRIPTION_PLANS.items()
+    }
+
+
 @router.get("/platform/organizations")
 async def list_organizations(request: Request):
     actor = _request_user_id(request)
@@ -690,7 +732,7 @@ async def list_organizations(request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                "SELECT id, name, code, is_active, created_by, created_at FROM organizations ORDER BY created_at DESC"
+                "SELECT id, name, code, subscription_type, is_active, created_by, created_at FROM organizations ORDER BY created_at DESC"
             )
             rows = await cur.fetchall()
     return rows
@@ -728,6 +770,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
 
     db_url = (body.dbUrl or "").strip()
     db_secret_ref = (body.dbSecretRef or "").strip()
+    subscription_type = _normalized_subscription_type(body.subscriptionType)
     bootstrap_stats = {"created": 0, "existing": 0}
     org_is_active = 1
     resolved_db_url = None
@@ -784,10 +827,10 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
 
             await cur.execute(
                 """
-                INSERT INTO organizations (id, name, code, db_url, db_secret_ref, is_active, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO organizations (id, name, code, subscription_type, db_url, db_secret_ref, is_active, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (org_id, body.name, body.code, db_url or None, db_secret_ref or None, org_is_active, actor or None),
+                (org_id, body.name, body.code, subscription_type, db_url or None, db_secret_ref or None, org_is_active, actor or None),
             )
 
             # Seed default organization admin role with broad permissions.
@@ -799,7 +842,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                 """,
                 (role_id, org_id, "Organization Admin", "organization-admin", "Default organization super role"),
             )
-            role_perms = [p for module in PERMISSION_CATALOG.values() for p in module]
+            role_perms = sorted(_allowed_permissions_for_subscription(subscription_type))
             for perm in role_perms:
                 await cur.execute(
                     "INSERT INTO role_permissions (role_id, permission_key) VALUES (%s, %s)",
@@ -830,6 +873,8 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                 "results.view_own",
             ]
             for perm in exam_taker_perms:
+                if perm not in _allowed_permissions_for_subscription(subscription_type):
+                    continue
                 await cur.execute(
                     "INSERT INTO role_permissions (role_id, permission_key) VALUES (%s, %s)",
                     (exam_taker_role_id, perm),
@@ -883,6 +928,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
         "success": True,
         "organizationId": org_id,
         "organizationAdminId": org_admin_id,
+        "subscriptionType": subscription_type,
         "tenantSchema": bootstrap_stats,
         "tenantDbConfigured": bool(resolved_db_url),
         "organizationActive": bool(org_is_active),
@@ -1248,7 +1294,7 @@ async def single_org_analytics(org_id: str, request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                "SELECT id, name, code, is_active, created_at FROM organizations WHERE id = %s",
+                "SELECT id, name, code, subscription_type, is_active, created_at FROM organizations WHERE id = %s",
                 (org_id,),
             )
             org = await cur.fetchone()
@@ -1319,6 +1365,7 @@ async def single_org_analytics(org_id: str, request: Request):
         "id": org.get("id"),
         "name": org.get("name"),
         "code": org.get("code"),
+        "subscription_type": org.get("subscription_type") or DEFAULT_SUBSCRIPTION_TYPE,
         "is_active": org.get("is_active"),
         "created_at": org.get("created_at"),
         "total_users": total_users,
@@ -1415,6 +1462,8 @@ async def create_org_role(org_id: str, body: CreateRoleBody, request: Request):
     permissions = _normalized_permissions(body.permissions)
     if not permissions:
         raise HTTPException(status_code=400, detail="Select at least one permission")
+    subscription_type = await _get_org_subscription_type(org_id)
+    _validate_permissions_for_subscription(permissions, subscription_type)
 
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
@@ -1455,6 +1504,9 @@ async def update_org_role(org_id: str, role_id: str, body: UpdateRoleBody, reque
         raise HTTPException(status_code=403, detail="Permission denied")
 
     permissions = _normalized_permissions(body.permissions) if body.permissions is not None else None
+    subscription_type = await _get_org_subscription_type(org_id)
+    if permissions is not None:
+        _validate_permissions_for_subscription(permissions, subscription_type)
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:

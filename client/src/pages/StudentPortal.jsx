@@ -2424,7 +2424,7 @@ function GlobalTests({ user }) {
 
                                     <div style={{ display: 'flex', gap: '0.75rem' }}>
                                         {inProgress ? (
-                                            <button onClick={() => startTest(t)} style={{ flex: 1, padding: '0.75rem', background: 'linear-gradient(135deg,#f59e0b,#d97706)', border: 'none', borderRadius: '10px', color: 'white', fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'pointer', boxShadow: '0 4px 14px rgba(245,158,11,0.35)' }}><Play size={18} /> Resume Exam</button>
+                                            <button disabled style={{ flex: 1, padding: '0.75rem', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '10px', color: '#f59e0b', fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'not-allowed' }}><Clock size={18} /> In Progress</button>
                                         ) : completed ? (
                                             <button disabled style={{ flex: 1, padding: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '10px', color: '#10b981', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'not-allowed' }}><CheckCircle size={18} /> Completed</button>
                                         ) : canRetry ? (

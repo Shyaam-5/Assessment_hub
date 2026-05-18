@@ -456,6 +456,7 @@ async def add_corp_header(request, call_next):
         "/api/auth/verify-otp",
         "/api/auth/complete-first-login",
         "/api/health",
+        "/api/public/",
         "/api/prescan/mobile/",
         "/docs",
         "/openapi.json",
@@ -469,6 +470,7 @@ async def add_corp_header(request, call_next):
         "/api/rbac/",
         "/api/orgs/",
         "/api/health",
+        "/api/public/",
         "/api/prescan/mobile/",
         "/docs",
         "/openapi.json",
@@ -562,6 +564,7 @@ from routes.ai import router as ai_router
 from routes.environment_scan import router as environment_scan_router
 from routes.attachments import router as attachments_router
 from routes.rbac import router as rbac_router
+from routes.public import router as public_router
 
 app.include_router(auth_router)
 app.include_router(tasks_router)
@@ -583,6 +586,7 @@ app.include_router(ai_router)
 app.include_router(environment_scan_router)
 app.include_router(attachments_router)
 app.include_router(rbac_router)
+app.include_router(public_router)
 
 
 # ─── Health check ────────────────────────────────────────────────

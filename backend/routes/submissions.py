@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 import pymysql.cursors
 from database import get_pool
+from routes.auth import _has_any_permission
 from config import settings
 from services.ai_service import cerebras_chat
 from services.pagination import paginated_response
@@ -56,21 +57,7 @@ async def _get_actor_user(request: Request) -> dict[str, Any]:
 
 
 async def _can_manage_all_submissions(user_id: str) -> bool:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute(
-                """
-                SELECT 1
-                FROM user_role_assignments ura
-                JOIN role_permissions rp ON rp.role_id = ura.role_id
-                WHERE ura.user_id = %s
-                  AND rp.permission_key IN ('submissions.manage', 'submissions.view_all')
-                LIMIT 1
-                """,
-                (user_id,),
-            )
-            return bool(await cur.fetchone())
+    return await _has_any_permission(user_id, ["submissions.manage"])
 
 
 def _client_ip(request: Request) -> str:
@@ -920,8 +907,7 @@ class EscalateBody(BaseModel):
 @router.post("/submissions/{submission_id}/feedback")
 async def add_submission_feedback(submission_id: str, body: FeedbackBody, request: Request):
     actor_user = await _get_actor_user(request)
-    role = (actor_user.get("role") or "").lower()
-    if role not in ("admin", "organization_admin", "mentor", "org_user"):
+    if not await _has_any_permission(str(actor_user.get("id") or ""), ["submissions.manage"]):
         raise HTTPException(status_code=403, detail="Mentor/Admin permission required")
 
     pool = await get_pool()
@@ -990,8 +976,7 @@ async def get_submission_feedback(submission_id: str, request: Request):
 @router.post("/submissions/{submission_id}/escalate")
 async def escalate_submission(submission_id: str, body: EscalateBody, request: Request):
     actor_user = await _get_actor_user(request)
-    role = (actor_user.get("role") or "").lower()
-    if role not in ("admin", "organization_admin", "mentor", "org_user"):
+    if not await _has_any_permission(str(actor_user.get("id") or ""), ["submissions.manage"]):
         raise HTTPException(status_code=403, detail="Mentor/Admin permission required")
 
     pool = await get_pool()
@@ -1029,4 +1014,3 @@ async def escalate_submission(submission_id: str, body: EscalateBody, request: R
         details={"mentor_id": body.mentor_id, "reason": body.reason},
     )
     return {"status": "escalated", "submission_id": submission_id, "escalated_at": now.isoformat()}
-

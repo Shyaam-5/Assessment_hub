@@ -1308,6 +1308,17 @@ async def ensure_rbac_schema() -> None:
                 )
                 if not await cur.fetchone():
                     await cur.execute("ALTER TABLE organizations ADD COLUMN db_secret_ref VARCHAR(255) NULL")
+                await cur.execute(
+                    """
+                    SELECT 1 FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'organizations' AND COLUMN_NAME = 'subscription_type'
+                    """,
+                    (settings.DB_NAME,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute(
+                        "ALTER TABLE organizations ADD COLUMN subscription_type VARCHAR(32) NOT NULL DEFAULT 'free_trial'"
+                    )
         print("[OK] RBAC schema verified.")
     except Exception as exc:
         print(f"[WARNING] RBAC schema migration (non-fatal): {exc}")

@@ -18,6 +18,11 @@ from google.auth.transport import requests as google_requests
 from config import settings
 from database import get_primary_pool
 from services.otp_delivery import send_login_otp_email
+from services.subscription_access import (
+    DEFAULT_SUBSCRIPTION_TYPE,
+    normalized_subscription_type,
+    allowed_permissions_for_subscription,
+)
 from audit_logger import get_audit_logger, AuditEventType
 from security import create_access_token
 
@@ -180,6 +185,7 @@ def _clean_user(row: dict) -> dict:
 async def _attach_rbac_context(user: dict) -> dict:
     """Attach primary role and permission list for dynamic UI authorization."""
     pool = await get_primary_pool()
+    org_subscription_type = DEFAULT_SUBSCRIPTION_TYPE
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
@@ -202,8 +208,14 @@ async def _attach_rbac_context(user: dict) -> dict:
                     (primary["role_id"],),
                 )
                 permissions = [r["permission_key"] for r in (await cur.fetchall() or [])]
+                org_id = primary.get("organization_id")
+                if org_id:
+                    await cur.execute("SELECT subscription_type FROM organizations WHERE id = %s", (org_id,))
+                    org_row = await cur.fetchone() or {}
+                    org_subscription_type = normalized_subscription_type(org_row.get("subscription_type"))
 
-    user["permissions"] = permissions
+    allowed = allowed_permissions_for_subscription(org_subscription_type)
+    user["permissions"] = [p for p in permissions if p in allowed]
     user["roleId"] = primary.get("role_id") if primary else None
     user["roleName"] = primary.get("role_name") if primary else None
     user["roleSlug"] = primary.get("role_slug") if primary else None
@@ -215,16 +227,30 @@ async def _attach_rbac_context(user: dict) -> dict:
 async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
     if not user_id:
         return False
+    if not permissions:
+        return False
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
-            row = await cur.fetchone()
+            await cur.execute("SELECT role, organization_id FROM users WHERE id = %s", (user_id,))
+            row = await cur.fetchone() or {}
             if row and row.get("role") == "admin":
                 return True
-            if row and row.get("role") in ("student", "learner"):
-                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in permissions)
-            fmt = ",".join(["%s"] * len(permissions))
+
+            org_subscription_type = DEFAULT_SUBSCRIPTION_TYPE
+            if row.get("organization_id"):
+                await cur.execute("SELECT subscription_type FROM organizations WHERE id = %s", (row.get("organization_id"),))
+                org_row = await cur.fetchone() or {}
+                org_subscription_type = normalized_subscription_type(org_row.get("subscription_type"))
+            allowed = allowed_permissions_for_subscription(org_subscription_type)
+            filtered_permissions = [p for p in permissions if p in allowed]
+            if not filtered_permissions:
+                return False
+
+            if row.get("role") in ("student", "learner"):
+                return any(p in LEGACY_EXAM_TAKER_PERMISSIONS for p in filtered_permissions)
+
+            fmt = ",".join(["%s"] * len(filtered_permissions))
             await cur.execute(
                 f"""
                 SELECT 1
@@ -233,7 +259,7 @@ async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
                 WHERE ura.user_id = %s AND rp.permission_key IN ({fmt})
                 LIMIT 1
                 """,
-                [user_id, *permissions],
+                [user_id, *filtered_permissions],
             )
             return bool(await cur.fetchone())
 

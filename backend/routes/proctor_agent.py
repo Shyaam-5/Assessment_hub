@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 import pymysql.cursors
+from routes.auth import _has_any_permission
 
 from audit_logger import get_audit_logger, AuditEventType
 from services.proctor_agent import (
@@ -122,16 +123,14 @@ async def _get_actor(request: Request) -> dict:
 
 async def _require_proctor_view(request: Request) -> dict:
     actor = await _get_actor(request)
-    role = (actor.get("role") or "").lower()
-    if role in {"admin", "organization_admin", "mentor", "org_user"}:
+    if await _has_any_permission(str(actor.get("id") or ""), ["proctoring.view"]):
         return actor
     raise HTTPException(status_code=403, detail="Permission denied")
 
 
 async def _require_proctor_manage(request: Request) -> dict:
     actor = await _get_actor(request)
-    role = (actor.get("role") or "").lower()
-    if role in {"admin", "organization_admin", "mentor"}:
+    if await _has_any_permission(str(actor.get("id") or ""), ["proctoring.manage"]):
         return actor
     raise HTTPException(status_code=403, detail="Proctoring permission required")
 

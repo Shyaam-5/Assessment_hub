@@ -11,6 +11,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from pydantic import BaseModel
+from routes.auth import _has_any_permission
 
 from services.behavior_agent import (
     save_behavior_events,
@@ -67,16 +68,16 @@ async def _get_actor(request: Request) -> dict:
 
 async def _require_behavior_view(request: Request) -> dict:
     actor = await _get_actor(request)
-    if (actor.get("role") or "").lower() in {"admin", "organization_admin", "mentor", "org_user"}:
+    if await _has_any_permission(str(actor.get("id") or ""), ["proctoring.view"]):
         return actor
     raise HTTPException(status_code=403, detail="Permission denied")
 
 
 async def _require_behavior_manage(request: Request) -> dict:
     actor = await _get_actor(request)
-    if (actor.get("role") or "").lower() in {"admin", "organization_admin"}:
+    if await _has_any_permission(str(actor.get("id") or ""), ["proctoring.manage"]):
         return actor
-    raise HTTPException(status_code=403, detail="Admin role required")
+    raise HTTPException(status_code=403, detail="Proctoring manage permission required")
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -115,8 +116,7 @@ async def log_behavior_events(req: LogEventsRequest, request: Request):
     """
     actor = await _get_actor(request)
     actor_id = str(actor.get("id") or "")
-    actor_role = (actor.get("role") or "").lower()
-    privileged = actor_role in {"admin", "organization_admin", "mentor"}
+    privileged = await _has_any_permission(actor_id, ["proctoring.view"])
     requested_user_id = (req.user_id or "").strip()
     if requested_user_id and requested_user_id != actor_id and not privileged:
         raise HTTPException(status_code=403, detail="Cannot log behavior events for another user")

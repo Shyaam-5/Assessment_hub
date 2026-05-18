@@ -74,6 +74,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     const [orgs, setOrgs] = useState([])
     const [selectedOrg, setSelectedOrg] = useState('')
     const [permissionCatalog, setPermissionCatalog] = useState({})
+    const [subscriptionPlans, setSubscriptionPlans] = useState({})
     const [roles, setRoles] = useState([])
     const [orgUsers, setOrgUsers] = useState([])
     const [tenantHealth, setTenantHealth] = useState([])
@@ -88,6 +89,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     const [orgForm, setOrgForm] = useState({
         name: '',
         code: '',
+        subscriptionType: 'free_trial',
         dbUrl: '',
         dbSecretRef: '',
         adminName: '',
@@ -127,6 +129,11 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
         () => orgs.find((org) => org.id === selectedOrg) || null,
         [orgs, selectedOrg],
     )
+    const selectedOrgPlan = (selectedOrgRecord?.subscription_type || 'free_trial').toLowerCase()
+    const allowedPermissionsForSelectedPlan = useMemo(() => {
+        const perms = subscriptionPlans?.[selectedOrgPlan]?.allowedPermissions
+        return new Set(Array.isArray(perms) ? perms : Object.values(modulePermissions).flatMap((arr) => arr || []))
+    }, [subscriptionPlans, selectedOrgPlan, modulePermissions])
     const activeCount = orgs.filter((org) => org.is_active).length
     const inactiveCount = Math.max(0, orgs.length - activeCount)
     const pendingInvites = orgUsers.filter((orgUser) => !!orgUser.must_change_password).length
@@ -175,6 +182,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                         id: orgId,
                         name: res.data.name || 'Organization',
                         code: res.data.code || '',
+                        subscription_type: (res.data.subscription_type || 'free_trial').toLowerCase(),
                         is_active: !!res.data.is_active,
                     }
                     : null
@@ -329,10 +337,12 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
         const boot = async () => {
             setLoading(true)
             try {
-                const [permRes] = await Promise.all([
+                const [permRes, plansRes] = await Promise.all([
                     axios.get(`${API_BASE}/rbac/permissions`, { headers }),
+                    axios.get(`${API_BASE}/rbac/subscription-plans`, { headers }),
                 ])
                 setPermissionCatalog(permRes.data || {})
+                setSubscriptionPlans(plansRes.data || {})
                 await fetchOrgs()
                 if (superAdminOnly) await Promise.all([fetchTenantHealth(), fetchUsageSummary()])
             } catch (e) {
@@ -361,7 +371,19 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
         Promise.all([fetchTenantDbHistory(selectedOrg), fetchUsageLimits(selectedOrg)]).catch(() => { })
     }, [selectedOrg, superAdminOnly])
 
+    useEffect(() => {
+        setRoleForm((prev) => ({
+            ...prev,
+            permissions: (prev.permissions || []).filter((perm) => allowedPermissionsForSelectedPlan.has(perm)),
+        }))
+        setRoleEditForm((prev) => ({
+            ...prev,
+            permissions: (prev.permissions || []).filter((perm) => allowedPermissionsForSelectedPlan.has(perm)),
+        }))
+    }, [allowedPermissionsForSelectedPlan])
+
     const togglePerm = (perm) => {
+        if (!allowedPermissionsForSelectedPlan.has(perm)) return
         setRoleForm((p) => ({
             ...p,
             permissions: p.permissions.includes(perm)
@@ -371,7 +393,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     }
 
     const toggleModulePerms = (moduleKey) => {
-        const perms = modulePermissions[moduleKey] || []
+        const perms = (modulePermissions[moduleKey] || []).filter((perm) => allowedPermissionsForSelectedPlan.has(perm))
         setRoleForm((p) => {
             const allEnabled = perms.every((perm) => p.permissions.includes(perm))
             if (allEnabled) {
@@ -383,6 +405,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     }
 
     const toggleEditPerm = (perm) => {
+        if (!allowedPermissionsForSelectedPlan.has(perm)) return
         setRoleEditForm((p) => ({
             ...p,
             permissions: p.permissions.includes(perm)
@@ -392,7 +415,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     }
 
     const toggleEditModulePerms = (moduleKey) => {
-        const perms = modulePermissions[moduleKey] || []
+        const perms = (modulePermissions[moduleKey] || []).filter((perm) => allowedPermissionsForSelectedPlan.has(perm))
         setRoleEditForm((p) => {
             const allEnabled = perms.every((perm) => p.permissions.includes(perm))
             if (allEnabled) {
@@ -412,6 +435,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             const payload = {
                 name: orgForm.name,
                 code: orgForm.code,
+                subscriptionType: orgForm.subscriptionType,
                 adminName: orgForm.adminName,
                 adminEmail: orgForm.adminEmail,
                 adminPassword: orgForm.adminPassword,
@@ -425,7 +449,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                     ? 'Organization created and tenant DB configured'
                     : 'Organization created. Configure tenant DB from Tenant DB Setup before creating tenant users.'
             )
-            setOrgForm({ name: '', code: '', dbUrl: '', dbSecretRef: '', adminName: '', adminEmail: '', adminPassword: '' })
+            setOrgForm({ name: '', code: '', subscriptionType: 'free_trial', dbUrl: '', dbSecretRef: '', adminName: '', adminEmail: '', adminPassword: '' })
             await fetchOrgs()
             if (superAdminOnly) await Promise.all([fetchTenantHealth(), fetchUsageSummary()])
         } catch (e) {
@@ -973,6 +997,11 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                     <input style={input} placeholder="Organization name" value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} />
                     <input style={input} placeholder="Code (unique)" value={orgForm.code} onChange={(e) => setOrgForm({ ...orgForm, code: e.target.value })} />
+                    <select style={input} value={orgForm.subscriptionType} onChange={(e) => setOrgForm({ ...orgForm, subscriptionType: e.target.value })}>
+                        {(Object.keys(subscriptionPlans).length ? Object.entries(subscriptionPlans) : [['free_trial', { label: 'Free Trial' }], ['basic', { label: 'Basic' }], ['pro', { label: 'Pro' }]]).map(([plan, meta]) => (
+                            <option key={plan} value={plan}>{meta?.label || plan}</option>
+                        ))}
+                    </select>
                     <input style={input} placeholder="Tenant DB URL (optional at creation)" value={orgForm.dbUrl} onChange={(e) => setOrgForm({ ...orgForm, dbUrl: e.target.value })} />
                     <input style={input} placeholder="or Secret Ref (env://TENANT_DB_ORG1)" value={orgForm.dbSecretRef} onChange={(e) => setOrgForm({ ...orgForm, dbSecretRef: e.target.value })} />
                     <input style={input} placeholder="Org Admin Name" value={orgForm.adminName} onChange={(e) => setOrgForm({ ...orgForm, adminName: e.target.value })} />
@@ -1025,7 +1054,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                 <h3 style={{ marginTop: 0 }}>{orgAdminOnly ? 'Organization' : '2. Select Organization'}</h3>
                 {selectedOrgRecord && (
                     <div style={{ ...muted, marginBottom: 10 }}>
-                        Selected: <strong>{selectedOrgRecord.name}</strong> - {selectedOrgRecord.is_active ? 'active' : 'inactive/setup pending'}
+                        Selected: <strong>{selectedOrgRecord.name}</strong> - {selectedOrgRecord.is_active ? 'active' : 'inactive/setup pending'} - plan: <strong>{subscriptionPlans?.[selectedOrgPlan]?.label || selectedOrgPlan}</strong>
                     </div>
                 )}
                 <select style={input} value={selectedOrg} onChange={(e) => setSelectedOrg(e.target.value)}>
@@ -1037,7 +1066,9 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                         <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px', gap: 12, flexWrap: 'wrap' }}>
                             <div>
                                 <div style={{ fontWeight: 600 }}>{o.name} ({o.code})</div>
-                                <div style={{ fontSize: 12, opacity: 0.8 }}>{o.is_active ? 'Active' : 'Inactive'}</div>
+                                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                    {o.is_active ? 'Active' : 'Inactive'} - {subscriptionPlans?.[(o.subscription_type || 'free_trial').toLowerCase()]?.label || (o.subscription_type || 'free_trial')}
+                                </div>
                             </div>
                             {!orgAdminOnly && (
                                 <button
@@ -1062,13 +1093,18 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                 <div style={{ marginTop: 12, padding: '10px 12px', border: '1px solid var(--border-color)', borderRadius: 8, opacity: 0.9 }}>
                     Selected permissions: <strong>{roleForm.permissions.length}</strong>
                 </div>
+                <div style={{ ...muted, marginTop: 8 }}>
+                    Subscription plan: <strong>{subscriptionPlans?.[selectedOrgPlan]?.label || selectedOrgPlan}</strong>
+                </div>
                 <div style={{ marginTop: 12, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                     {Object.keys(modulePermissions).map((moduleKey) => {
                         const perms = modulePermissions[moduleKey] || []
-                        const allEnabled = perms.length > 0 && perms.every((perm) => roleForm.permissions.includes(perm))
+                        const availablePerms = perms.filter((perm) => allowedPermissionsForSelectedPlan.has(perm))
+                        const disabled = availablePerms.length === 0
+                        const allEnabled = availablePerms.length > 0 && availablePerms.every((perm) => roleForm.permissions.includes(perm))
                         return (
-                            <label key={moduleKey} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <input type="checkbox" checked={allEnabled} onChange={() => toggleModulePerms(moduleKey)} />
+                            <label key={moduleKey} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: disabled ? 0.45 : 1 }}>
+                                <input type="checkbox" checked={allEnabled} disabled={disabled} onChange={() => toggleModulePerms(moduleKey)} />
                                 <span style={{ textTransform: 'capitalize' }}>{moduleKey.replaceAll('_', ' ')}</span>
                             </label>
                         )
@@ -1078,8 +1114,13 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                     <summary style={{ cursor: 'pointer' }}>Advanced permission override</summary>
                     <div style={{ marginTop: 10, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                         {Object.values(modulePermissions).flatMap((arr) => arr || []).map((perm) => (
-                            <label key={perm} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <input type="checkbox" checked={roleForm.permissions.includes(perm)} onChange={() => togglePerm(perm)} />
+                            <label key={perm} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: allowedPermissionsForSelectedPlan.has(perm) ? 1 : 0.45 }}>
+                                <input
+                                    type="checkbox"
+                                    checked={roleForm.permissions.includes(perm)}
+                                    disabled={!allowedPermissionsForSelectedPlan.has(perm)}
+                                    onChange={() => togglePerm(perm)}
+                                />
                                 <span>{perm}</span>
                             </label>
                         ))}
@@ -1113,6 +1154,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                                             />
                                         </div>
                                         <div style={{ ...muted }}>Selected permissions: <strong>{roleEditForm.permissions.length}</strong></div>
+                                        <div style={{ ...muted }}>Subscription plan: <strong>{subscriptionPlans?.[selectedOrgPlan]?.label || selectedOrgPlan}</strong></div>
                                         {(() => {
                                             const removedDangerous = (role.permissions || []).filter((perm) => dangerousPermissions.has(perm) && !roleEditForm.permissions.includes(perm))
                                             if (removedDangerous.length === 0) return null
@@ -1125,10 +1167,12 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                                         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                                             {Object.keys(modulePermissions).map((moduleKey) => {
                                                 const perms = modulePermissions[moduleKey] || []
-                                                const allEnabled = perms.length > 0 && perms.every((perm) => roleEditForm.permissions.includes(perm))
+                                                const availablePerms = perms.filter((perm) => allowedPermissionsForSelectedPlan.has(perm))
+                                                const disabled = availablePerms.length === 0
+                                                const allEnabled = availablePerms.length > 0 && availablePerms.every((perm) => roleEditForm.permissions.includes(perm))
                                                 return (
-                                                    <label key={moduleKey} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                        <input type="checkbox" checked={allEnabled} onChange={() => toggleEditModulePerms(moduleKey)} />
+                                                    <label key={moduleKey} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: disabled ? 0.45 : 1 }}>
+                                                        <input type="checkbox" checked={allEnabled} disabled={disabled} onChange={() => toggleEditModulePerms(moduleKey)} />
                                                         <span style={{ textTransform: 'capitalize' }}>{moduleKey.replaceAll('_', ' ')}</span>
                                                     </label>
                                                 )
@@ -1138,8 +1182,13 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                                             <summary style={{ cursor: 'pointer' }}>Advanced permission override</summary>
                                             <div style={{ marginTop: 10, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                                                 {Object.values(modulePermissions).flatMap((arr) => arr || []).map((perm) => (
-                                                    <label key={perm} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                        <input type="checkbox" checked={roleEditForm.permissions.includes(perm)} onChange={() => toggleEditPerm(perm)} />
+                                                    <label key={perm} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: allowedPermissionsForSelectedPlan.has(perm) ? 1 : 0.45 }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={roleEditForm.permissions.includes(perm)}
+                                                            disabled={!allowedPermissionsForSelectedPlan.has(perm)}
+                                                            onChange={() => toggleEditPerm(perm)}
+                                                        />
                                                         <span>{perm}</span>
                                                     </label>
                                                 ))}

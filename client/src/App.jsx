@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext, Component } from 'react
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import Login from './pages/Login'
+import LandingPage from './pages/LandingPage'
 import StudentPortal from './pages/StudentPortal'
 import MentorPortal from './pages/MentorPortal'
 import AdminPortal from './pages/AdminPortal'
@@ -134,7 +135,7 @@ function App() {
     }
 
     const getHomePath = (u) => {
-        if (!u) return '/login'
+        if (!u) return '/'
         if (u.role === 'admin' || u.role === 'organization_admin') return '/admin'
         if (hasStaffWorkspaceAccess(u)) return '/role'
         if (hasExamTakerAccess(u)) return '/student'
@@ -379,6 +380,7 @@ function App() {
                     <Route path="/login" element={
                         user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <Login />
                     } />
+                    <Route path="/landing" element={<Navigate to="/" replace />} />
 
                     <Route path="/student/*" element={
                         <ProtectedRoute allowedRoles={['student', 'org_user', 'learner']} requireExamWorkspace>
@@ -413,7 +415,7 @@ function App() {
                     } />
 
                     <Route path="/" element={
-                        user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <Navigate to="/login" replace />
+                        user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <LandingPage />
                     } />
 
                     <Route path="*" element={<Navigate to="/" replace />} />

@@ -79,6 +79,7 @@ class Settings:
             "meta-llama/llama-4-scout-17b-16e-instruct",
         ).strip()
         self.FRONTEND_URL: str = os.getenv("FRONTEND_URL", "").strip()
+        self.SUBSCRIPTION_ID: str = os.getenv("SUBSCRIPTION_ID", "").strip()
 
         # --- Google Sign-In (OIDC id_token verification; must match SPA client ID) ---
         self.GOOGLE_OAUTH_CLIENT_ID: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
