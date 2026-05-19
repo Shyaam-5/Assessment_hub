@@ -70,7 +70,7 @@ const parseCsvRows = (text) => {
     return rows.filter((r) => r.some((c) => String(c || '').trim()))
 }
 
-export default function TenantRBACManager({ user, superAdminOnly = false, orgAdminOnly = false }) {
+export default function TenantRBACManager({ user, superAdminOnly = false, orgAdminOnly = false, section = 'overview' }) {
     const [orgs, setOrgs] = useState([])
     const [selectedOrg, setSelectedOrg] = useState('')
     const [permissionCatalog, setPermissionCatalog] = useState({})
@@ -90,13 +90,12 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
         name: '',
         code: '',
         subscriptionType: 'free_trial',
-        dbUrl: '',
-        dbSecretRef: '',
         adminName: '',
         adminEmail: '',
         adminPassword: '',
     })
-    const [tenantDbForm, setTenantDbForm] = useState({ dbUrl: '', dbSecretRef: '', activate: true })
+    const [ownDbStatus, setOwnDbStatus] = useState(null)
+    const [tenantDbForm, setTenantDbForm] = useState({ dbUrl: '', activate: true })
     const [usageLimitForm, setUsageLimitForm] = useState({
         maxUsers: '',
         maxActiveUsers: '',
@@ -202,7 +201,11 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             const res = await axios.get(`${API_BASE}/platform/organizations`, { headers })
             const allOrgs = res.data || []
             setOrgs(allOrgs)
-            if (!selectedOrg && allOrgs.length) setSelectedOrg(allOrgs[0].id)
+            if (!selectedOrg && allOrgs.length) {
+                const savedOrg = superAdminOnly ? sessionStorage.getItem('superAdminSelectedOrg') : null
+                const restoredOrg = savedOrg && allOrgs.find((o) => o.id === savedOrg) ? savedOrg : allOrgs[0].id
+                setSelectedOrg(restoredOrg)
+            }
         } catch (e) {
             setOrgs([])
             setMessage(e?.response?.data?.detail || 'Failed to load organizations')
@@ -372,6 +375,12 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     }, [selectedOrg, superAdminOnly])
 
     useEffect(() => {
+        if (superAdminOnly && selectedOrg) {
+            sessionStorage.setItem('superAdminSelectedOrg', selectedOrg)
+        }
+    }, [selectedOrg, superAdminOnly])
+
+    useEffect(() => {
         setRoleForm((prev) => ({
             ...prev,
             permissions: (prev.permissions || []).filter((perm) => allowedPermissionsForSelectedPlan.has(perm)),
@@ -439,17 +448,10 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                 adminName: orgForm.adminName,
                 adminEmail: orgForm.adminEmail,
                 adminPassword: orgForm.adminPassword,
-                dbUrl: orgForm.dbUrl.trim() || null,
-                dbSecretRef: orgForm.dbSecretRef.trim() || null,
             }
-            const res = await axios.post(`${API_BASE}/platform/organizations`, payload, { headers })
-            const configured = !!res?.data?.tenantDbConfigured
-            setMessage(
-                configured
-                    ? 'Organization created and tenant DB configured'
-                    : 'Organization created. Configure tenant DB from Tenant DB Setup before creating tenant users.'
-            )
-            setOrgForm({ name: '', code: '', subscriptionType: 'free_trial', dbUrl: '', dbSecretRef: '', adminName: '', adminEmail: '', adminPassword: '' })
+            await axios.post(`${API_BASE}/platform/organizations`, payload, { headers })
+            setMessage('Organization created. The org admin should configure their tenant database from their Tenant Database page after first login.')
+            setOrgForm({ name: '', code: '', subscriptionType: 'free_trial', adminName: '', adminEmail: '', adminPassword: '' })
             await fetchOrgs()
             if (superAdminOnly) await Promise.all([fetchTenantHealth(), fetchUsageSummary()])
         } catch (e) {
@@ -461,8 +463,8 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
 
     const configureTenantDb = async () => {
         if (!selectedOrg) return
-        if (!tenantDbForm.dbUrl.trim() && !tenantDbForm.dbSecretRef.trim()) {
-            setMessage('Tenant DB URL or secret reference is required for configuration')
+        if (!tenantDbForm.dbUrl.trim()) {
+            setMessage('Tenant DB URL is required')
             return
         }
         try {
@@ -470,18 +472,32 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             await axios.post(
                 `${API_BASE}/orgs/${selectedOrg}/tenant-db`,
                 {
-                    dbUrl: tenantDbForm.dbUrl.trim() || null,
-                    dbSecretRef: tenantDbForm.dbSecretRef.trim() || null,
+                    dbUrl: tenantDbForm.dbUrl.trim(),
                     activate: tenantDbForm.activate
                 },
                 { headers }
             )
             setMessage('Tenant DB configured successfully')
-            setTenantDbForm({ dbUrl: '', dbSecretRef: '', activate: true })
+            setTenantDbForm({ dbUrl: '', activate: true })
             await fetchOrgs()
             if (superAdminOnly) await Promise.all([fetchTenantHealth(), fetchTenantDbHistory(selectedOrg)])
         } catch (e) {
             setMessage(e?.response?.data?.detail || 'Tenant DB configuration failed')
+        } finally {
+            setActionLoading('')
+        }
+    }
+
+    const fetchOwnTenantDbStatus = async () => {
+        const orgId = selectedOrg || user?.organizationId
+        if (!orgId) return
+        try {
+            setActionLoading('tenant-db-status')
+            const res = await axios.get(`${API_BASE}/orgs/${orgId}/tenant-db/status`, { headers })
+            setOwnDbStatus(res.data || null)
+        } catch (e) {
+            setOwnDbStatus(null)
+            setMessage(e?.response?.data?.detail || 'Failed to check DB status')
         } finally {
             setActionLoading('')
         }
@@ -737,6 +753,641 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
         )
     }
 
+    if (superAdminOnly) {
+        const OrgSelectorBar = () => (
+            <div style={{ ...card, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Organization:</span>
+                <select style={{ ...input, flex: 1, maxWidth: 400 }} value={selectedOrg} onChange={(e) => setSelectedOrg(e.target.value)}>
+                    <option value="">Select organization</option>
+                    {orgs.map((o) => <option key={o.id} value={o.id}>{o.name} ({o.code})</option>)}
+                </select>
+                {selectedOrgRecord && (
+                    <span style={{ ...muted, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 12 }}>
+                        {selectedOrgRecord.is_active ? 'Active' : 'Inactive'} &middot; {subscriptionPlans?.[selectedOrgPlan]?.label || selectedOrgPlan}
+                    </span>
+                )}
+            </div>
+        )
+
+        return (
+            <div style={{ display: 'grid', gap: 16 }}>
+                {message && <div style={{ ...card, borderColor: '#334155' }}>{message}</div>}
+
+                {/* ── DASHBOARD ── */}
+                {section === 'overview' && <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                        <div style={card}><div style={muted}>Organizations</div><div style={{ fontSize: 28, fontWeight: 800 }}>{orgs.length}</div></div>
+                        <div style={card}><div style={muted}>Active</div><div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{activeCount}</div></div>
+                        <div style={card}><div style={muted}>Inactive / Setup Needed</div><div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{inactiveCount}</div></div>
+                    </div>
+                    <div style={card}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div>
+                                <h3 style={{ margin: 0 }}>Tenant Health Monitor</h3>
+                                <div style={muted}>Real-time readiness check for each organization&apos;s tenant database.</div>
+                            </div>
+                            <button style={{ ...btn, background: '#334155' }} onClick={fetchTenantHealth}>Refresh Health</button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 14 }}>
+                            {tenantHealth.length === 0 ? (
+                                <div style={muted}>No tenant health data available yet.</div>
+                            ) : tenantHealth.map((org) => (
+                                <div key={org.id} style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 12 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                                        <strong>{org.name}</strong>
+                                        <span style={{ color: org.ok ? '#16a34a' : '#f59e0b', fontWeight: 700 }}>{org.ok ? 'Healthy' : 'Action needed'}</span>
+                                    </div>
+                                    <div style={{ ...muted, marginTop: 6 }}>{org.code} &mdash; {org.dbMode === 'direct_url' ? 'Direct URL configured' : 'DB not configured'}</div>
+                                    <div style={{ ...muted, marginTop: 6 }}>DB ready: {org.dbReady ? 'Yes' : 'No'} &mdash; Users table: {org.hasUsersTable ? 'Ready' : 'Missing'}</div>
+                                    {!org.ok && <div style={{ marginTop: 8, color: '#f59e0b', fontSize: 13 }}>{org.reason}</div>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </>}
+
+                {/* ── ORGANIZATIONS ── */}
+                {section === 'organizations' && <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                        <div style={card}><div style={muted}>Total</div><div style={{ fontSize: 28, fontWeight: 800 }}>{orgs.length}</div></div>
+                        <div style={card}><div style={muted}>Active</div><div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{activeCount}</div></div>
+                        <div style={card}><div style={muted}>Inactive</div><div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{inactiveCount}</div></div>
+                    </div>
+                    <div style={card}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                            <h3 style={{ margin: 0 }}>All Organizations</h3>
+                            <button style={{ ...btn, background: '#334155' }} onClick={fetchOrgs}>Refresh</button>
+                        </div>
+                        <div style={{ display: 'grid', gap: 8 }}>
+                            {orgs.length === 0 ? (
+                                <div style={muted}>No organizations found. Create one from &quot;Create Organization&quot;.</div>
+                            ) : orgs.map((o) => (
+                                <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px', gap: 12, flexWrap: 'wrap' }}>
+                                    <div>
+                                        <div style={{ fontWeight: 600 }}>{o.name} <span style={muted}>({o.code})</span></div>
+                                        <div style={{ fontSize: 12, marginTop: 2 }}>
+                                            <span style={{ color: o.is_active ? '#16a34a' : '#f59e0b', fontWeight: 700 }}>{o.is_active ? 'Active' : 'Inactive'}</span>
+                                            {' · '}
+                                            {subscriptionPlans?.[(o.subscription_type || 'free_trial').toLowerCase()]?.label || (o.subscription_type || 'free_trial')}
+                                        </div>
+                                    </div>
+                                    <button style={{ ...btn, background: o.is_active ? '#dc2626' : '#16a34a', minWidth: 100 }} onClick={() => toggleOrgStatus(o)}>
+                                        {o.is_active ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </>}
+
+                {/* ── CREATE ORGANIZATION ── */}
+                {section === 'create-org' && (
+                    <div style={card}>
+                        <h3 style={{ marginTop: 0 }}>Create Organization (Tenant)</h3>
+                        <div style={{ ...muted, marginBottom: 14 }}>Onboard a new tenant with admin credentials. The org admin configures their own database from their Tenant Database page after first login.</div>
+                        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                            <input style={input} placeholder="Organization name" value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} />
+                            <input style={input} placeholder="Code (unique)" value={orgForm.code} onChange={(e) => setOrgForm({ ...orgForm, code: e.target.value })} />
+                            <select style={input} value={orgForm.subscriptionType} onChange={(e) => setOrgForm({ ...orgForm, subscriptionType: e.target.value })}>
+                                {(Object.keys(subscriptionPlans).length ? Object.entries(subscriptionPlans) : [['free_trial', { label: 'Free Trial' }], ['basic', { label: 'Basic' }], ['pro', { label: 'Pro' }]]).map(([plan, meta]) => (
+                                    <option key={plan} value={plan}>{meta?.label || plan}</option>
+                                ))}
+                            </select>
+                            <input style={input} placeholder="Org Admin Name" value={orgForm.adminName} onChange={(e) => setOrgForm({ ...orgForm, adminName: e.target.value })} />
+                            <input style={input} placeholder="Org Admin Email" value={orgForm.adminEmail} onChange={(e) => setOrgForm({ ...orgForm, adminEmail: e.target.value })} />
+                            <input style={input} type="password" placeholder="Org Admin Password" value={orgForm.adminPassword} onChange={(e) => setOrgForm({ ...orgForm, adminPassword: e.target.value })} />
+                        </div>
+                        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.18)', ...muted }}>
+                            The org admin will configure the tenant database from their portal. Share the login credentials with them securely.
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                            <button style={btn} onClick={createOrganization} disabled={creatingOrg}>
+                                {creatingOrg ? 'Creating...' : 'Create Organization'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* ── TENANT DATABASE ── */}
+                {section === 'tenant-db' && <>
+                    <OrgSelectorBar />
+                    <div style={card}>
+                        <h3 style={{ marginTop: 0 }}>Tenant DB Setup</h3>
+                        <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 10 }}>
+                            Configure the tenant-owned database. Prefer a secret reference such as env://TENANT_DB_ORG1 in production.
+                        </div>
+                        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                            <input style={input} placeholder="Tenant DB URL (mysql://user:pass@host/db)" value={tenantDbForm.dbUrl} onChange={(e) => setTenantDbForm({ ...tenantDbForm, dbUrl: e.target.value })} />
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
+                                <input type="checkbox" checked={tenantDbForm.activate} onChange={(e) => setTenantDbForm({ ...tenantDbForm, activate: e.target.checked })} />
+                                <span>Activate organization after DB validation</span>
+                            </label>
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                            <button style={btn} onClick={configureTenantDb} disabled={!selectedOrg}>
+                                {actionLoading === 'tenant-db' ? 'Configuring...' : 'Configure Tenant DB'}
+                            </button>
+                        </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+                        <div style={card}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <div>
+                                    <h3 style={{ margin: 0 }}>DB Retry &amp; History</h3>
+                                    <div style={muted}>Manual retry plus the latest connection attempts for the selected organization.</div>
+                                </div>
+                                <button style={{ ...btn, background: '#0f766e' }} onClick={retryTenantDbConnection} disabled={!selectedOrg || actionLoading === 'tenant-db-retry'}>
+                                    {actionLoading === 'tenant-db-retry' ? 'Retrying...' : 'Retry Connection'}
+                                </button>
+                            </div>
+                            <div style={{ marginTop: 12, border: '1px solid var(--border-color)', borderRadius: 10, padding: 12 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                                    <strong>{selectedOrgRecord?.name || 'Select an organization'}</strong>
+                                    {selectedHealth && (
+                                        <span style={{ color: selectedHealth.ok ? '#16a34a' : '#f59e0b', fontWeight: 700 }}>
+                                            {selectedHealth.ok ? 'Healthy' : 'Action needed'}
+                                        </span>
+                                    )}
+                                </div>
+                                <div style={{ ...muted, marginTop: 6 }}>
+                                    {selectedHealth
+                                        ? `${selectedHealth.dbMode === 'direct_url' ? 'Direct URL' : 'DB not configured'} — ${selectedHealth.reason || 'No details'}`
+                                        : 'Health details appear after selecting an organization.'}
+                                </div>
+                            </div>
+                            <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                                {tenantDbHistory.length === 0 ? (
+                                    <div style={muted}>No tenant DB events recorded yet.</div>
+                                ) : tenantDbHistory.map((event) => (
+                                    <div key={event.id} style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                                            <strong>{String(event.event_source || 'check').replaceAll('_', ' ')}</strong>
+                                            <span style={{ color: event.status === 'SUCCESS' ? '#16a34a' : '#f59e0b', fontSize: 12, fontWeight: 700 }}>{event.status || 'UNKNOWN'}</span>
+                                        </div>
+                                        <div style={muted}>{event.db_mode || 'unknown mode'} &mdash; DB ready: {event.db_ready ? 'Yes' : 'No'} &mdash; Users table: {event.has_users_table ? 'Ready' : 'Missing'}</div>
+                                        {event.message && <div style={{ ...muted, marginTop: 4 }}>{event.message}</div>}
+                                        <div style={{ ...muted, marginTop: 4 }}>{event.created_at ? new Date(event.created_at).toLocaleString() : 'recent'}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div style={card}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <div>
+                                    <h3 style={{ margin: 0 }}>Usage Limits</h3>
+                                    <div style={muted}>Set tenant caps. Leave a field empty for unlimited.</div>
+                                </div>
+                                <button style={btn} onClick={saveUsageLimits} disabled={!selectedOrg || actionLoading === 'usage-limits'}>
+                                    {actionLoading === 'usage-limits' ? 'Saving...' : 'Save Limits'}
+                                </button>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginTop: 12 }}>
+                                {usageLimitFields.map(([field, label]) => (
+                                    <label key={field} style={{ display: 'grid', gap: 6 }}>
+                                        <span style={muted}>{label}</span>
+                                        <input style={input} type="number" min="0" placeholder="Unlimited" value={usageLimitForm[field]} onChange={(e) => setUsageLimitForm({ ...usageLimitForm, [field]: e.target.value })} />
+                                    </label>
+                                ))}
+                            </div>
+                            <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
+                                {(usageLimits?.status?.items || selectedUsage?.status?.items || []).length === 0 ? (
+                                    <div style={muted}>Usage status appears after selecting an organization.</div>
+                                ) : (usageLimits?.status?.items || selectedUsage?.status?.items || []).map((item) => (
+                                    <div key={item.key} style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                                            <strong>{usageMetricLabels[item.key] || item.key}</strong>
+                                            <span style={{ color: item.status === 'over' ? '#ef4444' : item.status === 'warning' ? '#f59e0b' : '#16a34a', fontWeight: 700 }}>
+                                                {item.status === 'unlimited' ? 'Unlimited' : item.status}
+                                            </span>
+                                        </div>
+                                        <div style={muted}>Used {item.used || 0} / {item.limit ?? 'Unlimited'}{item.percent !== null && item.percent !== undefined ? ` (${item.percent}%)` : ''}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </>}
+
+                {/* ── USAGE & LIMITS ── */}
+                {section === 'usage' && <>
+                    <OrgSelectorBar />
+                    <div style={card}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div>
+                                <h3 style={{ margin: 0 }}>Platform Usage Summary</h3>
+                                <div style={muted}>Production view of tenant consumption against configured limits.</div>
+                            </div>
+                            <button style={{ ...btn, background: '#334155' }} onClick={fetchUsageSummary}>Refresh Usage</button>
+                        </div>
+                        <div style={{ marginTop: 12, overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+                                <thead>
+                                    <tr>
+                                        {['Organization', 'Status', 'Users', 'Assessments', 'Submissions', 'API/month', 'Storage'].map((h) => (
+                                            <th key={h} style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {usageSummary.length === 0 ? (
+                                        <tr><td colSpan="7" style={{ padding: '10px 8px', color: 'var(--text-muted)' }}>No usage summary available yet.</td></tr>
+                                    ) : usageSummary.map((org) => {
+                                        const items = Object.fromEntries((org.status?.items || []).map((item) => [item.key, item]))
+                                        const cell = (key) => {
+                                            const item = items[key] || {}
+                                            return `${item.used ?? 0} / ${item.limit ?? 'Unlimited'}`
+                                        }
+                                        return (
+                                            <tr key={org.organizationId || org.id}>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                    <div style={{ fontWeight: 700 }}>{org.name}</div>
+                                                    <div style={muted}>{org.code || 'No code'}</div>
+                                                </td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                    <span style={{ color: org.status?.overLimit ? '#ef4444' : '#16a34a', fontWeight: 700 }}>
+                                                        {org.status?.overLimit ? 'Over limit' : 'Within limit'}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{cell('users')}</td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{cell('tests')}</td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{cell('submissions')}</td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{cell('apiRequestsMonthly')}</td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{cell('storageMb')}</td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>}
+            </div>
+        )
+    }
+
+    if (orgAdminOnly) {
+        return (
+            <div style={{ display: 'grid', gap: 16 }}>
+                {message && <div style={{ ...card, borderColor: '#334155' }}>{message}</div>}
+
+                {/* ── DASHBOARD ── */}
+                {section === 'org-overview' && <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                        <div style={card}><div style={muted}>Roles</div><div style={{ fontSize: 28, fontWeight: 800 }}>{roles.length}</div></div>
+                        <div style={card}><div style={muted}>Total Users</div><div style={{ fontSize: 28, fontWeight: 800 }}>{orgUsers.length}</div></div>
+                        <div style={card}><div style={muted}>Active Users</div><div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{activeUsers}</div></div>
+                        <div style={card}><div style={muted}>Pending Login</div><div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{pendingInvites}</div></div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 1.2fr)', gap: 16 }}>
+                        <div style={card}>
+                            <h3 style={{ marginTop: 0 }}>User Activity Status</h3>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                                <div><div style={muted}>Active users</div><div style={{ fontSize: 26, fontWeight: 800, color: '#16a34a' }}>{activeUsers}</div></div>
+                                <div><div style={muted}>Pending first login</div><div style={{ fontSize: 26, fontWeight: 800, color: '#f59e0b' }}>{pendingInvites}</div></div>
+                                <div><div style={muted}>Accepted login</div><div style={{ fontSize: 26, fontWeight: 800 }}>{acceptedInvites}</div></div>
+                                <div><div style={muted}>Inactive / suspended</div><div style={{ fontSize: 26, fontWeight: 800, color: '#ef4444' }}>{inactiveUsers + suspendedUsers}</div></div>
+                            </div>
+                            <p style={{ ...muted, marginBottom: 0 }}>Status based on account state, invite acceptance, and recent audit activity.</p>
+                        </div>
+                        <div style={card}>
+                            <h3 style={{ marginTop: 0 }}>Recent Access Activity</h3>
+                            {recentAccessEvents.length === 0 ? (
+                                <div style={muted}>Create roles or users to see access activity here.</div>
+                            ) : (
+                                <div style={{ display: 'grid', gap: 8 }}>
+                                    {recentAccessEvents.map((event) => (
+                                        <div key={event.id} style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
+                                            <div style={{ fontWeight: 700 }}>{event.label}</div>
+                                            <div style={muted}>{event.meta} &mdash; {event.time ? new Date(event.time).toLocaleString() : 'recent'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </>}
+
+                {/* ── ROLES & PERMISSIONS ── */}
+                {section === 'roles' && <>
+                    {selectedOrgRecord && (
+                        <div style={{ ...card, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600 }}>{selectedOrgRecord.name}</span>
+                            <span style={{ ...muted, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 12 }}>
+                                {selectedOrgRecord.is_active ? 'Active' : 'Inactive'} &middot; {subscriptionPlans?.[selectedOrgPlan]?.label || selectedOrgPlan}
+                            </span>
+                        </div>
+                    )}
+                    <div style={card}>
+                        <h3 style={{ marginTop: 0 }}>Create Role</h3>
+                        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                            <input style={input} placeholder="Role name" value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} />
+                            <input style={input} placeholder="Description" value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} />
+                        </div>
+                        <div style={{ marginTop: 12, padding: '10px 12px', border: '1px solid var(--border-color)', borderRadius: 8, opacity: 0.9 }}>
+                            Selected permissions: <strong>{roleForm.permissions.length}</strong>
+                        </div>
+                        <div style={{ ...muted, marginTop: 8 }}>
+                            Plan: <strong>{subscriptionPlans?.[selectedOrgPlan]?.label || selectedOrgPlan}</strong>
+                        </div>
+                        <div style={{ marginTop: 12, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                            {Object.keys(modulePermissions).map((moduleKey) => {
+                                const perms = modulePermissions[moduleKey] || []
+                                const availablePerms = perms.filter((perm) => allowedPermissionsForSelectedPlan.has(perm))
+                                const disabled = availablePerms.length === 0
+                                const allEnabled = availablePerms.length > 0 && availablePerms.every((perm) => roleForm.permissions.includes(perm))
+                                return (
+                                    <label key={moduleKey} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: disabled ? 0.45 : 1 }}>
+                                        <input type="checkbox" checked={allEnabled} disabled={disabled} onChange={() => toggleModulePerms(moduleKey)} />
+                                        <span style={{ textTransform: 'capitalize' }}>{moduleKey.replaceAll('_', ' ')}</span>
+                                    </label>
+                                )
+                            })}
+                        </div>
+                        <details style={{ marginTop: 10 }}>
+                            <summary style={{ cursor: 'pointer' }}>Advanced permission override</summary>
+                            <div style={{ marginTop: 10, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                                {Object.values(modulePermissions).flatMap((arr) => arr || []).map((perm) => (
+                                    <label key={perm} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: allowedPermissionsForSelectedPlan.has(perm) ? 1 : 0.45 }}>
+                                        <input type="checkbox" checked={roleForm.permissions.includes(perm)} disabled={!allowedPermissionsForSelectedPlan.has(perm)} onChange={() => togglePerm(perm)} />
+                                        <span>{perm}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </details>
+                        <div style={{ marginTop: 12 }}>
+                            <button style={btn} onClick={createRole} disabled={!selectedOrg || actionLoading === 'role'}>
+                                {actionLoading === 'role' ? 'Creating...' : 'Create Role'}
+                            </button>
+                        </div>
+                    </div>
+                    {roles.length > 0 && (
+                        <div style={{ ...card, display: 'grid', gap: 8 }}>
+                            <h4 style={{ margin: 0 }}>Existing Roles ({roles.length})</h4>
+                            {roles.map((role) => (
+                                <div key={role.id} style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
+                                    {editingRoleId === role.id ? (
+                                        <div style={{ display: 'grid', gap: 10 }}>
+                                            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                                                <input style={input} value={roleEditForm.name} disabled={!!role.is_system} onChange={(e) => setRoleEditForm({ ...roleEditForm, name: e.target.value })} placeholder="Role name" />
+                                                <input style={input} value={roleEditForm.description} onChange={(e) => setRoleEditForm({ ...roleEditForm, description: e.target.value })} placeholder="Description" />
+                                            </div>
+                                            <div style={muted}>Selected permissions: <strong>{roleEditForm.permissions.length}</strong></div>
+                                            {(() => {
+                                                const removedDangerous = (role.permissions || []).filter((perm) => dangerousPermissions.has(perm) && !roleEditForm.permissions.includes(perm))
+                                                if (removedDangerous.length === 0) return null
+                                                return <div style={{ border: '1px solid #f59e0b', borderRadius: 8, padding: '10px 12px', color: '#f59e0b', fontSize: 13 }}>Removing sensitive access: {removedDangerous.join(', ')}.</div>
+                                            })()}
+                                            <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                                                {Object.keys(modulePermissions).map((moduleKey) => {
+                                                    const perms = modulePermissions[moduleKey] || []
+                                                    const availablePerms = perms.filter((perm) => allowedPermissionsForSelectedPlan.has(perm))
+                                                    const disabled = availablePerms.length === 0
+                                                    const allEnabled = availablePerms.length > 0 && availablePerms.every((perm) => roleEditForm.permissions.includes(perm))
+                                                    return (
+                                                        <label key={moduleKey} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: disabled ? 0.45 : 1 }}>
+                                                            <input type="checkbox" checked={allEnabled} disabled={disabled} onChange={() => toggleEditModulePerms(moduleKey)} />
+                                                            <span style={{ textTransform: 'capitalize' }}>{moduleKey.replaceAll('_', ' ')}</span>
+                                                        </label>
+                                                    )
+                                                })}
+                                            </div>
+                                            <details>
+                                                <summary style={{ cursor: 'pointer' }}>Advanced permission override</summary>
+                                                <div style={{ marginTop: 10, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                                                    {Object.values(modulePermissions).flatMap((arr) => arr || []).map((perm) => (
+                                                        <label key={perm} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: allowedPermissionsForSelectedPlan.has(perm) ? 1 : 0.45 }}>
+                                                            <input type="checkbox" checked={roleEditForm.permissions.includes(perm)} disabled={!allowedPermissionsForSelectedPlan.has(perm)} onChange={() => toggleEditPerm(perm)} />
+                                                            <span>{perm}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                <button style={btn} onClick={updateRole} disabled={actionLoading === `role-edit-${role.id}`}>{actionLoading === `role-edit-${role.id}` ? 'Saving...' : 'Save Role'}</button>
+                                                <button style={{ ...btn, background: '#475569' }} onClick={() => { setEditingRoleId(''); setRoleEditForm({ name: '', description: '', permissions: [] }) }}>Cancel</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                                            <div>
+                                                <div style={{ fontWeight: 700 }}>{role.name}</div>
+                                                <div style={muted}>{role.description || 'No description'} &mdash; {(role.permissions || []).length} permissions{role.is_system ? ' &mdash; system role' : ''}</div>
+                                                <details style={{ marginTop: 8 }}>
+                                                    <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13 }}>Role preview</summary>
+                                                    <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                        {(role.permissions || []).map((perm) => (
+                                                            <span key={perm} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 999, background: 'rgba(37,99,235,0.12)', color: '#60a5fa' }}>{perm}</span>
+                                                        ))}
+                                                        {(role.permissions || []).length === 0 && <span style={muted}>No features enabled.</span>}
+                                                    </div>
+                                                </details>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                <button style={{ ...btn, background: '#334155' }} onClick={() => beginEditRole(role)}>Edit</button>
+                                                {!role.is_system && (
+                                                    <button style={{ ...btn, background: '#dc2626' }} onClick={() => deleteRole(role)} disabled={actionLoading === `role-delete-${role.id}`}>
+                                                        {actionLoading === `role-delete-${role.id}` ? 'Deleting...' : 'Delete'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </>}
+
+                {/* ── USERS ── */}
+                {section === 'users' && <>
+                    <div style={card}>
+                        <h3 style={{ marginTop: 0 }}>Create User</h3>
+                        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                            <input style={input} placeholder="User name" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} />
+                            <input style={input} placeholder="Email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} />
+                            <input style={input} type="password" placeholder="Password" value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} />
+                            <select style={input} value={userForm.roleId} onChange={(e) => setUserForm({ ...userForm, roleId: e.target.value })}>
+                                <option value="">Select role</option>
+                                {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                            </select>
+                            <input style={input} placeholder="Phone (optional)" value={userForm.phone} onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })} />
+                            <input style={input} placeholder="Batch/Dept (optional)" value={userForm.batch} onChange={(e) => setUserForm({ ...userForm, batch: e.target.value })} />
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                            <button style={btn} onClick={createUser} disabled={!selectedOrg || actionLoading === 'user'}>
+                                {actionLoading === 'user' ? 'Creating...' : 'Create User'}
+                            </button>
+                        </div>
+                        <details style={{ marginTop: 16 }}>
+                            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Bulk Upload Users (CSV / Excel)</summary>
+                            <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+                                <div style={muted}>Upload CSV/XLSX or paste CSV. Headers: name,email,password,role or roleId,phone,batch.</div>
+                                <input style={input} type="file" accept=".csv,.xlsx" onChange={handleBulkUsersFile} />
+                                {bulkUsersFileName && <div style={muted}>Loaded file: <strong>{bulkUsersFileName}</strong></div>}
+                                <textarea style={{ ...input, minHeight: 110, fontFamily: 'monospace' }} value={bulkUsersText} onChange={(e) => setBulkUsersText(e.target.value)} placeholder={'name,email,password,role,phone,batch\nAsha Rao,asha@example.com,Temp@123,Exam Taker,9999999999,2026'} />
+                                <button style={btn} onClick={bulkCreateUsers} disabled={!selectedOrg || actionLoading === 'bulk-users'}>
+                                    {actionLoading === 'bulk-users' ? 'Importing...' : 'Import Users'}
+                                </button>
+                            </div>
+                        </details>
+                    </div>
+                    {orgUsers.length > 0 && (
+                        <div style={{ ...card, overflowX: 'auto' }}>
+                            <h4 style={{ margin: '0 0 12px' }}>All Users ({orgUsers.length})</h4>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+                                <thead>
+                                    <tr>
+                                        {['Name', 'Email', 'Role', 'Status', 'Activity', 'Created', 'Actions'].map((h) => (
+                                            <th key={h} style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {orgUsers.map((orgUser) => (
+                                        <tr key={orgUser.id}>
+                                            {editingUserId === orgUser.id ? (
+                                                <>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}><input style={input} value={userEditForm.name} onChange={(e) => setUserEditForm({ ...userEditForm, name: e.target.value })} /></td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <input style={input} value={userEditForm.email} onChange={(e) => setUserEditForm({ ...userEditForm, email: e.target.value })} />
+                                                        <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+                                                            <input style={input} placeholder="Phone" value={userEditForm.phone} onChange={(e) => setUserEditForm({ ...userEditForm, phone: e.target.value })} />
+                                                            <input style={input} placeholder="Batch/Dept" value={userEditForm.batch} onChange={(e) => setUserEditForm({ ...userEditForm, batch: e.target.value })} />
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <select style={input} value={userEditForm.roleId} onChange={(e) => setUserEditForm({ ...userEditForm, roleId: e.target.value })}>
+                                                            <option value="">Select role</option>
+                                                            {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <select style={input} value={userEditForm.status} onChange={(e) => setUserEditForm({ ...userEditForm, status: e.target.value })}>
+                                                            <option value="active">Active</option>
+                                                            <option value="inactive">Inactive</option>
+                                                            <option value="suspended">Suspended</option>
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}><div style={muted}>Editing</div></td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.created_at ? new Date(orgUser.created_at).toLocaleDateString() : '-'}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                            <button style={btn} onClick={updateUser} disabled={actionLoading === `user-edit-${orgUser.id}`}>{actionLoading === `user-edit-${orgUser.id}` ? 'Saving...' : 'Save'}</button>
+                                                            <button style={{ ...btn, background: '#475569' }} onClick={() => { setEditingUserId(''); setUserEditForm({ name: '', email: '', roleId: '', phone: '', batch: '', status: 'active' }) }}>Cancel</button>
+                                                        </div>
+                                                    </td>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.name}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div>{orgUser.email}</div>
+                                                        <div style={muted}>{[orgUser.phone, orgUser.batch].filter(Boolean).join(' - ') || 'No profile details'}</div>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.role_name || 'Unassigned'}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <span style={{ color: orgUser.status === 'inactive' || orgUser.status === 'suspended' ? '#ef4444' : '#16a34a', fontWeight: 700 }}>{orgUser.status || 'active'}</span>
+                                                        {orgUser.must_change_password ? <div style={{ color: '#f59e0b', fontSize: 12 }}>Invite pending</div> : <div style={muted}>Invite accepted</div>}
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div>{orgUser.last_login_at ? `Last login ${new Date(orgUser.last_login_at).toLocaleDateString()}` : 'No login yet'}</div>
+                                                        <div style={muted}>{orgUser.last_activity_at ? `${orgUser.last_activity_type || 'Activity'} - ${new Date(orgUser.last_activity_at).toLocaleString()}` : 'No audit activity'}</div>
+                                                        <div style={muted}>{orgUser.activity_count || 0} audit events</div>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.created_at ? new Date(orgUser.created_at).toLocaleDateString() : '-'}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                            <button style={{ ...btn, background: '#334155' }} onClick={() => beginEditUser(orgUser)}>Edit</button>
+                                                            <button style={{ ...btn, background: '#0f766e' }} onClick={() => setResetPasswordFor(orgUser)}>Reset / Reinvite</button>
+                                                            <button style={{ ...btn, background: '#dc2626' }} onClick={() => deactivateUser(orgUser)} disabled={actionLoading === `user-delete-${orgUser.id}` || orgUser.status === 'inactive'}>
+                                                                {actionLoading === `user-delete-${orgUser.id}` ? 'Deactivating...' : 'Deactivate'}
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </>
+                                            )}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </>}
+
+                {/* ── TENANT DATABASE ── */}
+                {section === 'org-tenant-db' && (
+                    <div style={{ display: 'grid', gap: 16 }}>
+                        <div style={card}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+                                <div>
+                                    <h3 style={{ margin: 0 }}>DB Connection Status</h3>
+                                    <div style={muted}>Live check of your tenant database connection.</div>
+                                </div>
+                                <button style={{ ...btn, background: '#0f766e' }} onClick={fetchOwnTenantDbStatus} disabled={!selectedOrg || actionLoading === 'tenant-db-status'}>
+                                    {actionLoading === 'tenant-db-status' ? 'Checking...' : 'Check Status'}
+                                </button>
+                            </div>
+                            {ownDbStatus ? (
+                                <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <strong>{ownDbStatus.name || 'Your Organization'}</strong>
+                                        <span style={{ color: ownDbStatus.dbReady ? '#16a34a' : '#f59e0b', fontWeight: 700 }}>
+                                            {ownDbStatus.dbReady ? 'Connected & Ready' : ownDbStatus.dbConfigured ? 'Action needed' : 'Not configured'}
+                                        </span>
+                                    </div>
+                                    <div style={{ ...muted, marginTop: 6 }}>
+                                        Mode: {ownDbStatus.dbMode === 'direct_url' ? 'Direct URL' : 'Not configured'}
+                                        {' · '}Schema: {ownDbStatus.hasUsersTable ? 'Ready' : 'Missing'}
+                                    </div>
+                                    {!ownDbStatus.dbReady && ownDbStatus.reason && (
+                                        <div style={{ color: '#f59e0b', fontSize: 13, marginTop: 8 }}>{ownDbStatus.reason}</div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div style={muted}>Click &ldquo;Check Status&rdquo; to verify your tenant database connection.</div>
+                            )}
+                        </div>
+
+                        <div style={card}>
+                            <h3 style={{ marginTop: 0 }}>Configure Tenant Database</h3>
+                            <div style={{ ...muted, marginBottom: 12 }}>
+                                Provide your organization&rsquo;s database URL or a secret environment reference. The platform will validate connectivity and bootstrap the required schema automatically.
+                            </div>
+                            <div style={{ display: 'grid', gap: 10 }}>
+                                <input style={input} placeholder="Tenant DB URL (mysql://user:pass@host/db)" value={tenantDbForm.dbUrl} onChange={(e) => setTenantDbForm({ ...tenantDbForm, dbUrl: e.target.value })} />
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
+                                    <input type="checkbox" checked={tenantDbForm.activate} onChange={(e) => setTenantDbForm({ ...tenantDbForm, activate: e.target.checked })} />
+                                    <span>Activate organization after DB validation</span>
+                                </label>
+                            </div>
+                            <div style={{ marginTop: 12 }}>
+                                <button style={btn} onClick={configureTenantDb} disabled={!selectedOrg || actionLoading === 'tenant-db'}>
+                                    {actionLoading === 'tenant-db' ? 'Configuring...' : 'Save & Validate DB'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {resetPasswordFor && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'grid', placeItems: 'center', padding: 16 }}>
+                        <div style={{ ...card, width: 'min(460px, 100%)' }}>
+                            <h3 style={{ marginTop: 0 }}>Reset / Reinvite User</h3>
+                            <p style={muted}>User: <strong>{resetPasswordFor.name}</strong>. They will be asked to change this temporary password after login.</p>
+                            <input style={input} type="password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} placeholder="Temporary password" />
+                            <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                <button style={{ ...btn, background: '#475569' }} onClick={() => { setResetPasswordFor(null); setResetPassword('') }}>Cancel</button>
+                                <button style={btn} onClick={resetUserPassword} disabled={actionLoading === `reset-${resetPasswordFor.id}`}>
+                                    {actionLoading === `reset-${resetPasswordFor.id}` ? 'Sending...' : 'Reset & Send'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        )
+    }
+
     return (
         <div style={{ display: 'grid', gap: 16 }}>
             {message && <div style={{ ...card, borderColor: '#334155' }}>{message}</div>}
@@ -782,7 +1433,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                                         {org.ok ? 'Healthy' : 'Action needed'}
                                     </span>
                                 </div>
-                                <div style={{ ...muted, marginTop: 6 }}>{org.code} - {org.dbMode === 'secret_ref' ? 'Secret managed' : org.dbMode === 'direct_url' ? 'Direct URL' : 'DB missing'}</div>
+                                <div style={{ ...muted, marginTop: 6 }}>{org.code} - {org.dbMode === 'direct_url' ? 'Direct URL configured' : 'DB not configured'}</div>
                                 <div style={{ ...muted, marginTop: 6 }}>
                                     DB ready: {org.dbReady ? 'Yes' : 'No'} - Users table: {org.hasUsersTable ? 'Ready' : 'Missing'}
                                 </div>
@@ -820,7 +1471,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                             </div>
                             <div style={{ ...muted, marginTop: 6 }}>
                                 {selectedHealth
-                                    ? `${selectedHealth.dbMode === 'secret_ref' ? 'Secret managed' : selectedHealth.dbMode === 'direct_url' ? 'Direct URL' : 'DB missing'} - ${selectedHealth.reason || 'No details'}`
+                                    ? `${selectedHealth.dbMode === 'direct_url' ? 'Direct URL' : 'DB not configured'} - ${selectedHealth.reason || 'No details'}`
                                     : 'Health details appear after selecting an organization.'}
                             </div>
                         </div>
@@ -994,6 +1645,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             {!orgAdminOnly && (
             <div style={card}>
                 <h3 style={{ marginTop: 0 }}>1. Create Organization (Tenant)</h3>
+                <div style={{ ...muted, marginBottom: 12 }}>The org admin configures their own database from their Tenant Database page after first login.</div>
                 <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                     <input style={input} placeholder="Organization name" value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} />
                     <input style={input} placeholder="Code (unique)" value={orgForm.code} onChange={(e) => setOrgForm({ ...orgForm, code: e.target.value })} />
@@ -1002,8 +1654,6 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                             <option key={plan} value={plan}>{meta?.label || plan}</option>
                         ))}
                     </select>
-                    <input style={input} placeholder="Tenant DB URL (optional at creation)" value={orgForm.dbUrl} onChange={(e) => setOrgForm({ ...orgForm, dbUrl: e.target.value })} />
-                    <input style={input} placeholder="or Secret Ref (env://TENANT_DB_ORG1)" value={orgForm.dbSecretRef} onChange={(e) => setOrgForm({ ...orgForm, dbSecretRef: e.target.value })} />
                     <input style={input} placeholder="Org Admin Name" value={orgForm.adminName} onChange={(e) => setOrgForm({ ...orgForm, adminName: e.target.value })} />
                     <input style={input} placeholder="Org Admin Email" value={orgForm.adminEmail} onChange={(e) => setOrgForm({ ...orgForm, adminEmail: e.target.value })} />
                     <input style={input} type="password" placeholder="Org Admin Password" value={orgForm.adminPassword} onChange={(e) => setOrgForm({ ...orgForm, adminPassword: e.target.value })} />
@@ -1017,22 +1667,16 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             )}
 
             <div style={card}>
-                <h3 style={{ marginTop: 0 }}>{orgAdminOnly ? 'Tenant DB Setup' : 'Tenant DB Setup (Optional at creation)'}</h3>
+                <h3 style={{ marginTop: 0 }}>Tenant DB Setup</h3>
                 <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 10 }}>
-                    Configure the tenant-owned database when ready. Prefer a secret reference such as env://TENANT_DB_ORG1 in production.
+                    Enter the tenant database URL. The platform will validate the connection and bootstrap the required schema.
                 </div>
-                <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                <div style={{ display: 'grid', gap: 10 }}>
                     <input
                         style={input}
-                        placeholder="Tenant DB URL"
+                        placeholder="Tenant DB URL (mysql://user:pass@host/db)"
                         value={tenantDbForm.dbUrl}
                         onChange={(e) => setTenantDbForm({ ...tenantDbForm, dbUrl: e.target.value })}
-                    />
-                    <input
-                        style={input}
-                        placeholder="or Secret Ref (env://TENANT_DB_ORG1)"
-                        value={tenantDbForm.dbSecretRef}
-                        onChange={(e) => setTenantDbForm({ ...tenantDbForm, dbSecretRef: e.target.value })}
                     />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 12px' }}>
                         <input
