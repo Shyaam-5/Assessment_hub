@@ -366,8 +366,6 @@ async def _has_org_permission(user_id: str, org_id: str, permission: str) -> boo
 class CreateOrganizationBody(BaseModel):
     name: str
     code: str
-    dbUrl: str | None = None
-    dbSecretRef: str | None = None
     adminName: str
     adminEmail: str
     adminPassword: str
@@ -375,8 +373,7 @@ class CreateOrganizationBody(BaseModel):
 
 
 class ConfigureTenantDbBody(BaseModel):
-    dbUrl: str | None = None
-    dbSecretRef: str | None = None
+    dbUrl: str
     activate: bool = True
 
 
@@ -768,47 +765,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
     if not await _is_platform_super_admin(actor):
         raise HTTPException(status_code=403, detail="Only platform super admin can create organizations")
 
-    db_url = (body.dbUrl or "").strip()
-    db_secret_ref = (body.dbSecretRef or "").strip()
     subscription_type = _normalized_subscription_type(body.subscriptionType)
-    bootstrap_stats = {"created": 0, "existing": 0}
-    org_is_active = 1
-    resolved_db_url = None
-    if db_url or db_secret_ref:
-        try:
-            resolved_db_url = resolve_tenant_db_url(db_url=db_url or None, db_secret_ref=db_secret_ref or None)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if resolved_db_url:
-        readiness = _check_tenant_db_readiness(resolved_db_url)
-        if not readiness.get("ok"):
-            raise HTTPException(status_code=400, detail=readiness.get("reason") or "Tenant DB is not ready")
-        if not readiness.get("ddlOk", False):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Tenant DB user does not have CREATE/DROP privilege required for bootstrap. "
-                    f"Details: {readiness.get('ddlError')}"
-                ),
-            )
-
-        # Bootstrap all current table structures into tenant DB before registering org.
-        try:
-            bootstrap_stats = _bootstrap_tenant_schema_from_primary(resolved_db_url)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Tenant DB bootstrap failed: {exc}")
-
-        post_bootstrap = _check_tenant_db_readiness(resolved_db_url)
-        if not post_bootstrap.get("ok"):
-            raise HTTPException(status_code=400, detail=post_bootstrap.get("reason") or "Tenant DB post-check failed")
-        if not post_bootstrap.get("hasUsersTable", False):
-            raise HTTPException(
-                status_code=400,
-                detail="Tenant DB bootstrap incomplete: missing required 'users' table",
-            )
-    else:
-        # Tenant-owned DB onboarding: org can be created first, DB configured later.
-        org_is_active = 1
 
     org_id = str(uuid.uuid4())
     org_admin_id = f"orgadmin-{uuid.uuid4().hex[:8]}"
@@ -827,10 +784,10 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
 
             await cur.execute(
                 """
-                INSERT INTO organizations (id, name, code, subscription_type, db_url, db_secret_ref, is_active, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO organizations (id, name, code, subscription_type, is_active, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (org_id, body.name, body.code, subscription_type, db_url or None, db_secret_ref or None, org_is_active, actor or None),
+                (org_id, body.name, body.code, subscription_type, 1, actor or None),
             )
 
             # Seed default organization admin role with broad permissions.
@@ -897,18 +854,6 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
             )
         await conn.commit()
 
-    # Keep tenant DB's users table in sync for runtime joins on tenant-scoped modules.
-    if resolved_db_url:
-        _provision_user_in_tenant_db(
-            resolved_db_url,
-            user_id=org_admin_id,
-            name=body.adminName,
-            email=body.adminEmail,
-            password_hash=org_admin_password_hash,
-            role="organization_admin",
-            organization_id=org_id,
-            must_change_password=1,
-        )
     try:
         await asyncio.to_thread(
             send_notification_email,
@@ -919,6 +864,7 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                 f"You have been registered as Organization Admin for '{body.name}'.\n"
                 f"Login Email: {body.adminEmail}\n"
                 "Please use the password shared securely by super admin and change it immediately after login.\n"
+                "After logging in, go to Admin → Tenant Database to configure your organization database.\n"
             ),
         )
     except Exception:
@@ -929,9 +875,6 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
         "organizationId": org_id,
         "organizationAdminId": org_admin_id,
         "subscriptionType": subscription_type,
-        "tenantSchema": bootstrap_stats,
-        "tenantDbConfigured": bool(resolved_db_url),
-        "organizationActive": bool(org_is_active),
     }
 
 
@@ -944,11 +887,10 @@ async def configure_tenant_db(org_id: str, body: ConfigureTenantDbBody, request:
         raise HTTPException(status_code=403, detail="Permission denied")
 
     db_url = (body.dbUrl or "").strip()
-    db_secret_ref = (body.dbSecretRef or "").strip()
-    if not db_url and not db_secret_ref:
-        raise HTTPException(status_code=400, detail="Either DB URL or DB secret reference is required")
+    if not db_url:
+        raise HTTPException(status_code=400, detail="Tenant DB URL is required")
     try:
-        resolved_db_url = resolve_tenant_db_url(db_url=db_url or None, db_secret_ref=db_secret_ref or None)
+        resolved_db_url = resolve_tenant_db_url(db_url=db_url, db_secret_ref=None)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if not resolved_db_url:
@@ -978,8 +920,8 @@ async def configure_tenant_db(org_id: str, body: ConfigureTenantDbBody, request:
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                "UPDATE organizations SET db_url = %s, db_secret_ref = %s, is_active = %s WHERE id = %s",
-                ((db_url or None), (db_secret_ref or None), 1 if body.activate else 0, org_id),
+                "UPDATE organizations SET db_url = %s, db_secret_ref = NULL, is_active = %s WHERE id = %s",
+                (db_url, 1 if body.activate else 0, org_id),
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Organization not found")
@@ -1010,10 +952,21 @@ async def configure_tenant_db(org_id: str, body: ConfigureTenantDbBody, request:
         org_id,
         actor=actor,
         source="configure",
-        db_mode="secret_ref" if db_secret_ref else "direct_url",
+        db_mode="direct_url",
         readiness=post_bootstrap,
     )
     return {"success": True, "organizationId": org_id, "tenantSchema": bootstrap_stats, "organizationActive": bool(body.activate)}
+
+
+@router.get("/orgs/{org_id}/tenant-db/status")
+async def get_tenant_db_status(org_id: str, request: Request):
+    """Org admins can check their own tenant DB connection status without recording an event."""
+    actor = _request_user_id(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Missing actor identity")
+    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.create")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    return await _get_org_db_readiness(org_id, actor=actor, source="status_check", record=False)
 
 
 @router.post("/platform/organizations/{org_id}/tenant-db/retry")

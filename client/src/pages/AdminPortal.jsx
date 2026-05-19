@@ -272,6 +272,34 @@ function AdminPortal() {
                 setTitle('Error Monitoring')
                 setSubtitle('System errors, access denials, and health overview')
                 break
+            case 'organizations':
+                setTitle('Organizations')
+                setSubtitle('Manage and control tenant organizations')
+                break
+            case 'create-org':
+                setTitle('Create Organization')
+                setSubtitle('Onboard a new tenant to the platform')
+                break
+            case 'tenant-db':
+                setTitle('Tenant Database')
+                setSubtitle('Configure and monitor tenant database connections')
+                break
+            case 'usage':
+                setTitle('Usage & Limits')
+                setSubtitle('Platform-wide consumption and quota management')
+                break
+            case 'org-analytics':
+                setTitle('Organization Analytics')
+                setSubtitle('Platform-wide organization performance metrics')
+                break
+            case 'roles':
+                setTitle('Roles & Permissions')
+                setSubtitle('Create and manage organization roles')
+                break
+            case 'users':
+                setTitle('Users')
+                setSubtitle('Manage organization members and access')
+                break
             default:
                 setTitle(t('dashboard'))
                 setSubtitle(
@@ -327,25 +355,105 @@ function AdminPortal() {
 
     if (isSuperAdmin) {
         const superNavItems = [
-            { path: '/admin', label: 'Organization Management', icon: <Shield size={20} /> },
-            { path: '/admin/org-analytics', label: 'Organization Analytics', icon: <BarChart3 size={20} /> },
+            { path: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true },
+            {
+                label: 'Organizations',
+                icon: <Globe size={20} />,
+                defaultExpanded: true,
+                children: [
+                    { path: '/admin/organizations', label: 'All Organizations', icon: <Globe size={20} /> },
+                    { path: '/admin/create-org', label: 'Create Organization', icon: <Plus size={20} /> },
+                ],
+            },
+            {
+                label: 'Infrastructure',
+                icon: <Database size={20} />,
+                defaultExpanded: false,
+                children: [
+                    { path: '/admin/tenant-db', label: 'Tenant Database', icon: <Database size={20} /> },
+                    { path: '/admin/usage', label: 'Usage & Limits', icon: <BarChart2 size={20} /> },
+                ],
+            },
+            { path: '/admin/org-analytics', label: 'Analytics', icon: <BarChart3 size={20} /> },
         ]
         return (
             <DashboardLayout navItems={superNavItems} title={title || 'Super Admin'} subtitle={subtitle || 'Organization controls and analytics'}>
                 <Routes>
-                    <Route
-                        path="/"
-                        element={
-                            <AdminWorkspaceShell
-                                role="Super Admin"
-                                heading="Organization Management"
-                                description="Manage organizations, activate/deactivate tenants, and maintain platform-wide governance."
-                            >
-                                <TenantRBACManager user={user} superAdminOnly={true} />
-                            </AdminWorkspaceShell>
-                        }
-                    />
+                    <Route path="/" element={<TenantRBACManager user={user} superAdminOnly section="overview" />} />
+                    <Route path="/organizations" element={<TenantRBACManager user={user} superAdminOnly section="organizations" />} />
+                    <Route path="/create-org" element={<TenantRBACManager user={user} superAdminOnly section="create-org" />} />
+                    <Route path="/tenant-db" element={<TenantRBACManager user={user} superAdminOnly section="tenant-db" />} />
+                    <Route path="/usage" element={<TenantRBACManager user={user} superAdminOnly section="usage" />} />
                     <Route path="/org-analytics" element={<OrganizationAnalyticsPanel user={user} />} />
+                    <Route path="*" element={<Navigate to="/admin" replace />} />
+                </Routes>
+            </DashboardLayout>
+        )
+    }
+
+    if (isOrgAdmin) {
+        const monitoringChildren = [
+            featureAccess.submissions && { path: '/admin/all-submissions', label: 'All Submissions', icon: <List size={20} /> },
+            featureAccess.skillSubmissions && { path: '/admin/skill-submissions', label: 'Skill Submissions', icon: <Brain size={20} /> },
+            featureAccess.proctoring && { path: '/admin/live-monitoring', label: 'Live Monitoring', icon: <Activity size={20} /> },
+            featureAccess.proctoring && { path: '/admin/proctor-agent', label: 'Proctoring Agent', icon: <Shield size={20} /> },
+            featureAccess.proctoring && { path: '/admin/behavior-analysis', label: 'Behavior Analysis', icon: <Shield size={20} /> },
+        ].filter(Boolean)
+
+        const orgAdminNavItems = [
+            { path: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={20} />, end: true },
+            {
+                label: 'Access Control',
+                icon: <Shield size={20} />,
+                defaultExpanded: true,
+                children: [
+                    { path: '/admin/roles', label: 'Roles & Permissions', icon: <Shield size={20} /> },
+                    { path: '/admin/users', label: 'Users', icon: <Users size={20} /> },
+                ],
+            },
+            { path: '/admin/tenant-db', label: 'Tenant Database', icon: <Database size={20} /> },
+            ...(monitoringChildren.length > 0 ? [{
+                label: 'Monitoring',
+                icon: <Activity size={20} />,
+                defaultExpanded: false,
+                children: monitoringChildren,
+            }] : []),
+            ...(featureAccess.analytics ? [{
+                label: 'Analytics',
+                icon: <TrendingUp size={20} />,
+                defaultExpanded: false,
+                children: [
+                    { path: '/admin/analytics', label: 'Analytics', icon: <TrendingUp size={20} /> },
+                    { path: '/admin/org-analytics', label: 'Org Analytics', icon: <BarChart3 size={20} /> },
+                ],
+            }] : [{ path: '/admin/org-analytics', label: 'Org Analytics', icon: <BarChart3 size={20} /> }]),
+            {
+                label: 'System',
+                icon: <Settings size={20} />,
+                defaultExpanded: false,
+                children: [
+                    { path: '/admin/audit-logs', label: 'Audit Logs', icon: <Database size={20} /> },
+                    { path: '/admin/error-monitoring', label: 'Error Monitoring', icon: <AlertTriangle size={20} /> },
+                ],
+            },
+        ]
+
+        return (
+            <DashboardLayout navItems={orgAdminNavItems} title={title || 'Organization Admin'} subtitle={subtitle || 'Organization management and access control'}>
+                <Routes>
+                    <Route path="/" element={<TenantRBACManager user={user} orgAdminOnly section="org-overview" />} />
+                    <Route path="/roles" element={<TenantRBACManager user={user} orgAdminOnly section="roles" />} />
+                    <Route path="/users" element={<TenantRBACManager user={user} orgAdminOnly section="users" />} />
+                    <Route path="/tenant-db" element={<TenantRBACManager user={user} orgAdminOnly section="org-tenant-db" />} />
+                    <Route path="/all-submissions" element={gated(featureAccess.submissions, <AllSubmissions />, 'Submission monitoring')} />
+                    <Route path="/skill-submissions" element={gated(featureAccess.skillSubmissions, <SkillSubmissions user={user} isAdmin={true} />, 'Skill submissions')} />
+                    <Route path="/live-monitoring" element={gated(featureAccess.proctoring, <AdminLiveMonitoring user={user} />, 'Live monitoring')} />
+                    <Route path="/proctor-agent" element={gated(featureAccess.proctoring, <ProctorAgentDashboard />, 'Proctoring agent')} />
+                    <Route path="/behavior-analysis" element={gated(featureAccess.proctoring, <BehaviorAnalysisDashboard />, 'Behavior analysis')} />
+                    <Route path="/analytics" element={gated(featureAccess.analytics, <AdminAnalyticsDashboard />, 'Analytics')} />
+                    <Route path="/org-analytics" element={<OrgTenantAnalyticsPanel user={user} />} />
+                    <Route path="/audit-logs" element={<AuditLogViewer user={user} />} />
+                    <Route path="/error-monitoring" element={<ErrorMonitoringDashboard user={user} />} />
                     <Route path="*" element={<Navigate to="/admin" replace />} />
                 </Routes>
             </DashboardLayout>
@@ -358,15 +466,7 @@ function AdminPortal() {
                 <Route
                     path="/"
                     element={
-                        isOrgAdmin ? (
-                            <AdminWorkspaceShell
-                                role="Organization Admin"
-                                heading="Admin Workspace"
-                                description="Configure tenant database access, manage roles, and onboard users for your organization."
-                            >
-                                <TenantRBACManager user={user} orgAdminOnly={true} />
-                            </AdminWorkspaceShell>
-                        ) : isRoleBasedUser ? (
+                        isRoleBasedUser ? (
                             <RoleWorkspaceHome featureAccess={featureAccess} link={link} user={user} />
                         ) : <Dashboard />
                     }
@@ -445,26 +545,17 @@ function RoleWorkspaceHome({ featureAccess, link, user }) {
         acc[key].push(perm)
         return acc
     }, {})
-    const actions = [
-        featureAccess.aptitudeTests && { title: 'Create Aptitude Tests', description: 'Build or import MCQ assessments.', path: link('/aptitude-tests'), icon: <Target size={22} /> },
-        featureAccess.globalTests && { title: 'Create Global Tests', description: 'Manage complete multi-section exams.', path: link('/global-tests'), icon: <ClipboardList size={22} /> },
-        featureAccess.skillTests && { title: 'Create Skill Tests', description: 'Configure coding, SQL, MCQ, and interview rounds.', path: link('/skill-tests'), icon: <Brain size={22} /> },
-        featureAccess.communicationTests && { title: 'Create Communication Tests', description: 'Set up speaking, listening, and grammar checks.', path: link('/communication-tests'), icon: <MessageSquare size={22} /> },
-        featureAccess.aptitudeAssign && { title: 'Allocate Aptitude Tests', description: 'After creating a test, assign it to learners from the test page.', path: link('/aptitude-tests'), icon: <Users size={22} /> },
-        featureAccess.globalAssign && { title: 'Allocate Global Tests', description: 'Use this shortcut after creating a global assessment.', path: link('/global-tests'), icon: <Users size={22} /> },
-        featureAccess.skillAssign && { title: 'Allocate Skill Tests', description: 'Jump back to skill tests after creation to assign learners.', path: link('/skill-tests'), icon: <Users size={22} /> },
-        featureAccess.communicationAssign && { title: 'Allocate Communication Tests', description: 'Jump back to communication tests after creation to assign learners.', path: link('/communication-tests'), icon: <Users size={22} /> },
-        featureAccess.submissions && { title: 'Review Submissions', description: 'Monitor learner attempts and reports.', path: link('/all-submissions'), icon: <List size={22} /> },
-        featureAccess.skillSubmissions && { title: 'Skill Submissions', description: 'Review skill-test outcomes and proctoring signals.', path: link('/skill-submissions'), icon: <FileText size={22} /> },
-        featureAccess.proctoring && { title: 'Live Monitoring', description: 'Watch active exam integrity events.', path: link('/live-monitoring'), icon: <Activity size={22} /> },
-        featureAccess.analytics && { title: 'Analytics', description: 'Track performance and operational trends.', path: link('/analytics'), icon: <TrendingUp size={22} /> },
-        featureAccess.users && { title: 'User Management', description: 'Create users and assign organization roles.', path: link('/user-management'), icon: <Users size={22} /> },
-    ].filter(Boolean)
+    const moduleCount = Object.keys(permissionGroups).length
+    const enabledAreas = [
+        featureAccess.aptitudeTests || featureAccess.globalTests || featureAccess.skillTests || featureAccess.communicationTests,
+        featureAccess.submissions || featureAccess.skillSubmissions || featureAccess.proctoring,
+        featureAccess.analytics || featureAccess.users,
+    ].filter(Boolean).length
 
     const stats = [
-        { label: 'Enabled Modules', value: actions.length, icon: <Shield size={20} /> },
-        { label: 'Creation Access', value: actions.filter((a) => a.title.startsWith('Create')).length, icon: <Plus size={20} /> },
-        { label: 'Monitoring Access', value: actions.filter((a) => ['Review Submissions', 'Skill Submissions', 'Live Monitoring'].includes(a.title)).length, icon: <Activity size={20} /> },
+        { label: 'Permissions', value: permissions.length, icon: <Shield size={20} /> },
+        { label: 'Module Groups', value: moduleCount, icon: <Plus size={20} /> },
+        { label: 'Feature Areas', value: enabledAreas, icon: <Activity size={20} /> },
     ]
 
     useEffect(() => {
@@ -499,7 +590,7 @@ function RoleWorkspaceHome({ featureAccess, link, user }) {
         return () => { active = false }
     }, [featureAccess.aptitudeTests, featureAccess.globalTests, featureAccess.skillTests, featureAccess.skillSubmissions, featureAccess.submissions])
 
-    if (actions.length === 0) {
+    if (permissions.length === 0 && !Object.values(featureAccess).some(Boolean)) {
         return (
             <AccessNotice
                 title="No workspace features enabled"
@@ -510,15 +601,23 @@ function RoleWorkspaceHome({ featureAccess, link, user }) {
 
     return (
         <div className="animate-fadeIn">
-            <section className="admin-workspace-shell">
-                <div className="admin-workspace-header">
-                    <div>
-                        <p className="admin-workspace-role">{user?.roleName || 'Role-Based Workspace'}</p>
-                        <h2>Welcome, {user?.name || 'Team Member'}</h2>
-                        <p>Your dashboard only shows the features enabled for your assigned role.</p>
-                    </div>
-                </div>
-            </section>
+            <div style={{
+                background: 'linear-gradient(135deg, rgba(30, 64, 175, 0.1) 0%, rgba(139, 92, 246, 0.08) 100%)',
+                borderRadius: '20px',
+                padding: '2rem 2.5rem',
+                marginBottom: '2rem',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+            }}>
+                <p style={{ margin: '0 0 0.25rem', fontSize: '0.85rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {user?.roleName || 'Role-Based Workspace'}
+                </p>
+                <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.75rem', fontWeight: 800 }}>
+                    Welcome, {user?.name || 'Team Member'}
+                </h2>
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                    Your workspace shows the features enabled for your assigned role. Use the sidebar to navigate between sections.
+                </p>
+            </div>
 
             <div className="dashboard-stats-grid" style={{ marginBottom: '1.5rem' }}>
                 {stats.map((item) => (
@@ -533,24 +632,6 @@ function RoleWorkspaceHome({ featureAccess, link, user }) {
                             </div>
                         </div>
                     </div>
-                ))}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-                {actions.map((action) => (
-                    <button
-                        key={action.path}
-                        type="button"
-                        onClick={() => { window.location.href = action.path }}
-                        className="dashboard-panel"
-                        style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border-color)' }}
-                    >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>
-                            {action.icon}
-                            <h3 style={{ margin: 0 }}>{action.title}</h3>
-                        </div>
-                        <p style={{ margin: 0, color: 'var(--text-muted)' }}>{action.description}</p>
-                    </button>
                 ))}
             </div>
 

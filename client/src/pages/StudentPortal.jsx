@@ -112,7 +112,7 @@ function StudentPortal() {
         {
             label: 'Learning',
             icon: <ClipboardList size={20} />,
-            defaultExpanded: false,
+            defaultExpanded: true,
             children: [
                 featureAccess.codingPractice && { path: '/student/assignments', label: t('coding_problems'), icon: <Code size={20} /> },
                 featureAccess.aptitude && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
@@ -124,7 +124,7 @@ function StudentPortal() {
         {
             label: 'Progress',
             icon: <TrendingUp size={20} />,
-            defaultExpanded: false,
+            defaultExpanded: true,
             children: [
                 featureAccess.submissions && { path: '/student/submissions', label: t('my_submissions'), icon: <Send size={20} /> },
                 featureAccess.skillSubmissions && { path: '/student/skill-submissions', label: 'Skill Submissions', icon: <Target size={20} /> },
