@@ -34,10 +34,10 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
         return () => document.removeEventListener('keydown', handleEsc)
     }, [sidebarOpen])
 
-    const toggleGroup = (groupLabel) => {
+    const toggleGroup = (groupLabel, currentlyExpanded) => {
         setExpandedGroups(prev => ({
             ...prev,
-            [groupLabel]: !prev[groupLabel]
+            [groupLabel]: !currentlyExpanded
         }))
     }
 
@@ -94,12 +94,12 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                     {navItems.map((item) => {
                         // Group with children (collapsible)
                         if (item.children && item.children.length > 0) {
-                            const isExpanded = expandedGroups[item.label] || item.defaultExpanded || false
+                            const isExpanded = expandedGroups[item.label] ?? item.defaultExpanded ?? false
                             return (
                                 <div key={item.label} className="nav-group">
                                     <button
                                         className="nav-group-header"
-                                        onClick={() => toggleGroup(item.label)}
+                                        onClick={() => toggleGroup(item.label, isExpanded)}
                                         aria-expanded={isExpanded}
                                         data-expanded={isExpanded ? 'true' : 'false'}
                                     >
