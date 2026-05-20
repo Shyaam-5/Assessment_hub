@@ -26,8 +26,12 @@ SUBSCRIPTION_PLANS: dict[str, dict[str, Any]] = {
         "allowed_permissions": {
             "tests.create",
             "tests.view",
+            "tests.update",
+            "tests.assign",
             "tests.view_allocated",
             "tests.attempt",
+            "users.create",
+            "users.view",
             "coding.attempt",
             "communication.attempt",
             "aptitude.attempt",

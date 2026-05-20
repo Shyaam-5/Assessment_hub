@@ -41,11 +41,11 @@
 
 | Feature | Free Trial | Basic | Pro |
 |---------|-----------|-------|-----|
-| User management (create / update / delete users) | ✗ | ✓ | ✓ |
+| User management (create / view users) | ✓ (create + view) | ✓ (full CRUD) | ✓ |
 | Role management (create / update custom roles) | ✗ | ✓ | ✓ |
-| Create Tests / Question banks | ✓ (tests only) | ✓ | ✓ |
+| Create & assign MCQ Tests | ✓ | ✓ | ✓ |
 | Create Coding / Aptitude / Communication exams | ✗ | ✓ | ✓ |
-| Assign exams to users | ✗ | ✓ | ✓ |
+| Assign exams to users | ✓ (tests only) | ✓ (all types) | ✓ |
 | Evaluate / grade submissions | ✗ | ✓ | ✓ |
 | View analytics dashboard | ✓ (view only) | ✓ (view only) | ✓ |
 | Export analytics | ✗ | ✗ | ✓ |
@@ -107,7 +107,9 @@
 5. After password change, you land on `/admin` (org admin portal).
 
 **Expected:**
-- [ ] Sidebar shows sections appropriate for Free Trial: no "User Management" or "Role Management" links visible (those permissions are not granted under Free Trial).
+- [ ] Sidebar shows **Users**, **Tests**, **Analytics**, **Proctoring** sections.
+- [ ] **Roles** section is **NOT** visible (role management is not in Free Trial).
+- [ ] **Coding / Aptitude / Communication** exam create options are **NOT** visible.
 - [ ] Welcome banner shows role name and "Use the sidebar to navigate".
 
 ---
@@ -129,54 +131,53 @@
 
 ---
 
-### A4. Verify Free Trial Permission Limits (Org Admin)
+### A4. Create a Student User (Org Admin)
 
-Back in the org admin portal:
+Free Trial includes `users.create` and `users.view`, so the org admin can add students directly.
 
-- [ ] **Users section is NOT in the sidebar** (no `users.create` or `users.view` — those are blocked for Free Trial).
-- [ ] **Roles section is NOT in the sidebar**.
-- [ ] **Analytics** link IS present (view only).
-- [ ] **Proctoring** link IS present (view only — no override/manage buttons).
-
-> **Bug to look for:** If user management or role management appears for Free Trial, that is a permissions leak. Report it.
-
----
-
-### A5. Add a Student Manually via Super Admin
-
-Since the Free Trial org admin cannot create users, a super admin must seed test users.
-
-1. Go back to the **super admin** tab.
-2. Navigate to **Organizations → Users** (select `Test FT Org` from the org picker).
-3. Create a student user:
+1. In the org admin sidebar click **Users → Create User**.
+2. Fill in:
    - **Name:** `FT Student`
    - **Email:** `ftstudent@example.com`
    - **Password:** `Student@123`
-   - **Role:** `student` / `learner`
-4. Save.
+   - **Role:** Select the `Exam Taker` role (seeded automatically when the org was created)
+3. Click **Create User**.
+
+**Expected:**
+- [ ] User appears in the user list with status "active" and "Invite pending".
 
 ---
 
-### A6. Attempt an Exam as Student (Free Trial)
+### A5. Create and Assign a Test (Org Admin)
+
+Free Trial includes `tests.create`, `tests.update`, and `tests.assign`.
+
+1. In the org admin sidebar click **Tests → Create Test**.
+2. Fill in:
+   - **Title:** `FT Sample Test`
+   - Add 2–3 MCQ questions with answer options.
+3. Save / Publish the test.
+4. Go to **Tests → Assign** (or the Assign button next to the test).
+5. Assign `FT Sample Test` to `ftstudent@example.com`.
+
+**Expected:**
+- [ ] Test saves and appears in the test list.
+- [ ] Assignment confirmation shown.
+
+---
+
+### A6. Student Takes the Exam (Free Trial)
 
 1. Open another incognito tab, login as `ftstudent@example.com`.
 2. You land on `/student` (Student Portal).
 3. Verify the sidebar shows **Learning** and **Progress** groups expanded by default.
-4. Click **Assigned Tests** — the list may be empty if no exam has been assigned yet.
-
-**Create & Assign a Test (super admin does this for Free Trial):**
-
-1. In the super admin portal, go to `Test FT Org` → **Tests → Create Test**.
-2. Create a short test (2–3 MCQ questions).
-3. Go to **Tests → Assign** and assign it to `ftstudent@example.com`.
+4. Click **Assigned Tests** — `FT Sample Test` should appear.
 
 **Student takes the exam:**
 
-1. Refresh the student portal.
-2. The assigned test should appear under **Assigned Tests**.
-3. Click **Start Test**.
-4. Complete the questions and submit.
-5. Navigate to **My Results** — the result should appear.
+1. Click **Start Test** on `FT Sample Test`.
+2. Answer the MCQ questions and submit.
+3. Navigate to **My Results** — the result should appear with the score.
 
 **Expected:**
 - [ ] Test loads and questions are visible.
@@ -187,12 +188,15 @@ Since the Free Trial org admin cannot create users, a super admin must seed test
 
 ### A7. Free Trial Blocked Actions
 
-Verify the following actions are blocked (should show 403 or "permission denied"):
+Verify the following actions are blocked (should show 403 or hidden):
 
-- [ ] Org admin tries to create a new user → action button should not exist or returns error.
-- [ ] Org admin tries to create a new role → action button should not exist or returns error.
-- [ ] Org admin tries to assign an exam → no assign option visible.
-- [ ] Org admin tries to create a coding/aptitude/communication exam → those exam types should not be creatable.
+- [ ] Org admin tries to **delete a user** → no delete button (no `users.delete` permission).
+- [ ] Org admin tries to **create a custom role** → Roles section not in sidebar.
+- [ ] Org admin tries to **create a Coding exam** → Coding create option not visible.
+- [ ] Org admin tries to **create an Aptitude exam** → Aptitude create option not visible.
+- [ ] Org admin tries to **create a Communication exam** → Communication create option not visible.
+- [ ] Org admin tries to **export analytics** → Export button not present.
+- [ ] Org admin tries to **override proctoring flags** → Override/Manage buttons not present.
 
 ---
 
