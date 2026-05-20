@@ -286,7 +286,7 @@ async def get_test_attempts(test_id: int, request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM skill_test_attempts WHERE test_id = %s ORDER BY created_at DESC", (test_id,))
+            await cur.execute("SELECT * FROM skill_test_attempts WHERE test_id = %s ORDER BY started_at DESC", (test_id,))
             return await cur.fetchall()
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -327,7 +327,7 @@ async def student_available(studentId: str = Query(...), request: Request = None
             tests = await cur.fetchall()
             enriched = []
             for t in tests:
-                await cur.execute("SELECT id,attempt_number,overall_status,current_stage,mcq_score,created_at FROM skill_test_attempts WHERE test_id=%s AND student_id=%s ORDER BY attempt_number DESC", (t["id"], studentId))
+                await cur.execute("SELECT id,attempt_number,overall_status,current_stage,mcq_score,started_at FROM skill_test_attempts WHERE test_id=%s AND student_id=%s ORDER BY attempt_number DESC", (t["id"], studentId))
                 attempts = await cur.fetchall()
                 enriched.append({**t, "skills": _safe_json(t.get("skills")), "attempts_used": len(attempts), "can_attempt": len(attempts) < t["attempt_limit"] and not any(a["overall_status"] == "completed" for a in attempts), "my_attempts": attempts})
     return enriched
@@ -997,7 +997,7 @@ async def student_submissions(request: Request, studentId: str = Query(...)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT a.*,t.title as test_title FROM skill_test_attempts a JOIN skill_tests t ON a.test_id=t.id WHERE a.student_id=%s ORDER BY a.created_at DESC", (studentId,))
+            await cur.execute("SELECT a.*,t.title as test_title FROM skill_test_attempts a JOIN skill_tests t ON a.test_id=t.id WHERE a.student_id=%s ORDER BY a.started_at DESC", (studentId,))
             rows = await cur.fetchall()
     return [dict(r, report=_safe_json(r.get("report"))) for r in rows]
 
@@ -1037,7 +1037,7 @@ async def admin_all_submissions(request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT a.*,t.title as test_title FROM skill_test_attempts a JOIN skill_tests t ON a.test_id=t.id ORDER BY a.created_at DESC")
+            await cur.execute("SELECT a.*,t.title as test_title FROM skill_test_attempts a JOIN skill_tests t ON a.test_id=t.id ORDER BY a.started_at DESC")
             rows = await cur.fetchall()
     return [dict(r, report=_safe_json(r.get("report"))) for r in rows]
 
