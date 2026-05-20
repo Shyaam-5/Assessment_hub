@@ -361,6 +361,10 @@ async def _has_org_permission(user_id: str, org_id: str, permission: str) -> boo
     subscription_type = await _get_org_subscription_type(org_id)
     if permission not in _allowed_permissions_for_subscription(subscription_type):
         return False
+    # Organization admins implicitly hold all subscription-allowed permissions.
+    # This avoids stale role_permissions rows when the subscription plan expands.
+    if await _is_org_admin(user_id, org_id):
+        return True
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
