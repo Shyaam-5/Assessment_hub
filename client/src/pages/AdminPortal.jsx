@@ -3481,6 +3481,59 @@ function GlobalTestsAdmin() {
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
 
+    // Allocation state
+    const [allocatingTest, setAllocatingTest] = useState(null)
+    const [orgStudents, setOrgStudents] = useState([])
+    const [existingAllocs, setExistingAllocs] = useState([])
+    const [selectedStudents, setSelectedStudents] = useState(new Set())
+    const [allocSearch, setAllocSearch] = useState('')
+    const [allocSaving, setAllocSaving] = useState(false)
+
+    const openAllocate = async (test) => {
+        setAllocatingTest(test)
+        setAllocSearch('')
+        setAllocSaving(false)
+        try {
+            const [studentsRes, allocsRes] = await Promise.all([
+                axios.get(`${API_BASE}/global-tests/org-students`),
+                axios.get(`${API_BASE}/global-tests/${test.id}/allocations`),
+            ])
+            const students = Array.isArray(studentsRes.data) ? studentsRes.data : []
+            const allocs = Array.isArray(allocsRes.data) ? allocsRes.data : []
+            setOrgStudents(students)
+            setExistingAllocs(allocs)
+            setSelectedStudents(new Set(allocs.map(a => a.studentId)))
+        } catch {
+            setOrgStudents([])
+            setExistingAllocs([])
+            setSelectedStudents(new Set())
+        }
+    }
+
+    const saveAllocations = async () => {
+        if (!allocatingTest) return
+        setAllocSaving(true)
+        try {
+            await axios.post(`${API_BASE}/global-tests/${allocatingTest.id}/allocations`, {
+                studentIds: Array.from(selectedStudents),
+            })
+            setAllocatingTest(null)
+        } catch (e) {
+            alert(e.response?.data?.error || 'Failed to save allocations')
+        } finally {
+            setAllocSaving(false)
+        }
+    }
+
+    const toggleStudent = (id) => {
+        setSelectedStudents(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
+
     const handleCSVUpload = async (e) => {
         const file = e.target.files[0]
         if (!file) return
@@ -4109,6 +4162,13 @@ function GlobalTestsAdmin() {
                                     >
                                         <Eye size={14} /> View
                                     </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => openAllocate(t)}
+                                        style={{ background: '#1e3a5f', border: '1px solid #6366f1', color: '#a5b4fc', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    >
+                                        <Users size={14} /> Allocate
+                                    </button>
 
                                     {t.status === 'live' ? (
                                         <button
@@ -4139,6 +4199,59 @@ function GlobalTestsAdmin() {
                             </div>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {allocatingTest && (
+                <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '1rem', padding: '1.5rem', width: '100%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h3 style={{ margin: 0 }}>Allocate Students</h3>
+                                <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>{allocatingTest.title}</p>
+                            </div>
+                            <button onClick={() => setAllocatingTest(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
+                        </div>
+
+                        <input
+                            type="text"
+                            placeholder="Search students..."
+                            value={allocSearch}
+                            onChange={e => setAllocSearch(e.target.value)}
+                            style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text)', fontSize: '0.85rem' }}
+                        />
+
+                        <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
+                            <button onClick={() => setSelectedStudents(new Set(orgStudents.map(s => s.id)))} style={{ background: 'var(--primary-alpha)', border: '1px solid var(--primary)', color: 'var(--primary)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Select All</button>
+                            <button onClick={() => setSelectedStudents(new Set())} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Clear</button>
+                            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>{selectedStudents.size} selected</span>
+                        </div>
+
+                        <div style={{ overflowY: 'auto', flex: 1, border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                            {orgStudents.length === 0 ? (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No students found in this organization.</div>
+                            ) : (
+                                orgStudents
+                                    .filter(s => !allocSearch || s.name?.toLowerCase().includes(allocSearch.toLowerCase()) || s.email?.toLowerCase().includes(allocSearch.toLowerCase()))
+                                    .map(s => (
+                                        <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', background: selectedStudents.has(s.id) ? 'var(--primary-alpha)' : 'transparent' }}>
+                                            <input type="checkbox" checked={selectedStudents.has(s.id)} onChange={() => toggleStudent(s.id)} style={{ accentColor: 'var(--primary)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{s.name}</div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.email}{s.batch ? ` · ${s.batch}` : ''}</div>
+                                            </div>
+                                        </label>
+                                    ))
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button onClick={() => setAllocatingTest(null)} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
+                            <button onClick={saveAllocations} disabled={allocSaving} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', background: 'var(--primary)', color: 'white', border: 'none', cursor: allocSaving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                                {allocSaving ? 'Saving...' : `Save (${selectedStudents.size} students)`}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

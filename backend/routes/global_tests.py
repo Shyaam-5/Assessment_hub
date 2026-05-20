@@ -538,7 +538,106 @@ async def _run_sql_and_compare(schema: str, query: str, expected_output: str) ->
 
 # â”€â”€â”€ CRUD Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-@router.get("/global-tests")
+_ALLOC_TABLE_DDL = “””
+    CREATE TABLE IF NOT EXISTS global_test_allocations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(64) NOT NULL,
+        student_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_global_alloc (test_id, student_id)
+    )
+“””
+
+
+@router.get(“/global-tests/org-students”)
+async def list_org_students(request: Request):
+    “””Return org students available for test allocation (requires tests.assign).”””
+    actor = (getattr(request.state, “auth_user_id”, None) or “”).strip()
+    if not await _has_any_permission(actor, [“tests.assign”]):
+        raise HTTPException(403, “Permission denied”)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    “SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name”
+                )
+                rows = await cur.fetchall()
+        return [{“id”: r[“id”], “name”: r[“name”], “email”: r[“email”], “batch”: r.get(“batch”)} for r in rows]
+    except Exception as e:
+        if “doesn't exist” in str(e):
+            return []
+        raise HTTPException(500, “Failed to fetch students”)
+
+
+@router.get(“/global-tests/{test_id}/allocations”)
+async def get_test_allocations(test_id: str, request: Request):
+    “””List students currently allocated to a test.”””
+    actor = (getattr(request.state, “auth_user_id”, None) or “”).strip()
+    if not await _has_any_permission(actor, [“tests.assign”]):
+        raise HTTPException(403, “Permission denied”)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(_ALLOC_TABLE_DDL)
+                await cur.execute(
+                    “””SELECT a.student_id, u.name, u.email
+                       FROM global_test_allocations a
+                       JOIN users u ON u.id = a.student_id
+                       WHERE a.test_id = %s ORDER BY u.name”””,
+                    (test_id,),
+                )
+                rows = await cur.fetchall()
+        return [{“studentId”: r[“student_id”], “name”: r[“name”], “email”: r[“email”]} for r in rows]
+    except Exception as e:
+        if “doesn't exist” in str(e):
+            return []
+        raise HTTPException(500, “Failed to fetch allocations”)
+
+
+@router.post(“/global-tests/{test_id}/allocations”)
+async def set_test_allocations(test_id: str, request: Request):
+    “””Replace allocations for a test with the given student list.”””
+    actor = (getattr(request.state, “auth_user_id”, None) or “”).strip()
+    if not await _has_any_permission(actor, [“tests.assign”]):
+        raise HTTPException(403, “Permission denied”)
+    body = await request.json()
+    student_ids: list = body.get(“studentIds”, [])
+    if not isinstance(student_ids, list):
+        raise HTTPException(400, “studentIds must be a list”)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(_ALLOC_TABLE_DDL)
+                await cur.execute(“DELETE FROM global_test_allocations WHERE test_id = %s”, (test_id,))
+                for sid in student_ids:
+                    sid = (sid or “”).strip()
+                    if not sid:
+                        continue
+                    await cur.execute(
+                        “INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)”,
+                        (str(uuid.uuid4()), test_id, sid),
+                    )
+            await conn.commit()
+        audit_logger.log_event(
+            AuditEventType.ADMIN_TEST_MODIFIED,
+            user_id=actor,
+            ip_address=_client_ip(request),
+            resource_id=test_id,
+            resource_type=”global_test”,
+            action=”Global test allocations updated”,
+            details={“studentCount”: len(student_ids)},
+        )
+        return {“allocated”: len(student_ids)}
+    except Exception as e:
+        if “doesn't exist” in str(e):
+            raise HTTPException(503, “Global tests not set up.”)
+        raise HTTPException(500, “Failed to save allocations”)
+
+
+@router.get(“/global-tests”)
 async def list_global_tests(
     request: Request,
     status: Optional[str] = None,

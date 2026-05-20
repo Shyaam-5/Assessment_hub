@@ -173,7 +173,9 @@ class AuditLogger:
                 except Exception:
                     organization_id = None
 
-            pool = await get_pool()
+            # Always write to primary DB so events persist in one place
+            # regardless of which tenant pool is active for the request.
+            pool = await get_primary_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(

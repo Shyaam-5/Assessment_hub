@@ -1629,16 +1629,25 @@ async def get_audit_logs(
     event_type: str | None = Query(None),
     user_id_filter: str | None = Query(None, alias="userId"),
 ):
-    """Return paginated audit log entries. Admin/org-admin only."""
+    """Return paginated audit log entries. Org-admin or super-admin only."""
+    auth_role = getattr(request.state, "auth_role", "") or ""
     actor = getattr(request.state, "auth_user_id", None) or ""
-    if not await _has_any_permission(actor, ["admin.view", "audit.view"]):
+    org_id = getattr(request.state, "organization_id", None) or ""
+    is_org_admin = auth_role == "organization_admin"
+    is_super_admin = auth_role == "admin"
+    if not (is_org_admin or is_super_admin):
         raise HTTPException(status_code=403, detail="Admin permission required")
 
+    # Audit events are written to the primary DB — always read from there.
     pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             conditions = []
             params: list = []
+            # Org admins see only their own org's events.
+            if is_org_admin and org_id:
+                conditions.append("organization_id = %s")
+                params.append(org_id)
             if event_type:
                 conditions.append("event_type = %s")
                 params.append(event_type)
@@ -1649,11 +1658,11 @@ async def get_audit_logs(
             try:
                 await cur.execute(
                     f"SELECT id, event_type, user_id, ip_address, resource_type, resource_id, action, details, created_at "
-                    f"FROM audit_log {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                    f"FROM audit_events {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
                     [*params, limit, offset],
                 )
                 rows = await cur.fetchall()
-                await cur.execute(f"SELECT COUNT(*) AS total FROM audit_log {where}", params)
+                await cur.execute(f"SELECT COUNT(*) AS total FROM audit_events {where}", params)
                 count_row = await cur.fetchone()
             except Exception:
                 rows = []
@@ -1684,9 +1693,15 @@ async def get_system_errors(
     hours: int = Query(24, ge=1, le=168),
 ):
     """Return system error counts and recent errors for the error monitoring dashboard. Admin only."""
-    actor = getattr(request.state, "auth_user_id", None) or ""
-    if not await _has_any_permission(actor, ["admin.view", "audit.view"]):
+    auth_role = getattr(request.state, "auth_role", "") or ""
+    org_id = getattr(request.state, "organization_id", None) or ""
+    is_org_admin = auth_role == "organization_admin"
+    is_super_admin = auth_role == "admin"
+    if not (is_org_admin or is_super_admin):
         raise HTTPException(status_code=403, detail="Admin permission required")
+
+    org_clause = "AND organization_id = %s" if (is_org_admin and org_id) else ""
+    org_param = [org_id] if (is_org_admin and org_id) else []
 
     pool = await get_primary_pool()
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -1694,18 +1709,18 @@ async def get_system_errors(
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             try:
                 await cur.execute(
-                    "SELECT event_type, COUNT(*) AS count FROM audit_log "
-                    "WHERE event_type IN ('SYSTEM_ERROR','DATABASE_QUERY_ERROR','ACCESS_DENIED','PERMISSION_DENIED') "
-                    "AND created_at >= %s GROUP BY event_type ORDER BY count DESC",
-                    (since,),
+                    f"SELECT event_type, COUNT(*) AS count FROM audit_events "
+                    f"WHERE event_type IN ('SYSTEM_ERROR','DATABASE_QUERY_ERROR','ACCESS_DENIED','PERMISSION_DENIED') "
+                    f"AND created_at >= %s {org_clause} GROUP BY event_type ORDER BY count DESC",
+                    [since, *org_param],
                 )
                 summary = await cur.fetchall()
                 await cur.execute(
-                    "SELECT id, event_type, user_id, ip_address, resource_type, action, details, created_at "
-                    "FROM audit_log "
-                    "WHERE event_type IN ('SYSTEM_ERROR','DATABASE_QUERY_ERROR','ACCESS_DENIED','PERMISSION_DENIED') "
-                    "AND created_at >= %s ORDER BY created_at DESC LIMIT 50",
-                    (since,),
+                    f"SELECT id, event_type, user_id, ip_address, resource_type, action, details, created_at "
+                    f"FROM audit_events "
+                    f"WHERE event_type IN ('SYSTEM_ERROR','DATABASE_QUERY_ERROR','ACCESS_DENIED','PERMISSION_DENIED') "
+                    f"AND created_at >= %s {org_clause} ORDER BY created_at DESC LIMIT 50",
+                    [since, *org_param],
                 )
                 recent = await cur.fetchall()
             except Exception:
