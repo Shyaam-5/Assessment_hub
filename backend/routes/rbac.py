@@ -855,6 +855,46 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
                     (exam_taker_role_id, perm),
                 )
 
+            # Seed default content creator role for test/exam management.
+            content_creator_role_id = str(uuid.uuid4())
+            await cur.execute(
+                """
+                INSERT INTO roles (id, organization_id, name, slug, description, is_system)
+                VALUES (%s, %s, %s, %s, %s, 1)
+                """,
+                (
+                    content_creator_role_id,
+                    org_id,
+                    "Content Creator",
+                    "content-creator",
+                    "Staff role for creating and assigning tests",
+                ),
+            )
+            content_creator_perms = [
+                "tests.create",
+                "tests.view",
+                "tests.update",
+                "tests.assign",
+                "tests.view_allocated",
+                "tests.attempt",
+                "aptitude.create",
+                "aptitude.assign",
+                "aptitude.attempt",
+                "coding.create",
+                "coding.assign",
+                "coding.attempt",
+                "communication.create",
+                "communication.assign",
+                "communication.attempt",
+            ]
+            for perm in content_creator_perms:
+                if perm not in _allowed_permissions_for_subscription(subscription_type):
+                    continue
+                await cur.execute(
+                    "INSERT INTO role_permissions (role_id, permission_key) VALUES (%s, %s)",
+                    (content_creator_role_id, perm),
+                )
+
             await cur.execute(
                 """
                 INSERT INTO users (id, name, email, password, role, organization_id, status, must_change_password, created_at)

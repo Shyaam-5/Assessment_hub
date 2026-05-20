@@ -42,10 +42,11 @@
 | Feature | Free Trial | Basic | Pro |
 |---------|-----------|-------|-----|
 | User management (create / view users) | ✓ (create + view) | ✓ (full CRUD) | ✓ |
-| Role management (create / update custom roles) | ✗ | ✓ | ✓ |
-| Create & assign MCQ Tests | ✓ | ✓ | ✓ |
-| Create Coding / Aptitude / Communication exams | ✗ | ✓ | ✓ |
-| Assign exams to users | ✓ (tests only) | ✓ (all types) | ✓ |
+| Role management — view existing roles | ✓ | ✓ | ✓ |
+| Role management — create / update custom roles | ✗ | ✓ | ✓ |
+| Create & assign MCQ Tests | ✓ (via Content Creator role) | ✓ | ✓ |
+| Create Coding / Aptitude / Communication exams | ✗ | ✓ (via Basic Content Creator) | ✓ |
+| Assign exams to users | ✓ (MCQ tests only) | ✓ (all types) | ✓ |
 | Evaluate / grade submissions | ✗ | ✓ | ✓ |
 | View analytics dashboard | ✓ (view only) | ✓ (view only) | ✓ |
 | Export analytics | ✗ | ✗ | ✓ |
@@ -56,6 +57,8 @@
 | Student — attempt assigned exams | ✓ | ✓ | ✓ |
 | Student — view own results | ✓ | ✓ | ✓ |
 | Tenant database self-configure (org admin) | ✓ | ✓ | ✓ |
+
+> **Portal structure note:** The **Org Admin portal** (`/admin`) handles user management, access control, monitoring, and analytics only. All exam *creation* is done by role-based staff users logged into the **Staff portal** (`/role`) using a role that has content-creation permissions. Three system roles are seeded when an org is created: **Organization Admin**, **Content Creator**, and **Exam Taker**.
 
 ---
 
@@ -73,9 +76,9 @@
 
 ### What to verify
 
-- [ ] Sidebar shows: Organizations, Platform Health, Users (platform level), Audit Logs.
+- [ ] Sidebar shows: **Dashboard**, **Organizations** (All Organizations, Create Organization, Manage Users — expanded by default), **Infrastructure** (Tenant Database, Usage & Limits), **Analytics**.
 - [ ] No "Create Organization" form shows DB URL or secret ref fields — only: Org Name, Org Code, Subscription Type, Admin Name, Admin Email, Admin Password.
-- [ ] Platform Health page loads without errors.
+- [ ] The Organizations group is expanded by default; clicking its header collapses and re-expands it correctly.
 
 ---
 
@@ -107,10 +110,9 @@
 5. After password change, you land on `/admin` (org admin portal).
 
 **Expected:**
-- [ ] Sidebar shows **Users**, **Tests**, **Analytics**, **Proctoring** sections.
-- [ ] **Roles** section is **NOT** visible (role management is not in Free Trial).
-- [ ] **Coding / Aptitude / Communication** exam create options are **NOT** visible.
-- [ ] Welcome banner shows role name and "Use the sidebar to navigate".
+- [ ] Sidebar shows: **Dashboard**, **Access Control** (Roles & Permissions, Users — expanded by default), **Tenant Database**, **Monitoring** (All Submissions, Live Monitoring, Proctoring Agent, Behavior Analysis), **Analytics** (Analytics, Org Analytics), **System** (Audit Logs, Error Monitoring).
+- [ ] **Roles & Permissions** is visible (Free Trial includes `roles.view`) but the **Create Role** button is NOT available (no `roles.create` in Free Trial).
+- [ ] No **Tests / Coding / Aptitude / Communication create** sections exist in this portal. Exam creation is done by the seeded **Content Creator** role user (see A5).
 
 ---
 
@@ -131,72 +133,109 @@
 
 ---
 
-### A4. Create a Student User (Org Admin)
+### A4. Create Users (Org Admin)
 
-Free Trial includes `users.create` and `users.view`, so the org admin can add students directly.
+Free Trial includes `users.create` and `users.view`, so the org admin can add users directly.
 
-1. In the org admin sidebar click **Users → Create User**.
-2. Fill in:
-   - **Name:** `FT Student`
-   - **Email:** `ftstudent@example.com`
-   - **Password:** `Student@123`
-   - **Role:** Select the `Exam Taker` role (seeded automatically when the org was created)
-3. Click **Create User**.
+**Navigate to:** Org Admin sidebar → **Access Control → Users → Create User**
+
+**Create a Content Creator (for test authoring):**
+
+| Field | Value |
+|-------|-------|
+| Name | `FT Creator` |
+| Email | `ftcreator@example.com` |
+| Password | `Creator@123` |
+| Role | `Content Creator` *(seeded system role)* |
+
+Click **Create User**.
+
+**Create a Student:**
+
+| Field | Value |
+|-------|-------|
+| Name | `FT Student` |
+| Email | `ftstudent@example.com` |
+| Password | `Student@123` |
+| Role | `Exam Taker` *(seeded system role)* |
+
+Click **Create User**.
 
 **Expected:**
-- [ ] User appears in the user list with status "active" and "Invite pending".
+- [ ] Both users appear in the user list with status "active".
+- [ ] Role dropdown shows the three seeded system roles: Organization Admin, Content Creator, Exam Taker.
 
 ---
 
-### A5. Create and Assign a Test (Org Admin)
+### A5. Create and Assign a Test (Content Creator)
 
-Free Trial includes `tests.create`, `tests.update`, and `tests.assign`.
+Free Trial allows test creation via the seeded **Content Creator** role. The Content Creator logs into the **Staff portal** (`/role`), not the admin portal.
 
-1. In the org admin sidebar click **Tests → Create Test**.
-2. Fill in:
+1. Open another **incognito tab**.
+2. Navigate to `/login` and log in as `ftcreator@example.com` with the initial password `Creator@123`.
+3. You are prompted to **change your password** (first login). Set a new strong password.
+4. You land on `/role` (Staff portal — role-based workspace).
+5. Sidebar shows: **Dashboard** and **Content Management** (collapsed by default). Click **Content Management** to expand — you should see **Global Complete Tests** only. Coding, Aptitude, and Communication options are absent (not in Free Trial).
+
+**Create an MCQ test:**
+
+1. Click **Content Management → Global Complete Tests** (expand the group first if it is collapsed).
+2. Click **Create Test** (or "+ New Test").
+3. Fill in:
    - **Title:** `FT Sample Test`
-   - Add 2–3 MCQ questions with answer options.
-3. Save / Publish the test.
-4. Go to **Tests → Assign** (or the Assign button next to the test).
-5. Assign `FT Sample Test` to `ftstudent@example.com`.
+   - Add 2–3 MCQ questions with answer options and mark the correct answer for each.
+4. Save / Publish the test.
+
+**Assign the test to the student:**
+
+1. On the test list, click **Assign** next to `FT Sample Test`.
+2. Select `ftstudent@example.com` (or the student user you created).
+3. Confirm the assignment.
 
 **Expected:**
 - [ ] Test saves and appears in the test list.
 - [ ] Assignment confirmation shown.
+- [ ] Staff portal does **not** show Coding, Aptitude, or Communication create options (those are not in Free Trial).
+
+> **Coding / Aptitude / Communication create are unavailable in Free Trial.** Attempting to navigate to those URLs returns an "Access not enabled" notice.
 
 ---
 
 ### A6. Student Takes the Exam (Free Trial)
 
-1. Open another incognito tab, login as `ftstudent@example.com`.
-2. You land on `/student` (Student Portal).
-3. Verify the sidebar shows **Learning** and **Progress** groups expanded by default.
-4. Click **Assigned Tests** — `FT Sample Test` should appear.
+1. Open another incognito tab, navigate to `/login` and log in as `ftstudent@example.com` with `Student@123`.
+2. You are prompted to **change your password** (first login). Set a new strong password.
+3. You land on `/student` (Student Portal).
+4. Verify the sidebar shows **Learning** (expanded) and **Progress** (expanded) groups.
+
+**Learning group items visible:**
+- Coding Problems, Aptitude Tests, Global Complete Tests, Skill Tests, Communication
 
 **Student takes the exam:**
 
-1. Click **Start Test** on `FT Sample Test`.
-2. Answer the MCQ questions and submit.
-3. Navigate to **My Results** — the result should appear with the score.
+1. Click **Global Complete Tests** (in the Learning group) — `FT Sample Test` should appear.
+2. Click **Start Test** on `FT Sample Test`.
+3. Answer the MCQ questions and submit.
+4. Navigate to **Progress → My Submissions** — the result should appear with the score.
 
 **Expected:**
 - [ ] Test loads and questions are visible.
 - [ ] Submit works without errors.
-- [ ] Result is visible under My Results with score.
+- [ ] Result is visible under My Submissions with score.
 
 ---
 
 ### A7. Free Trial Blocked Actions
 
-Verify the following actions are blocked (should show 403 or hidden):
+Verify the following actions are blocked (hidden or show an "Access not enabled" notice):
 
-- [ ] Org admin tries to **delete a user** → no delete button (no `users.delete` permission).
-- [ ] Org admin tries to **create a custom role** → Roles section not in sidebar.
-- [ ] Org admin tries to **create a Coding exam** → Coding create option not visible.
-- [ ] Org admin tries to **create an Aptitude exam** → Aptitude create option not visible.
-- [ ] Org admin tries to **create a Communication exam** → Communication create option not visible.
-- [ ] Org admin tries to **export analytics** → Export button not present.
-- [ ] Org admin tries to **override proctoring flags** → Override/Manage buttons not present.
+- [ ] Org admin → **Access Control → Roles & Permissions** → **Create Role** button is NOT present (no `roles.create`).
+- [ ] Org admin tries to **delete or update a user** → no delete/edit buttons shown (no `users.delete` / `users.update`).
+- [ ] Content Creator (Staff portal) tries to **create a Coding exam** → not visible in Content Management (no `coding.create` in Free Trial).
+- [ ] Content Creator tries to **create an Aptitude exam** → not visible (no `aptitude.create` in Free Trial).
+- [ ] Content Creator tries to **create a Communication exam** → not visible (no `communication.create` in Free Trial).
+- [ ] Org admin → **Analytics → Analytics** → **Export** button is NOT present (no `analytics.export`).
+- [ ] Org admin → **Monitoring → Live Monitoring** → **Override / Manage** proctoring buttons are NOT present (no `proctoring.override` / `proctoring.manage`).
 
 ---
 
@@ -220,20 +259,23 @@ Verify the following actions are blocked (should show 403 or hidden):
 
 Same as [A2](#a2-org-admin-first-login) and [A3](#a3-configure-tenant-database-org-admin) but for `basicadmin@example.com`.
 
-After DB is configured:
+After DB is configured, verify the org admin sidebar:
 
-- [ ] Sidebar now shows **Users**, **Roles**, **Tests**, **Coding**, **Aptitude**, **Communication**, **Analytics**, **Proctoring**, **Submissions**.
+- [ ] **Dashboard**, **Access Control** (Roles & Permissions, Users), **Tenant Database**, **Monitoring** (All Submissions, Skill Submissions, Live Monitoring, Proctoring Agent, Behavior Analysis), **Analytics** (Analytics, Org Analytics), **System** (Audit Logs, Error Monitoring).
+- [ ] Access Control → **Roles & Permissions** now shows a **Create Role** button (Basic includes `roles.create`).
+
+> **Note:** The org admin portal still does not show exam creation options. Exam creation is done by role-based staff users via the Staff portal (`/role`).
 
 ---
 
 ### B3. Create Custom Roles
 
-1. Click **Roles → Create Role**.
+1. Click **Access Control → Roles & Permissions → Create Role**.
 2. Create two roles:
 
-**Role 1 — Content Creator:**
-- Name: `Content Creator`
-- Permissions: `tests.create`, `tests.view`, `tests.update`, `coding.create`, `coding.assign`, `aptitude.create`, `aptitude.assign`, `communication.create`, `communication.assign`
+**Role 1 — Content Creator (custom):**
+- Name: `Content Creator (Custom)`
+- Permissions: `tests.create`, `tests.view`, `tests.update`, `tests.assign`, `coding.create`, `coding.assign`, `aptitude.create`, `aptitude.assign`, `communication.create`, `communication.assign`
 
 **Role 2 — Exam Evaluator:**
 - Name: `Evaluator`
@@ -242,50 +284,50 @@ After DB is configured:
 3. Save both roles.
 
 **Expected:**
-- [ ] Roles appear in the Roles list.
+- [ ] Roles appear in the Roles list alongside the system-seeded roles.
 - [ ] Permissions shown match what was selected.
+
+> **Tip:** You may also use the seeded "Content Creator" system role (which has the same test creation permissions) if you prefer not to create a custom role.
 
 ---
 
 ### B4. Create Staff Users and Assign Roles
 
-1. Click **Users → Create User**.
+1. Click **Access Control → Users → Create User**.
 2. Create:
 
-| Name | Email | Password | Role Assignment |
-|------|-------|----------|-----------------|
-| Content Creator User | `creator@example.com` | `Creator@123` | Content Creator |
+| Name | Email | Password | Role |
+|------|-------|----------|------|
+| Content Creator User | `creator@example.com` | `Creator@123` | Content Creator (Custom) |
 | Evaluator User | `evaluator@example.com` | `Eval@123` | Evaluator |
-| Basic Student | `basicstudent@example.com` | `Student@123` | Exam Taker / learner |
-
-3. Assign the custom roles during user creation or via the role assignment panel.
+| Basic Student | `basicstudent@example.com` | `Student@123` | Exam Taker |
 
 ---
 
 ### B5. Create Exam Content (as Content Creator)
 
-1. Open incognito tab, login as `creator@example.com`.
-2. You land on `/role` (role-based staff workspace).
-3. Verify the welcome banner shows "Content Creator" role name.
-4. Sidebar should show only the sections permitted by Content Creator permissions.
+1. Open incognito tab, navigate to `/login` and log in as `creator@example.com` with `Creator@123`.
+2. You are prompted to **change your password** (first login). Set a new strong password.
+3. You land on `/role` (Staff portal — role-based workspace).
+4. Click **Content Management** to expand the group (collapsed by default). You should see: **Aptitude Tests**, **Global Complete Tests**, **Skill Tests**, **Communication Tests**.
 
 **Create an Aptitude Test:**
-1. Navigate to **Aptitude → Create**.
+1. Navigate to **Content Management → Aptitude Tests**.
 2. Add 5 aptitude questions (numerical/logical).
 3. Save and publish.
 
 **Create a Coding Challenge:**
-1. Navigate to **Coding → Create**.
+1. Navigate to **Content Management → Skill Tests**.
 2. Add a problem with test cases.
 3. Save and publish.
 
 **Create a Communication Test:**
-1. Navigate to **Communication → Create**.
+1. Navigate to **Content Management → Communication Tests**.
 2. Add speaking/listening prompts.
 3. Save.
 
 **Assign exams to `basicstudent@example.com`:**
-1. For each exam type created above, go to **Assign** and assign to the student.
+1. For each exam type created above, click **Assign** and assign to the student.
 
 **Expected:**
 - [ ] All three exam types created without errors.
@@ -295,27 +337,28 @@ After DB is configured:
 
 ### B6. Student Takes All Three Exam Types
 
-1. Incognito tab → login as `basicstudent@example.com`.
-2. Student portal opens, Learning and Progress groups expanded.
-3. Take each assigned exam:
-   - **Assigned Tests** → take the aptitude test → submit.
-   - **Assigned Tests** → take the coding challenge → write code → run test cases → submit.
-   - **Assigned Tests** → take the communication test → complete → submit.
-4. Go to **My Results** — all three results should appear.
+1. Incognito tab → navigate to `/login` and log in as `basicstudent@example.com` with `Student@123`.
+2. You are prompted to **change your password** (first login). Set a new strong password.
+3. Student portal opens; Learning and Progress groups expanded.
+4. Take each assigned exam:
+   - **Learning → Aptitude Tests** → take the aptitude test → submit.
+   - **Learning → Skill Tests** → take the coding challenge → write code → run test cases → submit.
+   - **Learning → Communication** → complete → submit.
+5. Go to **Progress → My Submissions** — all three results should appear.
 
 **Expected:**
 - [ ] Each exam loads with correct content.
 - [ ] Aptitude: score calculated immediately.
 - [ ] Coding: test case pass/fail shown.
 - [ ] Communication: submission recorded, awaiting evaluation.
-- [ ] Results panel shows all three entries.
+- [ ] My Submissions panel shows all three entries.
 
 ---
 
 ### B7. Evaluator Reviews Submissions
 
-1. Login as `evaluator@example.com`.
-2. Navigate to **Submissions**.
+1. Log in as `evaluator@example.com` with `Eval@123`. On first login you will be prompted to change your password. After changing it, you land on `/role`.
+2. Navigate to **Monitoring → All Submissions** (or Skill Submissions).
 3. Find the student's coding and communication submissions.
 4. For coding: review code, override score if needed.
 5. For communication: score each prompt, add comments, submit evaluation.
@@ -329,7 +372,7 @@ After DB is configured:
 
 ### B8. Analytics (Basic — View Only)
 
-1. As org admin, navigate to **Analytics**.
+1. As org admin, navigate to **Analytics → Analytics**.
 2. Verify dashboards load: exam completion rates, score distributions, user activity.
 3. Look for an **Export** button — it should **NOT** be present on Basic.
 
@@ -341,7 +384,7 @@ After DB is configured:
 
 ### B9. Proctoring (Basic — View Only)
 
-1. As org admin, navigate to **Proctoring**.
+1. As org admin, navigate to **Monitoring → Live Monitoring** or **Proctoring Agent**.
 2. View the proctoring events/flags for the student exams taken above.
 3. Look for **Override** or **Manage** buttons — they should **NOT** be present on Basic.
 
@@ -369,9 +412,10 @@ After DB is configured:
 
 ### C2. Org Admin First Login & DB Setup
 
-Same flow as before for `proadmin@example.com`. After DB setup:
+Same flow as before for `proadmin@example.com`. After DB setup, verify:
 
-- [ ] Sidebar shows all sections including Analytics Export, Proctoring with manage controls.
+- [ ] Sidebar same as Basic (Dashboard, Access Control, Tenant Database, Monitoring, Analytics, System).
+- [ ] Analytics export and proctoring override/manage are enabled — verify in C4 and C5.
 
 ---
 
@@ -383,7 +427,7 @@ Perform all the same steps as Tier B (create roles, users, exams, assign, studen
 
 ### C4. Analytics Export (Pro Only)
 
-1. As org admin navigate to **Analytics**.
+1. As org admin navigate to **Analytics → Analytics**.
 2. Verify an **Export** button is present.
 3. Click Export — a CSV/Excel file should download.
 
@@ -395,7 +439,7 @@ Perform all the same steps as Tier B (create roles, users, exams, assign, studen
 
 ### C5. Proctoring Override & Management (Pro Only)
 
-1. Navigate to **Proctoring**.
+1. Navigate to **Monitoring → Live Monitoring** or **Proctoring Agent**.
 2. Find a flagged proctoring event from a student exam.
 3. Click **Override** — should allow marking the flag as reviewed/cleared.
 4. Click **Manage** — should allow configuring proctoring rules (camera thresholds, tab-switch limits, etc.).
@@ -409,12 +453,12 @@ Perform all the same steps as Tier B (create roles, users, exams, assign, studen
 
 ### C6. Full Permission Matrix Verification (Pro)
 
-As a Pro org admin, verify every sidebar section is accessible:
+As a Pro org admin, verify every sidebar section is accessible and role-based users can use all create/evaluate features:
 
-- [ ] Users — Create / View / Update / Delete
-- [ ] Roles — Create / View / Update / Delete
-- [ ] Tests — Create / View / Update / Delete / Assign
-- [ ] Coding — Create / Assign / Evaluate
+- [ ] Users — Create / View (org admin portal)
+- [ ] Roles — Create / View / Update / Delete (org admin portal)
+- [ ] Tests (MCQ) — Create / Assign (Staff portal, Content Creator role)
+- [ ] Skill (Coding) — Create / Assign / Evaluate
 - [ ] Aptitude — Create / Assign / Evaluate
 - [ ] Communication — Create / Assign / Evaluate
 - [ ] Analytics — View + Export
@@ -436,10 +480,13 @@ These checks should be run after all three tiers are tested.
 
 | Action | Free Trial | Basic | Pro |
 |--------|-----------|-------|-----|
-| Create user via org admin | Should fail / hidden | Should work | Should work |
+| Create user (org admin) | Should work (`users.create` in Free Trial) | Should work | Should work |
+| Create MCQ test (Content Creator staff user) | Should work | Should work | Should work |
+| Create Coding/Aptitude exam (Content Creator) | Should fail / hidden | Should work | Should work |
 | Export analytics | Should fail / hidden | Should fail / hidden | Should work |
 | Proctoring override | Should fail / hidden | Should fail / hidden | Should work |
-| Assign exam | Should fail / hidden | Should work | Should work |
+| Assign MCQ test | Should work (`tests.assign` in Free Trial) | Should work | Should work |
+| Create custom role (org admin) | Should fail / hidden (no Create button) | Should work | Should work |
 
 ### Session & Auth Checks
 
@@ -451,7 +498,7 @@ These checks should be run after all three tiers are tested.
 
 - [ ] Learning and Progress nav groups are **expanded by default** on first load (not collapsed).
 - [ ] Navigating between sections preserves the student session.
-- [ ] "My Results" shows only the current student's own results.
+- [ ] "My Submissions" (Progress group) shows only the current student's own results.
 
 ---
 
@@ -470,4 +517,4 @@ When you find an issue, include the following in your report:
 
 ---
 
-*Guide version: 1.0 — matches commit `2b94824` (feat: move tenant DB config to org admin and remove secret refs)*
+*Guide version: 2.0 — updated to reflect actual portal structure: org admin portal handles access control only; exam creation is role-based via staff portal (`/role`). Free Trial seeds Content Creator and Exam Taker roles automatically.*
