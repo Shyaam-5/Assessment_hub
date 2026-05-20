@@ -321,7 +321,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     }
 
     const fetchOrgUsers = async (orgId) => {
-        if (!orgId || superAdminOnly) return
+        if (!orgId) return
         const res = await axios.get(`${API_BASE}/orgs/${orgId}/users`, { headers })
         setOrgUsers(res.data || [])
     }
@@ -358,16 +358,23 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     }, [])
 
     useEffect(() => {
-        if (superAdminOnly) return
         if (!selectedOrg) {
             setRoles([])
             setOrgUsers([])
             return
         }
+        if (superAdminOnly) {
+            if (section === 'org-users') {
+                Promise.all([fetchRoles(selectedOrg), fetchOrgUsers(selectedOrg)]).catch((e) => {
+                    setMessage(e?.response?.data?.detail || 'Failed to load org users')
+                })
+            }
+            return
+        }
         Promise.all([fetchRoles(selectedOrg), fetchOrgUsers(selectedOrg), fetchAuditEvents(selectedOrg)]).catch((e) => {
             setMessage(e?.response?.data?.detail || 'Failed to load selected organization access data')
         })
-    }, [selectedOrg, superAdminOnly])
+    }, [selectedOrg, superAdminOnly, section])
 
     useEffect(() => {
         if (!superAdminOnly || !selectedOrg) return
@@ -1020,6 +1027,127 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                             </table>
                         </div>
                     </div>
+                </>}
+
+                {/* ── MANAGE ORG USERS (super admin) ── */}
+                {section === 'org-users' && <>
+                    <OrgSelectorBar />
+                    {selectedOrg && (
+                        <div style={card}>
+                            <h3 style={{ marginTop: 0 }}>Create User in {selectedOrgRecord?.name || 'Organization'}</h3>
+                            <div style={{ ...muted, marginBottom: 12 }}>
+                                Subscription: <strong>{(selectedOrgRecord?.subscription_type || 'free_trial').replace('_', ' ')}</strong>
+                                {selectedOrgRecord?.subscription_type === 'free_trial' && ' — org admin cannot create users on Free Trial, use this panel to seed them.'}
+                            </div>
+                            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                                <input style={input} placeholder="User name" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} />
+                                <input style={input} placeholder="Email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} />
+                                <input style={input} type="password" placeholder="Password" value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} />
+                                <select style={input} value={userForm.roleId} onChange={(e) => setUserForm({ ...userForm, roleId: e.target.value })}>
+                                    <option value="">Select role</option>
+                                    {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                </select>
+                                <input style={input} placeholder="Phone (optional)" value={userForm.phone} onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })} />
+                                <input style={input} placeholder="Batch / Dept (optional)" value={userForm.batch} onChange={(e) => setUserForm({ ...userForm, batch: e.target.value })} />
+                            </div>
+                            <div style={{ marginTop: 12 }}>
+                                <button style={btn} onClick={createUser} disabled={actionLoading === 'user'}>
+                                    {actionLoading === 'user' ? 'Creating...' : 'Create User'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {orgUsers.length > 0 && (
+                        <div style={{ ...card, overflowX: 'auto' }}>
+                            <h4 style={{ margin: '0 0 12px' }}>Users in {selectedOrgRecord?.name || 'Organization'} ({orgUsers.length})</h4>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+                                <thead>
+                                    <tr>
+                                        {['Name', 'Email', 'Role', 'Status', 'Activity', 'Created', 'Actions'].map((h) => (
+                                            <th key={h} style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {orgUsers.map((orgUser) => (
+                                        <tr key={orgUser.id}>
+                                            {editingUserId === orgUser.id ? (
+                                                <>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}><input style={input} value={userEditForm.name} onChange={(e) => setUserEditForm({ ...userEditForm, name: e.target.value })} /></td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}><input style={input} value={userEditForm.email} onChange={(e) => setUserEditForm({ ...userEditForm, email: e.target.value })} /></td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <select style={input} value={userEditForm.roleId} onChange={(e) => setUserEditForm({ ...userEditForm, roleId: e.target.value })}>
+                                                            <option value="">Select role</option>
+                                                            {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <select style={input} value={userEditForm.status} onChange={(e) => setUserEditForm({ ...userEditForm, status: e.target.value })}>
+                                                            <option value="active">Active</option>
+                                                            <option value="inactive">Inactive</option>
+                                                            <option value="suspended">Suspended</option>
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}><div style={muted}>Editing</div></td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.created_at ? new Date(orgUser.created_at).toLocaleDateString() : '-'}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                            <button style={btn} onClick={updateUser} disabled={actionLoading === `user-edit-${orgUser.id}`}>{actionLoading === `user-edit-${orgUser.id}` ? 'Saving...' : 'Save'}</button>
+                                                            <button style={{ ...btn, background: '#475569' }} onClick={() => { setEditingUserId(''); setUserEditForm({ name: '', email: '', roleId: '', phone: '', batch: '', status: 'active' }) }}>Cancel</button>
+                                                        </div>
+                                                    </td>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.name}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div>{orgUser.email}</div>
+                                                        <div style={muted}>{[orgUser.phone, orgUser.batch].filter(Boolean).join(' - ') || ''}</div>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.role_name || 'Unassigned'}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <span style={{ color: orgUser.status === 'inactive' || orgUser.status === 'suspended' ? '#ef4444' : '#16a34a', fontWeight: 700 }}>{orgUser.status || 'active'}</span>
+                                                        {orgUser.must_change_password ? <div style={{ color: '#f59e0b', fontSize: 12 }}>Invite pending</div> : <div style={muted}>Active login</div>}
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div>{orgUser.last_login_at ? `Last login ${new Date(orgUser.last_login_at).toLocaleDateString()}` : 'No login yet'}</div>
+                                                    </td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>{orgUser.created_at ? new Date(orgUser.created_at).toLocaleDateString() : '-'}</td>
+                                                    <td style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                            <button style={{ ...btn, background: '#334155' }} onClick={() => beginEditUser(orgUser)}>Edit</button>
+                                                            <button style={{ ...btn, background: '#0f766e' }} onClick={() => setResetPasswordFor(orgUser)}>Reset Pwd</button>
+                                                            <button style={{ ...btn, background: '#dc2626' }} onClick={() => deactivateUser(orgUser)} disabled={actionLoading === `user-delete-${orgUser.id}` || orgUser.status === 'inactive'}>
+                                                                {actionLoading === `user-delete-${orgUser.id}` ? 'Deactivating...' : 'Deactivate'}
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </>
+                                            )}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                    {selectedOrg && orgUsers.length === 0 && (
+                        <div style={{ ...card, color: 'var(--text-muted)' }}>No users in this organization yet. Create one above.</div>
+                    )}
+                    {resetPasswordFor && (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'grid', placeItems: 'center', padding: 16 }}>
+                            <div style={{ ...card, width: 'min(460px, 100%)' }}>
+                                <h3 style={{ marginTop: 0 }}>Reset / Reinvite User</h3>
+                                <p style={muted}>User: <strong>{resetPasswordFor.name}</strong>. They will be asked to change this temporary password after login.</p>
+                                <input style={input} type="password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} placeholder="Temporary password" />
+                                <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                    <button style={{ ...btn, background: '#475569' }} onClick={() => { setResetPasswordFor(null); setResetPassword('') }}>Cancel</button>
+                                    <button style={btn} onClick={resetUserPassword} disabled={actionLoading === `reset-${resetPasswordFor.id}`}>
+                                        {actionLoading === `reset-${resetPasswordFor.id}` ? 'Sending...' : 'Reset & Send'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </>}
             </div>
         )

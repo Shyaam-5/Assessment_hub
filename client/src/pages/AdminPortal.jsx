@@ -363,6 +363,7 @@ function AdminPortal() {
                 children: [
                     { path: '/admin/organizations', label: 'All Organizations', icon: <Globe size={20} /> },
                     { path: '/admin/create-org', label: 'Create Organization', icon: <Plus size={20} /> },
+                    { path: '/admin/org-users', label: 'Manage Users', icon: <Users size={20} /> },
                 ],
             },
             {
@@ -384,6 +385,7 @@ function AdminPortal() {
                     <Route path="/create-org" element={<TenantRBACManager user={user} superAdminOnly section="create-org" />} />
                     <Route path="/tenant-db" element={<TenantRBACManager user={user} superAdminOnly section="tenant-db" />} />
                     <Route path="/usage" element={<TenantRBACManager user={user} superAdminOnly section="usage" />} />
+                    <Route path="/org-users" element={<TenantRBACManager user={user} superAdminOnly section="org-users" />} />
                     <Route path="/org-analytics" element={<OrganizationAnalyticsPanel user={user} />} />
                     <Route path="*" element={<Navigate to="/admin" replace />} />
                 </Routes>
