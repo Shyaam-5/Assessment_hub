@@ -115,6 +115,8 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     const [resetPasswordFor, setResetPasswordFor] = useState(null)
     const [resetPassword, setResetPassword] = useState('')
     const [creatingOrg, setCreatingOrg] = useState(false)
+    const [changingPlanOrg, setChangingPlanOrg] = useState(null)
+    const [changingPlanValue, setChangingPlanValue] = useState('')
 
     const headers = useMemo(() => {
         const h = { 'x-user-id': user?.id || '' }
@@ -311,6 +313,22 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
             await fetchOrgs()
         } catch (e) {
             setMessage(e?.response?.data?.detail || 'Failed to update organization status')
+        }
+    }
+
+    const changeOrgSubscription = async (orgId) => {
+        if (!changingPlanValue) return
+        try {
+            await axios.patch(
+                `${API_BASE}/platform/organizations/${orgId}/subscription`,
+                { subscriptionType: changingPlanValue },
+                { headers }
+            )
+            setMessage(`Subscription plan updated to ${subscriptionPlans?.[changingPlanValue]?.label || changingPlanValue}`)
+            setChangingPlanOrg(null)
+            await fetchOrgs()
+        } catch (e) {
+            setMessage(e?.response?.data?.detail || 'Failed to update subscription plan')
         }
     }
 
@@ -838,9 +856,33 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
                                             {subscriptionPlans?.[(o.subscription_type || 'free_trial').toLowerCase()]?.label || (o.subscription_type || 'free_trial')}
                                         </div>
                                     </div>
-                                    <button style={{ ...btn, background: o.is_active ? '#dc2626' : '#16a34a', minWidth: 100 }} onClick={() => toggleOrgStatus(o)}>
-                                        {o.is_active ? 'Deactivate' : 'Activate'}
-                                    </button>
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        {changingPlanOrg === o.id ? (
+                                            <>
+                                                <select
+                                                    style={{ ...input, minWidth: 120 }}
+                                                    value={changingPlanValue}
+                                                    onChange={(e) => setChangingPlanValue(e.target.value)}
+                                                >
+                                                    {(Object.keys(subscriptionPlans).length
+                                                        ? Object.entries(subscriptionPlans)
+                                                        : [['free_trial', { label: 'Free Trial' }], ['basic', { label: 'Basic' }], ['pro', { label: 'Pro' }]]
+                                                    ).map(([plan, meta]) => (
+                                                        <option key={plan} value={plan}>{meta?.label || plan}</option>
+                                                    ))}
+                                                </select>
+                                                <button style={{ ...btn, minWidth: 64 }} onClick={() => changeOrgSubscription(o.id)}>Save</button>
+                                                <button style={{ ...btn, background: '#334155', minWidth: 64 }} onClick={() => setChangingPlanOrg(null)}>Cancel</button>
+                                            </>
+                                        ) : (
+                                            <button style={{ ...btn, background: '#334155', minWidth: 100 }} onClick={() => { setChangingPlanOrg(o.id); setChangingPlanValue((o.subscription_type || 'free_trial').toLowerCase()) }}>
+                                                Change Plan
+                                            </button>
+                                        )}
+                                        <button style={{ ...btn, background: o.is_active ? '#dc2626' : '#16a34a', minWidth: 100 }} onClick={() => toggleOrgStatus(o)}>
+                                            {o.is_active ? 'Deactivate' : 'Activate'}
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>

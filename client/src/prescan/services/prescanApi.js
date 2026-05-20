@@ -34,10 +34,12 @@ function toErrorMessage(body, status) {
 }
 
 async function request(path, options = {}) {
+  const token = (typeof localStorage !== 'undefined' && localStorage.getItem('authToken')) || '';
   const res = await fetch(`${apiOrigin()}${path}`, {
     headers: {
       'Content-Type': 'application/json',
       'ngrok-skip-browser-warning': 'true',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
     ...options,

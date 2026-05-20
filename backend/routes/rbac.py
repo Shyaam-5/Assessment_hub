@@ -447,6 +447,10 @@ class OrganizationStatusBody(BaseModel):
     isActive: bool
 
 
+class SubscriptionChangeBody(BaseModel):
+    subscriptionType: str
+
+
 class UsageLimitsBody(BaseModel):
     maxUsers: int | None = None
     maxActiveUsers: int | None = None
@@ -1112,6 +1116,39 @@ async def update_organization_status(org_id: str, body: OrganizationStatusBody, 
                 raise HTTPException(status_code=404, detail="Organization not found")
         await conn.commit()
     return {"success": True, "organizationId": org_id, "isActive": body.isActive}
+
+
+@router.patch("/platform/organizations/{org_id}/subscription")
+async def change_organization_subscription(org_id: str, body: SubscriptionChangeBody, request: Request):
+    actor = _request_user_id(request)
+    if not await _is_platform_super_admin(actor):
+        raise HTTPException(status_code=403, detail="Only platform super admin can change subscription plan")
+
+    new_type = _normalized_subscription_type(body.subscriptionType)
+
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT subscription_type FROM organizations WHERE id = %s", (org_id,))
+            org = await cur.fetchone()
+            if not org:
+                raise HTTPException(status_code=404, detail="Organization not found")
+            old_type = (org.get("subscription_type") or DEFAULT_SUBSCRIPTION_TYPE)
+            await cur.execute(
+                "UPDATE organizations SET subscription_type = %s WHERE id = %s",
+                (new_type, org_id),
+            )
+        await conn.commit()
+
+    get_audit_logger().log_admin_action(
+        admin_id=actor,
+        ip_address=getattr(request.state, "ip_address", "UNKNOWN") or "UNKNOWN",
+        event_type=AuditEventType.ADMIN_USER_MODIFIED,
+        resource_id=org_id,
+        resource_type="organization",
+        changes={"subscription_type": {"from": old_type, "to": new_type}},
+    )
+    return {"success": True, "organizationId": org_id, "subscriptionType": new_type}
 
 
 @router.get("/platform/organizations/analytics")

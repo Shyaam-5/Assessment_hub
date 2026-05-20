@@ -2401,7 +2401,7 @@ function GlobalTests({ user }) {
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Target size={16} color="#06b6d4" /><span>{t.totalQuestions} Questions</span></div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Award size={16} color="#f59e0b" /><span>Pass: {t.passingScore}%</span></div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><AlertTriangle size={16} color="#ef4444" /><span>Tab Limit: {t.maxTabSwitches || 3}</span></div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Zap size={16} color="#3b82f6" /><span>Attempts: {attemptCount}/{t.maxAttempts === -1 ? '∞' : (t.maxAttempts || 1)}</span></div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Zap size={16} color="#3b82f6" /><span>Attempts: {completedAttempts}/{t.maxAttempts === -1 ? '∞' : (t.maxAttempts || 1)}</span></div>
                                         {t.deadline && (
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: t.startTime && new Date(t.startTime) > new Date() ? '#f59e42' : t.deadline && new Date(t.deadline) < new Date() ? '#ef4444' : 'var(--text-muted)' }}>
                                                 <Clock size={16} color={t.startTime && new Date(t.startTime) > new Date() ? '#f59e42' : t.deadline && new Date(t.deadline) < new Date() ? '#ef4444' : '#10b981'} />
@@ -2410,7 +2410,7 @@ function GlobalTests({ user }) {
                                         )}
                                     </div>
 
-                                    {attemptCount > 0 && submission && (
+                                    {completedAttempts > 0 && submission && (
                                         <div style={{ background: 'var(--bg-tertiary)', borderRadius: '12px', padding: '1rem', marginBottom: '1rem', border: '1px solid var(--border-color)' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{locked ? 'Result Status' : 'Your Score'}</span>

@@ -12,7 +12,7 @@ from logging_config import LogConfig
 logger = LogConfig.get_logger(__name__)
 from typing import Any, Dict, List, Optional
 
-from database import get_pool
+from database import get_primary_pool
 
 logger = LogConfig.get_logger(__name__)
 
@@ -21,28 +21,28 @@ class PrescanDB:
     """Wraps the shared connection pool for environment-scan queries."""
 
     async def fetchone(self, query: str, args=None) -> Optional[Dict]:
-        pool = await get_pool()
+        pool = await get_primary_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(query, args)
                 return await cur.fetchone()
 
     async def fetchall(self, query: str, args=None) -> List[Dict]:
-        pool = await get_pool()
+        pool = await get_primary_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(query, args)
                 return await cur.fetchall() or []
 
     async def execute(self, query: str, args=None) -> int:
-        pool = await get_pool()
+        pool = await get_primary_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 result = await cur.execute(query, args)
                 return result
 
     async def execute_lastrowid(self, query: str, args=None) -> int:
-        pool = await get_pool()
+        pool = await get_primary_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(query, args)

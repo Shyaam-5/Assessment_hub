@@ -129,7 +129,7 @@ LANGUAGE_MAP = {
 }
 
 
-# â”€â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Request Bodies â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 class GlobalTestCreate(BaseModel):
     title: str = "Untitled"
@@ -190,7 +190,7 @@ class GlobalTestSubmit(BaseModel):
     terminationReason: Optional[str] = None
 
 
-# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _fmt_dt(iso: Optional[str]) -> Optional[str]:
     if not iso or not iso.strip():
@@ -536,9 +536,9 @@ async def _run_sql_and_compare(schema: str, query: str, expected_output: str) ->
         return {"isCorrect": False, "output": str(e)}
 
 
-# â”€â”€â”€ CRUD Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ CRUD Routes â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-_ALLOC_TABLE_DDL = “””
+_ALLOC_TABLE_DDL = """
     CREATE TABLE IF NOT EXISTS global_test_allocations (
         id CHAR(36) NOT NULL PRIMARY KEY,
         test_id VARCHAR(64) NOT NULL,
@@ -546,78 +546,78 @@ _ALLOC_TABLE_DDL = “””
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_global_alloc (test_id, student_id)
     )
-“””
+"""
 
 
-@router.get(“/global-tests/org-students”)
+@router.get("/global-tests/org-students")
 async def list_org_students(request: Request):
-    “””Return org students available for test allocation (requires tests.assign).”””
-    actor = (getattr(request.state, “auth_user_id”, None) or “”).strip()
-    if not await _has_any_permission(actor, [“tests.assign”]):
-        raise HTTPException(403, “Permission denied”)
+    """Return org students available for test allocation (requires tests.assign)."""
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["tests.assign"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(
-                    “SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name”
+                    "SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name"
                 )
                 rows = await cur.fetchall()
-        return [{“id”: r[“id”], “name”: r[“name”], “email”: r[“email”], “batch”: r.get(“batch”)} for r in rows]
+        return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
     except Exception as e:
-        if “doesn't exist” in str(e):
+        if "doesn't exist" in str(e):
             return []
-        raise HTTPException(500, “Failed to fetch students”)
+        raise HTTPException(500, "Failed to fetch students")
 
 
-@router.get(“/global-tests/{test_id}/allocations”)
+@router.get("/global-tests/{test_id}/allocations")
 async def get_test_allocations(test_id: str, request: Request):
-    “””List students currently allocated to a test.”””
-    actor = (getattr(request.state, “auth_user_id”, None) or “”).strip()
-    if not await _has_any_permission(actor, [“tests.assign”]):
-        raise HTTPException(403, “Permission denied”)
+    """List students currently allocated to a test."""
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["tests.assign"]):
+        raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(_ALLOC_TABLE_DDL)
                 await cur.execute(
-                    “””SELECT a.student_id, u.name, u.email
+                    """SELECT a.student_id, u.name, u.email
                        FROM global_test_allocations a
                        JOIN users u ON u.id = a.student_id
-                       WHERE a.test_id = %s ORDER BY u.name”””,
+                       WHERE a.test_id = %s ORDER BY u.name""",
                     (test_id,),
                 )
                 rows = await cur.fetchall()
-        return [{“studentId”: r[“student_id”], “name”: r[“name”], “email”: r[“email”]} for r in rows]
+        return [{"studentId": r["student_id"], "name": r["name"], "email": r["email"]} for r in rows]
     except Exception as e:
-        if “doesn't exist” in str(e):
+        if "doesn't exist" in str(e):
             return []
-        raise HTTPException(500, “Failed to fetch allocations”)
+        raise HTTPException(500, "Failed to fetch allocations")
 
 
-@router.post(“/global-tests/{test_id}/allocations”)
+@router.post("/global-tests/{test_id}/allocations")
 async def set_test_allocations(test_id: str, request: Request):
-    “””Replace allocations for a test with the given student list.”””
-    actor = (getattr(request.state, “auth_user_id”, None) or “”).strip()
-    if not await _has_any_permission(actor, [“tests.assign”]):
-        raise HTTPException(403, “Permission denied”)
+    """Replace allocations for a test with the given student list."""
+    actor = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor, ["tests.assign"]):
+        raise HTTPException(403, "Permission denied")
     body = await request.json()
-    student_ids: list = body.get(“studentIds”, [])
+    student_ids: list = body.get("studentIds", [])
     if not isinstance(student_ids, list):
-        raise HTTPException(400, “studentIds must be a list”)
+        raise HTTPException(400, "studentIds must be a list")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(_ALLOC_TABLE_DDL)
-                await cur.execute(“DELETE FROM global_test_allocations WHERE test_id = %s”, (test_id,))
+                await cur.execute("DELETE FROM global_test_allocations WHERE test_id = %s", (test_id,))
                 for sid in student_ids:
-                    sid = (sid or “”).strip()
+                    sid = (sid or "").strip()
                     if not sid:
                         continue
                     await cur.execute(
-                        “INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)”,
+                        "INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
                         (str(uuid.uuid4()), test_id, sid),
                     )
             await conn.commit()
@@ -626,18 +626,18 @@ async def set_test_allocations(test_id: str, request: Request):
             user_id=actor,
             ip_address=_client_ip(request),
             resource_id=test_id,
-            resource_type=”global_test”,
-            action=”Global test allocations updated”,
-            details={“studentCount”: len(student_ids)},
+            resource_type="global_test",
+            action="Global test allocations updated",
+            details={"studentCount": len(student_ids)},
         )
-        return {“allocated”: len(student_ids)}
+        return {"allocated": len(student_ids)}
     except Exception as e:
-        if “doesn't exist” in str(e):
-            raise HTTPException(503, “Global tests not set up.”)
-        raise HTTPException(500, “Failed to save allocations”)
+        if "doesn't exist" in str(e):
+            raise HTTPException(503, "Global tests not set up.")
+        raise HTTPException(500, "Failed to save allocations")
 
 
-@router.get(“/global-tests”)
+@router.get("/global-tests")
 async def list_global_tests(
     request: Request,
     status: Optional[str] = None,
@@ -963,7 +963,7 @@ async def delete_global_test(test_id: str, request: Request):
         raise HTTPException(500, "Internal server error")
 
 
-# â”€â”€â”€ Question routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Question routes â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 @router.post("/global-tests/{test_id}/questions")
 async def add_questions(test_id: str, body: QuestionBatch, request: Request):
@@ -1164,7 +1164,7 @@ async def global_proctoring_log(request: Request):
     return {"success": True}
 
 
-# â”€â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Submit â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 @router.post("/global-tests/{test_id}/submit")
 async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Request):
@@ -1458,7 +1458,7 @@ async def submit_global_test(test_id: str, body: GlobalTestSubmit, request: Requ
     }
 
 
-# â”€â”€â”€ Submission listing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Submission listing â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 @router.get("/global-test-submissions")
 async def list_global_submissions(
@@ -1652,7 +1652,7 @@ async def get_global_submission(submission_id: str, request: Request):
         raise HTTPException(500, "Internal server error")
 
 
-# â”€â”€â”€ Personalized report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€â"€ Personalized report â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 @router.get("/global-test-submissions/{submission_id}/report")
 async def get_submission_report(submission_id: str, request: Request):
