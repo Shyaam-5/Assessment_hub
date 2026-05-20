@@ -343,6 +343,20 @@ async def _is_platform_super_admin(user_id: str) -> bool:
     return bool(row and (row.get("role") == "admin"))
 
 
+async def _is_org_admin(user_id: str, org_id: str) -> bool:
+    """True if the user is the organization_admin of this specific org (by user record role column)."""
+    if not user_id or not org_id:
+        return False
+    pool = await get_primary_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT 1 FROM users WHERE id = %s AND organization_id = %s AND role = 'organization_admin' LIMIT 1",
+                (user_id, org_id),
+            )
+            return bool(await cur.fetchone())
+
+
 async def _has_org_permission(user_id: str, org_id: str, permission: str) -> bool:
     subscription_type = await _get_org_subscription_type(org_id)
     if permission not in _allowed_permissions_for_subscription(subscription_type):
@@ -883,7 +897,7 @@ async def configure_tenant_db(org_id: str, body: ConfigureTenantDbBody, request:
     actor = _request_user_id(request)
     if not actor:
         raise HTTPException(status_code=401, detail="Missing actor identity")
-    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.create")):
+    if not (await _is_platform_super_admin(actor) or await _is_org_admin(actor, org_id)):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     db_url = (body.dbUrl or "").strip()
@@ -964,7 +978,7 @@ async def get_tenant_db_status(org_id: str, request: Request):
     actor = _request_user_id(request)
     if not actor:
         raise HTTPException(status_code=401, detail="Missing actor identity")
-    if not (await _is_platform_super_admin(actor) or await _has_org_permission(actor, org_id, "users.create")):
+    if not (await _is_platform_super_admin(actor) or await _is_org_admin(actor, org_id)):
         raise HTTPException(status_code=403, detail="Permission denied")
     return await _get_org_db_readiness(org_id, actor=actor, source="status_check", record=False)
 
