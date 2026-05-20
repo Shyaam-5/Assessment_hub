@@ -475,12 +475,7 @@ async def student_analytics(student_id: str, request: Request):
             )
             avg_problem_score = round((await cur.fetchone())["avg"] or 0)
 
-            # Average task score
-            await cur.execute(
-                "SELECT COALESCE(AVG(score), 0) AS avg FROM submissions WHERE student_id = %s AND task_id IS NOT NULL",
-                (student_id,),
-            )
-            avg_task_score = round((await cur.fetchone())["avg"] or 0)
+            avg_task_score = 0  # tasks tracked via task_completions, not submissions
 
             # Total submissions
             await cur.execute(
@@ -537,13 +532,12 @@ async def student_analytics(student_id: str, request: Request):
                 for t in trends
             ]
 
-            # Recent submissions with problem/task title
+            # Recent submissions with problem title
             await cur.execute(
                 """SELECT s.id, s.score, s.status, s.language, s.submitted_at AS time,
-                          p.title AS problemTitle, t.title AS taskTitle
+                          p.title AS problemTitle
                    FROM submissions s
                    LEFT JOIN problems p ON s.problem_id = p.id
-                   LEFT JOIN tasks t ON s.task_id = t.id
                    WHERE s.student_id = %s
                    ORDER BY s.submitted_at DESC LIMIT 5""",
                 (student_id,),
@@ -552,7 +546,7 @@ async def student_analytics(student_id: str, request: Request):
             recent_submissions = [
                 {
                     "id": r["id"],
-                    "title": r["problemTitle"] or r["taskTitle"] or "Unknown",
+                    "title": r["problemTitle"] or "Unknown",
                     "score": r["score"],
                     "status": r["status"],
                     "language": r["language"],
