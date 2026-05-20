@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
 import { Mic, MicOff, Volume2, BookOpen, MessageSquare, PenTool, BarChart3, Play, Square, RefreshCw, CheckCircle, XCircle, ChevronRight, Award, Target, TrendingUp, Clock, Headphones, ArrowRight, ArrowLeft, HelpCircle, Sparkles, Shield, Camera, CameraOff, AlertTriangle, Eye, Smartphone, Monitor, Users, Ban, Lock } from 'lucide-react'
 import socketService from '../services/socketService'
+import EnvironmentScanGate from '../prescan/components/EnvironmentScanGate'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api/communication'
 const BACKEND_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -773,6 +774,8 @@ export default function CommunicationHub({ user }) {
     const sessionId = useRef(crypto.randomUUID ? crypto.randomUUID() : `s_${Date.now()}`).current
 
     const [wasAutoTerminated, setWasAutoTerminated] = useState(false)
+    const [scanGate, setScanGate] = useState(null) // pending test waiting for scan approval
+    const pendingTestRef = useRef(null)
 
     // Proctoring — active in test-runner or in practice exercise modules
     const isProctoredModule = view === 'test-runner' || (view === 'practice' && activeModule !== 'overview')
@@ -822,8 +825,13 @@ export default function CommunicationHub({ user }) {
 
     useEffect(() => { if (view === 'practice') fetchReport() }, [view, fetchReport])
 
-    // Start a test attempt
-    const startTest = async (test) => {
+    // Start a test attempt — show scan gate first
+    const startTest = (test) => {
+        pendingTestRef.current = test
+        setScanGate(test)
+    }
+
+    const _doStartTest = async (test) => {
         try {
             const res = await axios.post(`${API_BASE}/tests/${test.id}/start`, {
                 studentId: user.id,
@@ -837,6 +845,12 @@ export default function CommunicationHub({ user }) {
         } catch (err) {
             alert(err.response?.data?.detail || 'Failed to start test')
         }
+    }
+
+    const handleScanApproved = () => {
+        setScanGate(null)
+        const test = pendingTestRef.current
+        if (test) _doStartTest(test)
     }
 
     // Handle module completion in test mode
@@ -896,6 +910,14 @@ export default function CommunicationHub({ user }) {
     /* ── TEST SELECTION VIEW ── */
     if (view === 'tests') return (
         <div ref={proctoring.containerRef} className="animate-fadeIn" style={{ minHeight: '100%', background: 'var(--bg-main, #0f172a)' }}>
+            {scanGate && (
+                <EnvironmentScanGate
+                    userId={user.id}
+                    examTitle={scanGate.title || 'Communication Exam'}
+                    onApproved={handleScanApproved}
+                    onCancel={() => { setScanGate(null); pendingTestRef.current = null; }}
+                />
+            )}
             <TestSelectionScreen tests={availableTests} onStartTest={startTest} onPractice={() => setView('practice')} user={user} />
         </div>
     )

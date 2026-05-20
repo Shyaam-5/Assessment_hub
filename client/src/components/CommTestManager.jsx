@@ -76,7 +76,20 @@ export default function CommTestManager() {
     const [error, setError] = useState('');
     const [postCreateAction, setPostCreateAction] = useState(null);
     const [generating, setGenerating] = useState({});
-    const [viewDetail, setViewDetail] = useState(null); // attempt object for detail view
+    const [viewDetail, setViewDetail] = useState(null);
+
+    // Edit state
+    const [editingTest, setEditingTest] = useState(null);
+    const [editForm, setEditForm] = useState(null);
+    const [saving, setSaving] = useState(false);
+
+    // Allocate state
+    const [allocatingTest, setAllocatingTest] = useState(null);
+    const [orgStudents, setOrgStudents] = useState([]);
+    const [existingAllocs, setExistingAllocs] = useState([]);
+    const [selectedStudents, setSelectedStudents] = useState(new Set());
+    const [allocSearch, setAllocSearch] = useState('');
+    const [allocSaving, setAllocSaving] = useState(false);
 
     const defaultForm = {
         title: '', description: '',
@@ -144,6 +157,76 @@ export default function CommTestManager() {
             setAttempts(data);
             setViewAttempts(testId);
         } catch (err) { setError(err.message); }
+    };
+
+    const openEdit = (test) => {
+        setEditingTest(test);
+        setEditForm({
+            title: test.title || '',
+            description: test.description || '',
+            generation_method: 'manual',
+            difficulty: 'mixed',
+            module_a_count: test.module_a_count || 5,
+            module_b_count: test.module_b_count || 5,
+            module_c_count: test.module_c_count || 3,
+            module_d_count: test.module_d_count || 5,
+            duration_minutes: test.duration_minutes || 60,
+            attempt_limit: test.attempt_limit || 3,
+            proctoring_enabled: test.proctoring_enabled ?? true,
+            proctoring_config: test.proctoring_config || { camera: true, fullscreen: true, tab_switch: true, copy_paste: true, phone_detect: true, multi_monitor_detect: true, multiple_people_detect: true },
+            module_a_sentences: test.module_a_sentences || [],
+            module_b_sentences: test.module_b_sentences || [],
+            module_c_topics: test.module_c_topics || [],
+            module_d_questions: test.module_d_questions || [],
+        });
+        setShowCreate(false);
+        setError('');
+    };
+
+    const saveEdit = async () => {
+        if (!editForm.title.trim()) return setError('Title is required');
+        setError(''); setSaving(true);
+        try {
+            await axios.put(`${API}/api/communication/tests/${editingTest.id}`, editForm);
+            setEditingTest(null); setEditForm(null);
+            loadTests();
+        } catch (err) {
+            setError(err.response?.data?.detail || err.message);
+        } finally { setSaving(false); }
+    };
+
+    const openAllocate = async (test) => {
+        setAllocatingTest(test); setAllocSearch(''); setAllocSaving(false);
+        try {
+            const [studRes, allocRes] = await Promise.all([
+                axios.get(`${API}/api/communication/org-students`),
+                axios.get(`${API}/api/communication/tests/${test.id}/allocations`),
+            ]);
+            setOrgStudents(Array.isArray(studRes.data) ? studRes.data : []);
+            const allocs = Array.isArray(allocRes.data) ? allocRes.data : [];
+            setExistingAllocs(allocs);
+            setSelectedStudents(new Set(allocs.map(a => a.studentId)));
+        } catch (err) { setError(err.response?.data?.detail || err.message); }
+    };
+
+    const saveAllocations = async () => {
+        setAllocSaving(true);
+        try {
+            await axios.post(`${API}/api/communication/tests/${allocatingTest.id}/allocations`, {
+                studentIds: Array.from(selectedStudents),
+            });
+            setAllocatingTest(null);
+        } catch (err) {
+            setError(err.response?.data?.detail || err.message);
+        } finally { setAllocSaving(false); }
+    };
+
+    const toggleStudent = (id) => {
+        setSelectedStudents(prev => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
     };
 
     // AI content preview/generation per module
@@ -573,7 +656,17 @@ export default function CommTestManager() {
                                     </div>
                                 </div>
 
-                                <div style={{ display: 'flex', gap: '6px', marginLeft: '16px' }}>
+                                <div style={{ display: 'flex', gap: '6px', marginLeft: '16px', flexWrap: 'wrap' }}>
+                                    <button onClick={() => openAllocate(test)} title="Allocate Students" style={{
+                                        padding: '8px 12px', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.35)',
+                                        borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px',
+                                        color: '#a5b4fc', fontSize: '12px', fontWeight: 600
+                                    }}><Users size={14} /> Allocate</button>
+                                    <button onClick={() => openEdit(test)} title="Edit Test" style={{
+                                        padding: '8px 12px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+                                        borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px',
+                                        color: '#fbbf24', fontSize: '12px', fontWeight: 600
+                                    }}><Edit3 size={14} /> Edit</button>
                                     <button onClick={() => loadAttempts(test.id)} title="View Attempts" style={{
                                         padding: '8px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)',
                                         borderRadius: '10px', cursor: 'pointer'
@@ -681,6 +774,82 @@ export default function CommTestManager() {
                             {/* Detailed Attempt Viewer */}
                             {viewDetail && viewAttempts === test.id && (
                                 <AttemptDetailViewer attempt={viewDetail} onClose={() => setViewDetail(null)} />
+                            )}
+
+                            {/* Edit Panel */}
+                            {editingTest?.id === test.id && editForm && (
+                                <div style={{ marginTop: 16, borderTop: '1px solid #334155', paddingTop: 16 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                                        <h4 style={{ margin: 0, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}><Edit3 size={15} /> Edit Test</h4>
+                                        <button onClick={() => { setEditingTest(null); setEditForm(null); }} style={{ background: '#334155', border: 'none', cursor: 'pointer', color: '#94a3b8', borderRadius: 6, padding: '4px 10px', fontSize: 12 }}>Cancel</button>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                        <div>
+                                            <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 4 }}>Title *</label>
+                                            <input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+                                                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #475569', background: '#0f172a', color: '#f1f5f9', fontSize: 13, boxSizing: 'border-box' }} />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 4 }}>Description</label>
+                                            <input value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                                                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #475569', background: '#0f172a', color: '#f1f5f9', fontSize: 13, boxSizing: 'border-box' }} />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 4 }}>Duration (min)</label>
+                                            <input type="number" value={editForm.duration_minutes} min={5} max={360}
+                                                onChange={e => setEditForm(f => ({ ...f, duration_minutes: parseInt(e.target.value) || 60 }))}
+                                                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #475569', background: '#0f172a', color: '#f1f5f9', fontSize: 13, boxSizing: 'border-box' }} />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 4 }}>Max Attempts</label>
+                                            <input type="number" value={editForm.attempt_limit} min={1} max={10}
+                                                onChange={e => setEditForm(f => ({ ...f, attempt_limit: parseInt(e.target.value) || 1 }))}
+                                                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #475569', background: '#0f172a', color: '#f1f5f9', fontSize: 13, boxSizing: 'border-box' }} />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                        <button onClick={saveEdit} disabled={saving} style={{
+                                            padding: '9px 20px', background: 'linear-gradient(135deg,#f59e0b,#d97706)', border: 'none',
+                                            borderRadius: 8, color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 13
+                                        }}>{saving ? 'Saving...' : 'Save Changes'}</button>
+                                        <button onClick={() => { setEditingTest(null); setEditForm(null); }} style={{ padding: '9px 20px', background: '#334155', border: 'none', borderRadius: 8, color: '#cbd5e1', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Allocate Modal */}
+                            {allocatingTest?.id === test.id && (
+                                <div style={{ marginTop: 16, borderTop: '1px solid #334155', paddingTop: 16 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                        <h4 style={{ margin: 0, color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 6 }}><Users size={15} /> Allocate Students</h4>
+                                        <button onClick={() => setAllocatingTest(null)} style={{ background: '#334155', border: 'none', cursor: 'pointer', color: '#94a3b8', borderRadius: 6, padding: '4px 10px', fontSize: 12 }}>Close</button>
+                                    </div>
+                                    <input placeholder="Search students..." value={allocSearch} onChange={e => setAllocSearch(e.target.value)}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #475569', background: '#0f172a', color: '#f1f5f9', fontSize: 13, marginBottom: 10, boxSizing: 'border-box' }} />
+                                    <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                                        <button onClick={() => setSelectedStudents(new Set(orgStudents.map(s => s.id)))} style={{ fontSize: 11, padding: '4px 10px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, color: '#a5b4fc', cursor: 'pointer' }}>Select All</button>
+                                        <button onClick={() => setSelectedStudents(new Set())} style={{ fontSize: 11, padding: '4px 10px', background: '#1e293b', border: '1px solid #334155', borderRadius: 6, color: '#94a3b8', cursor: 'pointer' }}>Clear</button>
+                                        <span style={{ fontSize: 12, color: '#64748b', alignSelf: 'center' }}>{selectedStudents.size} selected</span>
+                                    </div>
+                                    <div style={{ maxHeight: 220, overflowY: 'auto', display: 'grid', gap: 4 }}>
+                                        {orgStudents.filter(s => !allocSearch || s.name?.toLowerCase().includes(allocSearch.toLowerCase()) || s.email?.toLowerCase().includes(allocSearch.toLowerCase())).map(s => (
+                                            <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: selectedStudents.has(s.id) ? 'rgba(99,102,241,0.1)' : 'transparent', borderRadius: 6, cursor: 'pointer', border: '1px solid ' + (selectedStudents.has(s.id) ? 'rgba(99,102,241,0.3)' : 'transparent') }}>
+                                                <input type="checkbox" checked={selectedStudents.has(s.id)} onChange={() => toggleStudent(s.id)} style={{ accentColor: '#6366f1' }} />
+                                                <span style={{ fontSize: 13, color: '#e2e8f0' }}>{s.name}</span>
+                                                <span style={{ fontSize: 11, color: '#64748b' }}>{s.email}</span>
+                                                {s.batch && <span style={{ fontSize: 10, color: '#475569', marginLeft: 'auto' }}>{s.batch}</span>}
+                                            </label>
+                                        ))}
+                                        {orgStudents.length === 0 && <p style={{ color: '#64748b', fontSize: 13 }}>No students found in organization.</p>}
+                                    </div>
+                                    <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                                        <button onClick={saveAllocations} disabled={allocSaving} style={{
+                                            padding: '9px 20px', background: 'linear-gradient(135deg,#6366f1,#4f46e5)', border: 'none',
+                                            borderRadius: 8, color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 13
+                                        }}>{allocSaving ? 'Saving...' : `Save (${selectedStudents.size})`}</button>
+                                        <button onClick={() => setAllocatingTest(null)} style={{ padding: '9px 20px', background: '#334155', border: 'none', borderRadius: 8, color: '#cbd5e1', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     ))}

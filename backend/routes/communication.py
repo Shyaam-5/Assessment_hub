@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import random
+import uuid as _uuid
 
 from fastapi import APIRouter, HTTPException, Request, Body, Depends
 from fastapi.responses import JSONResponse
@@ -755,6 +756,20 @@ async def _ai_generate_grammar(count: int) -> list[dict]:
 
 # â”€â”€â”€ Admin CRUD Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+@router.get("/org-students")
+async def list_comm_org_students(request: Request):
+    """Return org users available for test allocation (requires communication.assign)."""
+    await _require_comm_permission(request, ["communication.assign"])
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name"
+            )
+            rows = await cur.fetchall()
+    return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
+
+
 @router.post("/tests/create")
 async def create_comm_test(request: Request):
     """Create a new communication test (admin)."""
@@ -912,6 +927,140 @@ async def toggle_comm_test(test_id: int, request: Request):
         action="Communication test toggled active",
     )
     return {"success": True}
+
+
+@router.put("/tests/{test_id}")
+async def update_comm_test(test_id: int, request: Request):
+    """Update an existing communication test (admin)."""
+    await _require_comm_permission(request, ["communication.assign"])
+    await _ensure_comm_tables()
+    data = await request.json()
+
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Title is required")
+
+    module_a_sentences = data.get("module_a_sentences") or []
+    module_b_sentences = data.get("module_b_sentences") or []
+    module_c_topics = data.get("module_c_topics") or []
+    module_d_questions = data.get("module_d_questions") or []
+
+    proctoring_config = data.get("proctoring_config", {
+        "camera": True, "fullscreen": True, "tab_switch": True, "copy_paste": True
+    })
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE comm_tests SET
+                    title=%s, description=%s,
+                    module_a_sentences=%s, module_b_sentences=%s,
+                    module_c_topics=%s, module_d_questions=%s,
+                    module_a_count=%s, module_b_count=%s, module_c_count=%s, module_d_count=%s,
+                    duration_minutes=%s, attempt_limit=%s,
+                    proctoring_enabled=%s, proctoring_config=%s
+                WHERE id=%s""",
+                (
+                    title,
+                    data.get("description", ""),
+                    _json_str(module_a_sentences), _json_str(module_b_sentences),
+                    _json_str(module_c_topics), _json_str(module_d_questions),
+                    int(data.get("module_a_count", 5)), int(data.get("module_b_count", 5)),
+                    int(data.get("module_c_count", 3)), int(data.get("module_d_count", 5)),
+                    int(data.get("duration_minutes", 60)),
+                    int(data.get("attempt_limit", 3)),
+                    bool(data.get("proctoring_enabled", True)),
+                    _json_str(proctoring_config),
+                    test_id,
+                )
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(404, "Test not found")
+        await conn.commit()
+
+    audit_logger.log_event(
+        AuditEventType.ADMIN_TEST_MODIFIED,
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
+        ip_address=_client_ip(request),
+        resource_id=str(test_id),
+        resource_type="communication_test",
+        action="Communication test updated",
+        details={"title": title},
+    )
+    return {"success": True}
+
+
+@router.get("/tests/{test_id}/allocations")
+async def get_comm_test_allocations(test_id: int, request: Request):
+    """List students currently allocated to a communication test."""
+    await _require_comm_permission(request, ["communication.assign"])
+    await _ensure_comm_tables()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS comm_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id INT NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_comm_alloc (test_id, student_id)
+                )"""
+            )
+            await cur.execute(
+                """SELECT a.student_id, u.name, u.email
+                FROM comm_test_allocations a
+                LEFT JOIN users u ON u.id = a.student_id
+                WHERE a.test_id = %s ORDER BY u.name""",
+                (test_id,),
+            )
+            rows = await cur.fetchall()
+    return [{"studentId": r["student_id"], "name": r["name"], "email": r["email"]} for r in rows]
+
+
+@router.post("/tests/{test_id}/allocations")
+async def set_comm_test_allocations(test_id: int, request: Request):
+    """Replace all student allocations for a communication test."""
+    await _require_comm_permission(request, ["communication.assign"])
+    await _ensure_comm_tables()
+    data = await request.json()
+    student_ids = data.get("studentIds", [])
+    if not isinstance(student_ids, list):
+        raise HTTPException(400, "studentIds must be a list")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS comm_test_allocations (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    test_id INT NOT NULL,
+                    student_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_comm_alloc (test_id, student_id)
+                )"""
+            )
+            await cur.execute("DELETE FROM comm_test_allocations WHERE test_id = %s", (test_id,))
+            for sid in student_ids:
+                sid = (sid or "").strip()
+                if sid:
+                    await cur.execute(
+                        "INSERT IGNORE INTO comm_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
+                        (str(_uuid.uuid4()), test_id, sid),
+                    )
+        await conn.commit()
+
+    audit_logger.log_event(
+        AuditEventType.ADMIN_TEST_MODIFIED,
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
+        ip_address=_client_ip(request),
+        resource_id=str(test_id),
+        resource_type="communication_test",
+        action="Communication test allocations updated",
+        details={"studentCount": len(student_ids)},
+    )
+    return {"allocated": len(student_ids)}
 
 
 @router.delete("/tests/{test_id}")
