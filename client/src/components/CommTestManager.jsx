@@ -76,6 +76,7 @@ export default function CommTestManager() {
     const [error, setError] = useState('');
     const [postCreateAction, setPostCreateAction] = useState(null);
     const [generating, setGenerating] = useState({});
+    const [generatingAll, setGeneratingAll] = useState(false);
     const [viewDetail, setViewDetail] = useState(null);
 
     // Edit state
@@ -92,7 +93,7 @@ export default function CommTestManager() {
     const [allocSaving, setAllocSaving] = useState(false);
 
     const defaultForm = {
-        title: '', description: '',
+        title: '', description: '', topic: '',
         generation_method: 'ai', difficulty: 'mixed',
         module_a_count: 5, module_b_count: 5, module_c_count: 3, module_d_count: 5,
         duration_minutes: 60, attempt_limit: 3,
@@ -234,7 +235,7 @@ export default function CommTestManager() {
         setGenerating(g => ({ ...g, [module]: true }));
         try {
             const { data } = await axios.post(`${API}/api/communication/tests/generate-preview`, {
-                module, count: form[countKey], difficulty: form.difficulty
+                module, count: form[countKey], difficulty: form.difficulty, topic: form.topic || ''
             });
             if (module === 'A') setForm(f => ({ ...f, module_a_sentences: data.content }));
             else if (module === 'B') setForm(f => ({ ...f, module_b_sentences: data.content }));
@@ -245,6 +246,29 @@ export default function CommTestManager() {
         } finally {
             setGenerating(g => ({ ...g, [module]: false }));
         }
+    };
+
+    const generateAll = async () => {
+        setGeneratingAll(true); setError('');
+        try {
+            const { data } = await axios.post(`${API}/api/communication/tests/generate-all-preview`, {
+                difficulty: form.difficulty,
+                topic: form.topic || '',
+                module_a_count: form.module_a_count,
+                module_b_count: form.module_b_count,
+                module_c_count: form.module_c_count,
+                module_d_count: form.module_d_count,
+            });
+            setForm(f => ({
+                ...f,
+                module_a_sentences: data.module_a_sentences || f.module_a_sentences,
+                module_b_sentences: data.module_b_sentences || f.module_b_sentences,
+                module_c_topics: data.module_c_topics || f.module_c_topics,
+                module_d_questions: data.module_d_questions || f.module_d_questions,
+            }));
+        } catch (err) {
+            setError('AI generation failed: ' + (err.response?.data?.detail || err.message));
+        } finally { setGeneratingAll(false); }
     };
 
     // Manual content editing helpers
@@ -364,6 +388,21 @@ export default function CommTestManager() {
                             </div>
                         </div>
 
+                        {/* Topic/Domain */}
+                        <div style={{ marginTop: '14px' }}>
+                            <label style={{ fontWeight: 600, fontSize: '12px', display: 'block', marginBottom: '6px', color: '#cbd5e1' }}>
+                                Topic / Domain <span style={{ color: '#64748b', fontWeight: 400 }}>(optional — AI uses this to focus content)</span>
+                            </label>
+                            <input value={form.topic} onChange={e => setForm({ ...form, topic: e.target.value })}
+                                placeholder="e.g. Business English, Medical terminology, IT & Software, Daily conversation…"
+                                style={{
+                                    width: '100%', padding: '11px 14px', borderRadius: '10px',
+                                    border: '2px solid ' + (form.topic ? '#8b5cf6' : '#475569'),
+                                    fontSize: '14px', boxSizing: 'border-box', outline: 'none',
+                                    background: '#0f172a', color: '#f1f5f9'
+                                }} />
+                        </div>
+
                         {/* Generation method & Difficulty */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '14px' }}>
                             <div>
@@ -468,7 +507,23 @@ export default function CommTestManager() {
 
                     {/* Content Management — AI Generate or Manual per Module */}
                     <SectionCard icon={<Wand2 size={16} />} title="Content Management"
-                        subtitle={form.generation_method === 'ai' ? 'AI will generate all content on creation' : 'Add or generate content per module'} color="#10b981">
+                        subtitle={form.generation_method === 'ai' ? 'Preview AI content per module, or click Generate All below' : 'Add or generate content per module'} color="#10b981">
+
+                        {/* Generate All button */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', padding: '12px 14px', background: 'rgba(16,185,129,0.06)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.2)' }}>
+                            <button onClick={generateAll} disabled={generatingAll} style={{
+                                display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 22px',
+                                background: generatingAll ? '#334155' : 'linear-gradient(135deg,#10b981,#059669)',
+                                color: 'white', border: 'none', borderRadius: '10px', cursor: generatingAll ? 'not-allowed' : 'pointer',
+                                fontWeight: 700, fontSize: '13px', whiteSpace: 'nowrap'
+                            }}>
+                                {generatingAll ? <><RefreshCw size={14} className="spin" /> Generating all 4 modules…</> : <><Wand2 size={14} /> Generate All 4 Modules with AI</>}
+                            </button>
+                            <span style={{ fontSize: '12px', color: '#64748b' }}>
+                                Generates Read &amp; Speak, Listen &amp; Repeat, Topics, and Grammar in one click
+                                {form.topic && <span style={{ color: '#a78bfa' }}> · Topic: <strong>{form.topic}</strong></span>}
+                            </span>
+                        </div>
 
                         {/* Module A: Read & Speak sentences */}
                         <ModuleContentEditor

@@ -662,7 +662,7 @@ def _safe_json(val):
 
 # â”€â”€â”€ AI Generation for Communication Content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-async def _ai_generate_sentences(count: int, difficulty: str = "mixed") -> list[str]:
+async def _ai_generate_sentences(count: int, difficulty: str = "mixed", topic: str = "") -> list[str]:
     """Generate sentences for Read & Speak / Listen & Repeat using AI."""
     diff_hint = ""
     if difficulty == "easy":
@@ -672,12 +672,15 @@ async def _ai_generate_sentences(count: int, difficulty: str = "mixed") -> list[
     else:
         diff_hint = "Mix easy (5-10 words), medium (10-15 words), and hard (15-25 words) sentences."
 
+    topic_hint = f"All sentences must relate to the domain: {topic}." if topic else \
+        "The sentences should cover diverse topics: science, technology, daily life, nature, business, health."
+
     messages = [
         {"role": "system", "content": "You are an English language teaching expert. Generate sentences for pronunciation and reading practice. Return ONLY a valid JSON array of strings."},
         {"role": "user", "content": (
             f"Generate {count} unique English sentences for a speaking/pronunciation practice exercise.\n"
             f"{diff_hint}\n"
-            "The sentences should cover diverse topics: science, technology, daily life, nature, business, health.\n"
+            f"{topic_hint}\n"
             "Make them natural and conversational.\n"
             "Return ONLY a valid JSON array of strings, nothing else.\n"
             f'Example: ["The sun rises in the east.", "Python is a powerful language."]'
@@ -691,17 +694,20 @@ async def _ai_generate_sentences(count: int, difficulty: str = "mixed") -> list[
             return sentences[:count]
     except Exception as e:
         print(f"AI sentence generation error: {e}")
-    # Fallback
     return SENTENCES_A[:count]
 
 
-async def _ai_generate_topics(count: int) -> list[str]:
+async def _ai_generate_topics(count: int, topic: str = "") -> list[str]:
     """Generate speaking topics using AI."""
+    topic_hint = f"All discussion topics must relate to: {topic}." if topic else \
+        "Topics should cover: technology, society, education, environment, career, health, culture."
+
     messages = [
         {"role": "system", "content": "You are an English language teaching expert. Generate discussion topics for speaking practice. Return ONLY a valid JSON array of strings."},
         {"role": "user", "content": (
             f"Generate {count} unique discussion topics for an English-speaking practice exercise.\n"
-            "Topics should be thought-provoking but accessible, covering: technology, society, education, environment, career, health, culture.\n"
+            f"{topic_hint}\n"
+            "Topics should be thought-provoking but accessible.\n"
             "Each topic should be 5-15 words, phrased as a statement or prompt.\n"
             "Return ONLY a valid JSON array of strings.\n"
             f'Example: ["The importance of renewable energy in today\'s world", "How technology is changing education"]'
@@ -718,8 +724,10 @@ async def _ai_generate_topics(count: int) -> list[str]:
     return TOPICS[:count]
 
 
-async def _ai_generate_grammar(count: int) -> list[dict]:
+async def _ai_generate_grammar(count: int, topic: str = "") -> list[dict]:
     """Generate grammar fill-in-the-blank questions using AI."""
+    topic_hint = f"Use sentences related to: {topic} where natural." if topic else ""
+
     messages = [
         {"role": "system", "content": (
             "You are an English grammar expert. Generate fill-in-the-blank grammar questions.\n"
@@ -731,6 +739,7 @@ async def _ai_generate_grammar(count: int) -> list[dict]:
         )},
         {"role": "user", "content": (
             f"Generate {count} unique English grammar fill-in-the-blank questions.\n"
+            f"{topic_hint}\n"
             "Cover these categories proportionally: tenses (past simple, present continuous, past continuous, present perfect), "
             "prepositions (time, place, movement), articles (a/an/the), adverbs.\n"
             "Each question should have a clear single correct answer.\n"
@@ -743,10 +752,7 @@ async def _ai_generate_grammar(count: int) -> list[dict]:
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         questions = parse_json(content)
         if questions and isinstance(questions, list):
-            valid = []
-            for q in questions:
-                if q.get("sentence") and q.get("answer") and q.get("category"):
-                    valid.append(q)
+            valid = [q for q in questions if q.get("sentence") and q.get("answer") and q.get("category")]
             if valid:
                 return valid[:count]
     except Exception as e:
@@ -784,6 +790,7 @@ async def create_comm_test(request: Request):
     description = data.get("description", "")
     generation_method = data.get("generation_method", "ai")  # ai | manual | mixed
     difficulty = data.get("difficulty", "mixed")
+    topic = (data.get("topic") or "").strip()
 
     module_a_count = int(data.get("module_a_count", 5))
     module_b_count = int(data.get("module_b_count", 5))
@@ -797,25 +804,25 @@ async def create_comm_test(request: Request):
     module_d_questions = data.get("module_d_questions")
 
     if generation_method in ("ai", "mixed"):
-        if not module_a_sentences or len(module_a_sentences) < module_a_count:
-            ai_a = await _ai_generate_sentences(module_a_count, difficulty)
-            module_a_sentences = (module_a_sentences or []) + ai_a
-            module_a_sentences = module_a_sentences[:module_a_count]
+        needs_a = not module_a_sentences or len(module_a_sentences) < module_a_count
+        needs_b = not module_b_sentences or len(module_b_sentences) < module_b_count
+        needs_c = not module_c_topics or len(module_c_topics) < module_c_count
+        needs_d = not module_d_questions or len(module_d_questions) < module_d_count
 
-        if not module_b_sentences or len(module_b_sentences) < module_b_count:
-            ai_b = await _ai_generate_sentences(module_b_count, difficulty)
-            module_b_sentences = (module_b_sentences or []) + ai_b
-            module_b_sentences = module_b_sentences[:module_b_count]
-
-        if not module_c_topics or len(module_c_topics) < module_c_count:
-            ai_c = await _ai_generate_topics(module_c_count)
-            module_c_topics = (module_c_topics or []) + ai_c
-            module_c_topics = module_c_topics[:module_c_count]
-
-        if not module_d_questions or len(module_d_questions) < module_d_count:
-            ai_d = await _ai_generate_grammar(module_d_count)
-            module_d_questions = (module_d_questions or []) + ai_d
-            module_d_questions = module_d_questions[:module_d_count]
+        ai_results = await asyncio.gather(
+            _ai_generate_sentences(module_a_count, difficulty, topic) if needs_a else asyncio.sleep(0, result=[]),
+            _ai_generate_sentences(module_b_count, difficulty, topic) if needs_b else asyncio.sleep(0, result=[]),
+            _ai_generate_topics(module_c_count, topic) if needs_c else asyncio.sleep(0, result=[]),
+            _ai_generate_grammar(module_d_count, topic) if needs_d else asyncio.sleep(0, result=[]),
+        )
+        if needs_a:
+            module_a_sentences = ((module_a_sentences or []) + ai_results[0])[:module_a_count]
+        if needs_b:
+            module_b_sentences = ((module_b_sentences or []) + ai_results[1])[:module_b_count]
+        if needs_c:
+            module_c_topics = ((module_c_topics or []) + ai_results[2])[:module_c_count]
+        if needs_d:
+            module_d_questions = ((module_d_questions or []) + ai_results[3])[:module_d_count]
 
     # Use defaults if still empty
     module_a_sentences = module_a_sentences or SENTENCES_A[:module_a_count]
@@ -870,18 +877,48 @@ async def generate_preview(request: Request):
     module = data.get("module", "A")
     count = int(data.get("count", 5))
     difficulty = data.get("difficulty", "mixed")
+    topic = (data.get("topic") or "").strip()
 
     if module == "A" or module == "B":
-        content = await _ai_generate_sentences(count, difficulty)
+        content = await _ai_generate_sentences(count, difficulty, topic)
         return {"success": True, "content": content}
     elif module == "C":
-        content = await _ai_generate_topics(count)
+        content = await _ai_generate_topics(count, topic)
         return {"success": True, "content": content}
     elif module == "D":
-        content = await _ai_generate_grammar(count)
+        content = await _ai_generate_grammar(count, topic)
         return {"success": True, "content": content}
     else:
         raise HTTPException(400, "Invalid module (A, B, C, D)")
+
+
+@router.post("/tests/generate-all-preview")
+async def generate_all_preview(request: Request):
+    """Generate AI content for all 4 modules at once (admin preview)."""
+    await _require_comm_permission(request, ["communication.assign"])
+    data = await request.json()
+    difficulty = data.get("difficulty", "mixed")
+    topic = (data.get("topic") or "").strip()
+    counts = {
+        "A": int(data.get("module_a_count", 5)),
+        "B": int(data.get("module_b_count", 5)),
+        "C": int(data.get("module_c_count", 3)),
+        "D": int(data.get("module_d_count", 5)),
+    }
+
+    sentences_a, sentences_b, topics_c, grammar_d = await asyncio.gather(
+        _ai_generate_sentences(counts["A"], difficulty, topic),
+        _ai_generate_sentences(counts["B"], difficulty, topic),
+        _ai_generate_topics(counts["C"], topic),
+        _ai_generate_grammar(counts["D"], topic),
+    )
+    return {
+        "success": True,
+        "module_a_sentences": sentences_a,
+        "module_b_sentences": sentences_b,
+        "module_c_topics": topics_c,
+        "module_d_questions": grammar_d,
+    }
 
 
 @router.get("/tests/all")
