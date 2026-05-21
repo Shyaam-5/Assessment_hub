@@ -905,7 +905,7 @@ export default function CommunicationHub({ user }) {
         { key: 'grammar', label: 'Grammar Quiz', icon: <PenTool size={18} /> },
     ]
 
-    if (view === 'loading') return <div className="loading-spinner" />
+    if (view === 'loading') return <div className="page-loading"><div className="loading-spinner" /></div>
 
     /* ── TEST SELECTION VIEW ── */
     if (view === 'tests') return (
@@ -1249,15 +1249,7 @@ function OverviewPanel({ report, loading, onRefresh, onGoTo }) {
                 {moduleCards.map(mc => {
                     const stat = getModuleStat(mc.moduleName)
                     return (
-                        <div key={mc.key} onClick={() => onGoTo(mc.key)} style={{
-                            background: 'var(--bg-card)', borderRadius: '0.75rem',
-                            border: '1px solid var(--border-color)',
-                            padding: '1.5rem', cursor: 'pointer',
-                            transition: 'transform 0.2s, box-shadow 0.2s',
-                        }}
-                            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.15)' }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '' }}
-                        >
+                        <div key={mc.key} onClick={() => onGoTo(mc.key)} className="comm-module-card">
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem' }}>
                                 <div style={{ width: 40, height: 40, borderRadius: '0.5rem', background: mc.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', color: mc.color }}>
                                     {mc.key === 'read' && <BookOpen size={20} />}
@@ -1472,7 +1464,7 @@ function ReadAndSpeak({ user, sessionId, onDone, testSentences, onModuleDone }) 
         setSubmitting(false)
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const handleNext = () => {
         if (isTestMode) return // handled in handleSubmit
@@ -1674,7 +1666,7 @@ function ListenAndRepeat({ user, sessionId, onDone, testSentences, onModuleDone 
         setSubmitting(false)
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const handleNext = () => {
         if (isTestMode) return // handled in handleSubmit
@@ -1851,7 +1843,7 @@ function TopicSpeaking({ user, sessionId, onDone, testTopics, onModuleDone }) {
         setSubmitting(false)
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const handleNext = () => {
         if (isTestMode) return // handled in handleSubmit
@@ -2083,7 +2075,7 @@ function GrammarQuiz({ user, sessionId, onDone, testQuestions, onModuleDone }) {
         }
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div style={{ maxWidth: 700, margin: '0 auto' }}>

@@ -1,3 +1,5 @@
+import '../../../prescan.css'
+
 const VERDICT_CONFIG = {
   approved: { bg: '#f0fdf4', border: '#16a34a', headerBg: '#16a34a', title: 'Environment Approved', subtitle: 'You may start the exam', textColor: '#14532d', accentColor: '#16a34a' },
   rejected: { bg: '#fef2f2', border: '#dc2626', headerBg: '#dc2626', title: 'Environment Not Approved', subtitle: 'Remove detected items and rescan', textColor: '#7f1d1d', accentColor: '#dc2626' },
@@ -43,9 +45,8 @@ function ActionButton({ label, onClick, primary, color }) {
   return (
     <button
       onClick={onClick}
-      style={{ padding: '12px 24px', backgroundColor: primary ? color : 'transparent', color: primary ? '#ffffff' : color, border: `2px solid ${color}`, borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: 'pointer', transition: 'opacity 0.15s', letterSpacing: '0.02em' }}
-      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+      className="prescan-action-btn"
+      style={{ padding: '12px 24px', backgroundColor: primary ? color : 'transparent', color: primary ? '#ffffff' : color, border: `2px solid ${color}`, borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.02em' }}
     >
       {label}
     </button>

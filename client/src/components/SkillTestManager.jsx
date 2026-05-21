@@ -103,6 +103,11 @@ export default function SkillTestManager() {
     const [skillSearch, setSkillSearch] = useState('');
     const [expandedCategory, setExpandedCategory] = useState(null);
     const [error, setError] = useState('');
+    const [allocatingTest, setAllocatingTest] = useState(null);
+    const [orgStudents, setOrgStudents] = useState([]);
+    const [selectedStudents, setSelectedStudents] = useState(new Set());
+    const [allocSearch, setAllocSearch] = useState('');
+    const [allocSaving, setAllocSaving] = useState(false);
 
     useEffect(() => { loadTests(); }, []);
 
@@ -192,6 +197,50 @@ export default function SkillTestManager() {
         : [];
 
     const stageColors = { passed: '#22c55e', failed: '#ef4444', in_progress: '#f59e0b', pending: '#6b7280' };
+
+    const openAllocate = async (test) => {
+        setAllocatingTest(test);
+        setAllocSearch('');
+        setAllocSaving(false);
+        try {
+            const [studentsRes, allocsRes] = await Promise.all([
+                axios.get(`${API}/api/skill-tests/org-students`),
+                axios.get(`${API}/api/skill-tests/${test.id}/allocations`),
+            ]);
+            const students = Array.isArray(studentsRes.data) ? studentsRes.data : [];
+            const allocs = Array.isArray(allocsRes.data) ? allocsRes.data : [];
+            setOrgStudents(students);
+            setSelectedStudents(new Set(allocs.map(a => a.studentId)));
+        } catch (err) {
+            setOrgStudents([]);
+            setSelectedStudents(new Set());
+            setError(err.response?.data?.detail || err.response?.data?.error || err.message);
+        }
+    };
+
+    const toggleStudent = (id) => {
+        setSelectedStudents(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const saveAllocations = async () => {
+        if (!allocatingTest) return;
+        setAllocSaving(true);
+        try {
+            await axios.post(`${API}/api/skill-tests/${allocatingTest.id}/allocations`, {
+                studentIds: Array.from(selectedStudents),
+            });
+            setAllocatingTest(null);
+        } catch (err) {
+            setError(err.response?.data?.detail || err.response?.data?.error || err.message);
+        } finally {
+            setAllocSaving(false);
+        }
+    };
 
 
 
@@ -634,6 +683,12 @@ export default function SkillTestManager() {
                                         <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#f1f5f9' }}>{test.title}</h3>
                                         <span style={{
                                             padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700,
+                                            background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', border: '1px solid rgba(99,102,241,0.35)'
+                                        }}>
+                                            {test.allocatedCount || 0} allocated
+                                        </span>
+                                        <span style={{
+                                            padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700,
                                             background: test.is_active ? '#dcfce7' : '#fee2e2',
                                             color: test.is_active ? '#16a34a' : '#dc2626'
                                         }}>
@@ -697,6 +752,10 @@ export default function SkillTestManager() {
                                 </div>
 
                                 <div style={{ display: 'flex', gap: '6px', marginLeft: '16px' }}>
+                                    <button onClick={() => openAllocate(test)} title="Allocate Students" style={{
+                                        padding: '8px', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.35)',
+                                        borderRadius: '10px', cursor: 'pointer', transition: 'all 0.15s'
+                                    }}><Users size={16} color="#a5b4fc" /></button>
                                     <button onClick={() => loadAttempts(test.id)} title="View Attempts" style={{
                                         padding: '8px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)',
                                         borderRadius: '10px', cursor: 'pointer', transition: 'all 0.15s'
@@ -784,6 +843,59 @@ export default function SkillTestManager() {
                             )}
                         </div>
                     ))}
+                </div>
+            )}
+
+            {allocatingTest && (
+                <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}>
+                    <div style={{ background: '#1e293b', borderRadius: '1rem', padding: '1.25rem', width: '100%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: '0.9rem', border: '1px solid #334155' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h3 style={{ margin: 0, color: '#f1f5f9' }}>Allocate Students</h3>
+                                <p style={{ margin: '0.2rem 0 0', color: '#94a3b8', fontSize: '0.85rem' }}>{allocatingTest.title}</p>
+                            </div>
+                            <button onClick={() => setAllocatingTest(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={20} /></button>
+                        </div>
+
+                        <input
+                            type="text"
+                            placeholder="Search students..."
+                            value={allocSearch}
+                            onChange={e => setAllocSearch(e.target.value)}
+                            style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: '#f1f5f9', fontSize: '0.85rem' }}
+                        />
+
+                        <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
+                            <button onClick={() => setSelectedStudents(new Set(orgStudents.map(s => s.id)))} style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid #6366f1', color: '#c7d2fe', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer' }}>Select All</button>
+                            <button onClick={() => setSelectedStudents(new Set())} style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer' }}>Clear</button>
+                            <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>{selectedStudents.size} selected</span>
+                        </div>
+
+                        <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #334155', borderRadius: '8px' }}>
+                            {orgStudents.length === 0 ? (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>No students found in this organization.</div>
+                            ) : (
+                                orgStudents
+                                    .filter(s => !allocSearch || s.name?.toLowerCase().includes(allocSearch.toLowerCase()) || s.email?.toLowerCase().includes(allocSearch.toLowerCase()))
+                                    .map(s => (
+                                        <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', cursor: 'pointer', borderBottom: '1px solid #334155', background: selectedStudents.has(s.id) ? 'rgba(99,102,241,0.16)' : 'transparent' }}>
+                                            <input type="checkbox" checked={selectedStudents.has(s.id)} onChange={() => toggleStudent(s.id)} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#f1f5f9' }}>{s.name}</div>
+                                                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{s.email}{s.batch ? ` · ${s.batch}` : ''}</div>
+                                            </div>
+                                        </label>
+                                    ))
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button onClick={() => setAllocatingTest(null)} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', border: '1px solid #475569', background: 'transparent', color: '#e2e8f0', cursor: 'pointer' }}>Cancel</button>
+                            <button onClick={saveAllocations} disabled={allocSaving} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', background: '#6366f1', color: 'white', border: 'none', cursor: allocSaving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                                {allocSaving ? 'Saving...' : 'Save Allocation'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

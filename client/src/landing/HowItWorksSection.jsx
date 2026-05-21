@@ -41,7 +41,7 @@ const steps = [
 export default function HowItWorksSection() {
     return (
         <section className="landing-section" id="how-it-works">
-            <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
+            <div className="section-header">
                 <div className="section-badge">How It Works</div>
                 <h2 className="section-title">
                     From Sign-Up to <span className="gradient-text">AI Reports</span> in Minutes
@@ -60,16 +60,7 @@ export default function HowItWorksSection() {
                         <div className="step-number" style={{ background: `linear-gradient(135deg, ${step.color}, ${step.color}bb)` }}>
                             {step.num}
                         </div>
-                        <div style={{
-                            width: 44, height: 44,
-                            borderRadius: 12,
-                            background: step.color + '18',
-                            color: step.color,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            marginBottom: '1rem',
-                        }}>
+                        <div className="card-icon-wrapper" style={{ background: step.color + '18', color: step.color, marginBottom: '1rem' }}>
                             {step.icon}
                         </div>
                         <h3 className="step-title">{step.title}</h3>

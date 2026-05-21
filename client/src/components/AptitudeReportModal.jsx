@@ -70,9 +70,9 @@ function AptitudeReportModal({ submission, onClose, isStudentView = false }) {
                 {/* Scrollable Content */}
                 <div className="modal-body" style={{ flex: 1, overflowY: 'auto' }}>
                     {loading ? (
-                        <div style={{ textAlign: 'center', padding: '3rem' }}>
+                        <div className="page-loading" style={{ flexDirection: 'column', gap: '1rem' }}>
                             <div className="loading-spinner"></div>
-                            <p style={{ color: 'var(--text-muted)', marginTop: '1rem' }}>Loading report details...</p>
+                            <p style={{ color: 'var(--text-muted)' }}>Loading report details...</p>
                         </div>
                     ) : error ? (
                         <div style={{ textAlign: 'center', padding: '3rem' }}>

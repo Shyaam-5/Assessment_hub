@@ -144,14 +144,8 @@ export default function SkillSubmissions({ user, isAdmin = false }) {
                         <button
                             onClick={resetAllSubmissions}
                             disabled={resetting}
-                            style={{
-                                padding: '10px 18px', borderRadius: '10px', border: '1px solid rgba(239,68,68,0.3)',
-                                background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: resetting ? 'not-allowed' : 'pointer',
-                                fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px',
-                                transition: 'all 0.2s', opacity: resetting ? 0.5 : 1
-                            }}
-                            onMouseEnter={e => { e.target.style.background = 'rgba(239,68,68,0.2)'; }}
-                            onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.1)'; }}
+                            className="tbl-action-btn danger"
+                            style={{ padding: '10px 18px', borderRadius: '10px', fontSize: '13px', opacity: resetting ? 0.5 : 1, cursor: resetting ? 'not-allowed' : 'pointer' }}
                         >
                             <RotateCcw size={15} style={resetting ? { animation: 'spin 1s linear infinite' } : {}} />
                             {resetting ? 'Resetting...' : 'Reset All'}
@@ -233,13 +227,8 @@ export default function SkillSubmissions({ user, isAdmin = false }) {
                                         {isAdmin && (
                                             <div
                                                 onClick={(e) => deleteSubmission(e, sub.id)}
-                                                style={{
-                                                    width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(239,68,68,0.1)',
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f87171',
-                                                    cursor: 'pointer', transition: 'all 0.2s', border: '1px solid rgba(239,68,68,0.2)'
-                                                }}
-                                                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.25)'; }}
-                                                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; }}
+                                                className="um-icon-btn delete"
+                                                style={{ width: '32px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                                                 title="Delete this submission"
                                             >
                                                 <Trash2 size={15} />

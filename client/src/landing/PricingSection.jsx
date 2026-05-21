@@ -97,8 +97,8 @@ export default function PricingSection({ standalone = false, subscriptionId = ''
             id="pricing-section"
             style={{ background: 'transparent', maxWidth: standalone ? '100%' : undefined, padding: standalone ? '2rem 2rem 6rem' : undefined }}
         >
-            <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-                <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+            <div className="landing-container">
+                <div className="section-header" style={{ marginBottom: '3rem' }}>
                     {!standalone && (<>
                         <div className="section-badge">
                             <DollarSign size={12} />

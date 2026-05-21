@@ -770,13 +770,7 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
         }
     }
 
-    if (loading) {
-        return (
-            <div style={{ ...card, display: 'grid', placeItems: 'center', minHeight: 160 }}>
-                <div className="loading-spinner" />
-            </div>
-        )
-    }
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     if (superAdminOnly) {
         const OrgSelectorBar = () => (

@@ -674,7 +674,25 @@ async def list_global_tests(
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(query, params)
                 rows = await cur.fetchall()
-        return [_clean_global_test(t) for t in rows]
+                test_ids = [str(t.get("id")) for t in (rows or []) if t.get("id")]
+                alloc_counts: dict[str, int] = {}
+                if test_ids:
+                    placeholders = ",".join(["%s"] * len(test_ids))
+                    await cur.execute(
+                        f"""SELECT test_id, COUNT(*) AS cnt
+                            FROM global_test_allocations
+                            WHERE test_id IN ({placeholders})
+                            GROUP BY test_id""",
+                        test_ids,
+                    )
+                    for row in (await cur.fetchall()) or []:
+                        alloc_counts[str(row.get("test_id"))] = int(row.get("cnt") or 0)
+        cleaned = []
+        for t in rows:
+            item = _clean_global_test(t)
+            item["allocatedCount"] = alloc_counts.get(str(t.get("id")), 0)
+            cleaned.append(item)
+        return cleaned
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")

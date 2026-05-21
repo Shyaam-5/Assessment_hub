@@ -16,12 +16,34 @@ class ErrorBoundary extends Component {
     componentDidCatch(error, info) { console.error('ErrorBoundary caught:', error, info) }
     render() {
         if (this.state.hasError) {
-            return (<div style={{ padding: 40, background: '#1e1e2e', color: '#ff6b6b', minHeight: '100vh', fontFamily: 'monospace' }}>
-                <h1>Something went wrong</h1>
-                <pre style={{ whiteSpace: 'pre-wrap', color: '#ffa07a' }}>{this.state.error?.message}</pre>
-                <pre style={{ whiteSpace: 'pre-wrap', color: '#888', fontSize: 12 }}>{this.state.error?.stack}</pre>
-                <button onClick={() => this.setState({ hasError: false, error: null })} style={{ marginTop: 20, padding: '10px 20px', background: '#4a4a6a', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}>Try Again</button>
-            </div>)
+            return (
+                <div style={{
+                    padding: '2.5rem',
+                    background: 'var(--bg-primary)',
+                    color: 'var(--danger)',
+                    minHeight: '100vh',
+                    fontFamily: 'monospace',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem',
+                    maxWidth: 800,
+                    margin: '0 auto',
+                }}>
+                    <h1 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--text-main)' }}>Something went wrong</h1>
+                    <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--danger)', fontSize: '0.9rem', background: 'var(--bg-card)', padding: '1rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                        {this.state.error?.message}
+                    </pre>
+                    <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--text-muted)', fontSize: '0.75rem', background: 'var(--bg-card)', padding: '1rem', borderRadius: 8, border: '1px solid var(--border-color)', overflow: 'auto', maxHeight: 300 }}>
+                        {this.state.error?.stack}
+                    </pre>
+                    <button
+                        onClick={() => this.setState({ hasError: false, error: null })}
+                        style={{ alignSelf: 'flex-start', padding: '0.6rem 1.25rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}
+                    >
+                        Try Again
+                    </button>
+                </div>
+            )
         }
         return this.props.children
     }
@@ -362,12 +384,17 @@ function App() {
         return (
             <div style={{
                 display: 'flex',
-                justifyContent: 'center',
+                flexDirection: 'column',
                 alignItems: 'center',
+                justifyContent: 'center',
                 height: '100vh',
-                background: 'var(--bg-secondary)'
+                gap: '1rem',
+                background: 'var(--bg-primary)',
             }}>
-                <div className="loading-spinner"></div>
+                <div className="loading-spinner" />
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500 }}>
+                    Loading…
+                </span>
             </div>
         )
     }

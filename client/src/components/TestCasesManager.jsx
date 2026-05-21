@@ -76,7 +76,7 @@ function TestCasesManager({ problemId, problemTitle, isReadOnly = false, onClose
         })
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div className="modal-overlay" onClick={onClose}>

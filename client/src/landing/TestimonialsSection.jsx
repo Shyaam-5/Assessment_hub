@@ -21,9 +21,9 @@ const testimonials = [
 
 export default function TestimonialsSection() {
     return (
-        <section className="landing-section" style={{ background: 'transparent', maxWidth: '100%', padding: '6rem 0' }}>
-            <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 2rem' }}>
-                <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
+        <section className="landing-section full-bleed">
+            <div className="landing-container">
+                <div className="section-header">
                     <div className="section-badge">Client Stories</div>
                     <h2 className="section-title">
                         Trusted by <span className="gradient-text">Leading Institutions</span>

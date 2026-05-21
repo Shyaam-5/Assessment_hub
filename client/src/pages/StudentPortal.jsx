@@ -257,26 +257,13 @@ function UpcomingExamReminders({ user }) {
                             key={item.id}
                             type="button"
                             onClick={() => { window.location.href = item.path }}
-                            style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                gap: '1rem',
-                                width: '100%',
-                                padding: '0.9rem 1rem',
-                                borderRadius: 12,
-                                border: '1px solid var(--border-color)',
-                                background: 'var(--bg-card)',
-                                color: 'var(--text-primary)',
-                                textAlign: 'left',
-                                cursor: 'pointer',
-                            }}
+                            className="exam-reminder-btn"
                         >
                             <div>
-                                <div style={{ fontWeight: 800 }}>{item.title}</div>
-                                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{item.type}</div>
+                                <div className="exam-reminder-title">{item.title}</div>
+                                <div className="exam-reminder-type">{item.type}</div>
                             </div>
-                            <div style={{ color: item.ms !== null && item.ms <= 86400000 ? '#f59e0b' : 'var(--text-muted)', fontWeight: 700 }}>
+                            <div className={`exam-reminder-due${item.ms !== null && item.ms <= 86400000 ? ' urgent' : ''}`}>
                                 {labelFor(item)}
                             </div>
                         </button>
@@ -328,7 +315,7 @@ function Dashboard({ user }) {
         return date.toLocaleDateString()
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
     if (error) return <div className="dashboard-panel">{error}</div>
     if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
 
@@ -603,60 +590,41 @@ function Assignments({ user }) {
     const codingProblems = problems.filter(p => p.language !== 'SQL' && p.type !== 'SQL')
     const sqlProblems = problems.filter(p => p.language === 'SQL' || p.type === 'SQL')
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     // Helper function to render problem cards
     const renderProblemCard = (problem) => (
         <div key={problem.id} className="item-card glass">
             <div className="item-card-header">
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'var(--primary-alpha)', color: 'var(--primary)', fontWeight: 700 }}>{problem.type?.toUpperCase()}</span>
-                    <span className={`status-badge ${problem.status || 'live'}`} style={{ fontSize: '0.65rem' }}>{problem.status || 'Active'}</span>
+                <div className="problem-card-badges">
+                    <span className="badge-type">{problem.type?.toUpperCase()}</span>
+                    <span className={`status-badge ${problem.status || 'live'}`}>{problem.status || 'Active'}</span>
                     {problem.proctoring?.enabled && (
-                        <span style={{
-                            fontSize: '0.6rem',
-                            padding: '3px 8px',
-                            borderRadius: '4px',
-                            background: 'rgba(239, 68, 68, 0.15)',
-                            color: '#ef4444',
-                            fontWeight: 700,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                        }}>
+                        <span className="badge-proctored">
                             <Shield size={10} /> PROCTORED
                         </span>
                     )}
                 </div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'var(--bg-dark)', padding: '2px 8px', borderRadius: '4px' }}>{problem.language}</span>
+                <span className="badge-lang">{problem.language}</span>
             </div>
-            <h3 style={{ margin: '0.75rem 0', fontSize: '1.2rem' }}>{problem.title}</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginBottom: '1rem' }}>{problem.description}</p>
+            <h3 className="problem-card-title">{problem.title}</h3>
+            <p className="problem-card-desc text-clamp-2">{problem.description}</p>
 
-            {/* Proctoring Info */}
             {problem.proctoring?.enabled && (
-                <div style={{
-                    padding: '0.5rem 0.75rem',
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    borderRadius: '8px',
-                    marginBottom: '0.75rem',
-                    border: '1px solid rgba(239, 68, 68, 0.15)'
-                }}>
-                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <Eye size={12} /> Proctoring Enabled:
-                        {problem.proctoring.videoAudio && <span style={{ marginLeft: '4px' }}>📹 Video</span>}
-                        {problem.proctoring.disableCopyPaste && <span style={{ marginLeft: '4px' }}>📋 No Copy</span>}
-                        {problem.proctoring.trackTabSwitches && <span style={{ marginLeft: '4px' }}>🔒 Tab Track</span>}
-                        {problem.proctoring.enableFaceDetection && <span style={{ marginLeft: '4px' }}>👁️ Face</span>}
-                        {problem.proctoring.detectMultipleFaces && <span style={{ marginLeft: '4px' }}>👥 Multi-Face</span>}
-                        {problem.proctoring.trackFaceLookaway && <span style={{ marginLeft: '4px' }}>👀 Lookaway</span>}
-                    </p>
+                <div className="proctoring-info-bar">
+                    <Eye size={12} /> Proctoring Enabled:
+                    {problem.proctoring.videoAudio && <span>📹 Video</span>}
+                    {problem.proctoring.disableCopyPaste && <span>📋 No Copy</span>}
+                    {problem.proctoring.trackTabSwitches && <span>🔒 Tab Track</span>}
+                    {problem.proctoring.enableFaceDetection && <span>👁️ Face</span>}
+                    {problem.proctoring.detectMultipleFaces && <span>👥 Multi-Face</span>}
+                    {problem.proctoring.trackFaceLookaway && <span>👀 Lookaway</span>}
                 </div>
             )}
 
-            <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+            <div className="problem-card-footer">
                 <span className={`difficulty-badge ${problem.difficulty?.toLowerCase()}`}>{problem.difficulty}</span>
-                <button onClick={() => handleSolve(problem)} className="btn-create-new" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}><Play size={16} /> Solve</button>
+                <button onClick={() => handleSolve(problem)} className="btn-create-new btn-sm"><Play size={16} /> Solve</button>
             </div>
         </div>
     )
@@ -664,66 +632,22 @@ function Assignments({ user }) {
     return (
         <>
             {/* Tab Buttons */}
-            <div style={{
-                display: 'flex',
-                gap: '1rem',
-                marginBottom: '1.5rem',
-                padding: '0.5rem',
-                background: 'var(--bg-card)',
-                borderRadius: '12px',
-                width: 'fit-content'
-            }}>
+            <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
                 <button
                     onClick={() => setActiveTab('coding')}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease',
-                        background: activeTab === 'coding' ? 'var(--primary)' : 'transparent',
-                        color: activeTab === 'coding' ? 'white' : 'var(--text-muted)'
-                    }}
+                    className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}
                 >
                     <Code size={18} />
                     Coding Problems
-                    <span style={{
-                        background: activeTab === 'coding' ? 'rgba(255,255,255,0.2)' : 'var(--bg-dark)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem'
-                    }}>{codingProblems.length}</span>
+                    <span className="tab-count">{codingProblems.length}</span>
                 </button>
                 <button
                     onClick={() => setActiveTab('sql')}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease',
-                        background: activeTab === 'sql' ? 'linear-gradient(135deg, #06b6d4, #0891b2)' : 'transparent',
-                        color: activeTab === 'sql' ? 'white' : 'var(--text-muted)'
-                    }}
+                    className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}
                 >
                     <FileText size={18} />
                     SQL Problems
-                    <span style={{
-                        background: activeTab === 'sql' ? 'rgba(255,255,255,0.2)' : 'var(--bg-dark)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem'
-                    }}>{sqlProblems.length}</span>
+                    <span className="tab-count">{sqlProblems.length}</span>
                 </button>
             </div>
 
@@ -1507,69 +1431,32 @@ function Submissions({ user }) {
 
     const filteredSubmissions = getFilteredSubmissions()
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <>
             {/* Header with Search */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.5rem' }}>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                        onClick={() => setActiveTab('all')}
-                        style={{
-                            padding: '0.6rem 1.2rem',
-                            background: activeTab === 'all' ? 'var(--primary)' : 'rgba(59, 130, 246, 0.1)',
-                            border: activeTab === 'all' ? 'none' : '1px solid var(--border-color)',
-                            borderRadius: '8px',
-                            color: activeTab === 'all' ? 'white' : 'var(--text-muted)',
-                            cursor: 'pointer',
-                            fontWeight: 500
-                        }}
-                    >All ({allSubmissions.length})</button>
-                    <button
-                        onClick={() => setActiveTab('code')}
-                        style={{
-                            padding: '0.6rem 1.2rem',
-                            background: activeTab === 'code' ? 'var(--primary)' : 'rgba(59, 130, 246, 0.1)',
-                            border: activeTab === 'code' ? 'none' : '1px solid var(--border-color)',
-                            borderRadius: '8px',
-                            color: activeTab === 'code' ? 'white' : 'var(--text-muted)',
-                            cursor: 'pointer',
-                            fontWeight: 500
-                        }}
-                    >💻 Code ({submissions.length})</button>
-
-                    <button
-                        onClick={() => setActiveTab('aptitude')}
-                        style={{
-                            padding: '0.6rem 1.2rem',
-                            background: activeTab === 'aptitude' ? '#8b5cf6' : 'rgba(139, 92, 246, 0.1)',
-                            border: activeTab === 'aptitude' ? 'none' : '1px solid var(--border-color)',
-                            borderRadius: '8px',
-                            color: activeTab === 'aptitude' ? 'white' : 'var(--text-muted)',
-                            cursor: 'pointer',
-                            fontWeight: 500
-                        }}
-                    >📝 Aptitude ({aptitudeSubmissions.length})</button>
-                    <button
-                        onClick={() => setActiveTab('global')}
-                        style={{
-                            padding: '0.6rem 1.2rem',
-                            background: activeTab === 'global' ? '#3b82f6' : 'rgba(59, 130, 246, 0.1)',
-                            border: activeTab === 'global' ? 'none' : '1px solid var(--border-color)',
-                            borderRadius: '8px',
-                            color: activeTab === 'global' ? 'white' : 'var(--text-muted)',
-                            cursor: 'pointer',
-                            fontWeight: 500
-                        }}
-                    >🌐 Global ({globalSubmissions.length})</button>
+            <div className="filter-toolbar" style={{ marginBottom: '1.5rem' }}>
+                <div className="tabs-bar">
+                    <button onClick={() => setActiveTab('all')} className={`tab-btn${activeTab === 'all' ? ' active' : ''}`}>
+                        All <span className="tab-count">{allSubmissions.length}</span>
+                    </button>
+                    <button onClick={() => setActiveTab('code')} className={`tab-btn${activeTab === 'code' ? ' active' : ''}`}>
+                        💻 Code <span className="tab-count">{submissions.length}</span>
+                    </button>
+                    <button onClick={() => setActiveTab('aptitude')} className={`tab-btn${activeTab === 'aptitude' ? ' active' : ''}`}>
+                        📝 Aptitude <span className="tab-count">{aptitudeSubmissions.length}</span>
+                    </button>
+                    <button onClick={() => setActiveTab('global')} className={`tab-btn${activeTab === 'global' ? ' active' : ''}`}>
+                        🌐 Global <span className="tab-count">{globalSubmissions.length}</span>
+                    </button>
                 </div>
-                <div style={{ position: 'relative' }}>
-                    <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <div className="search-input-wrap">
+                    <Search size={16} className="search-icon" />
                     <input
                         type="text"
                         placeholder="Search problem or status..."
-                        style={{ padding: '0.6rem 1rem 0.6rem 2.5rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'white', width: '250px' }}
+                        className="search-input"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -1596,23 +1483,17 @@ function Submissions({ user }) {
                             filteredSubmissions.map(sub => (
                                 <tr key={sub.id}>
                                     <td>
-                                        <span style={{
-                                            fontSize: '0.75rem',
-                                            padding: '2px 8px',
-                                            borderRadius: '4px',
-                                            background: sub.subType === 'aptitude' ? 'rgba(139, 92, 246, 0.1)' : 'var(--primary-alpha)',
-                                            color: sub.subType === 'aptitude' ? '#8b5cf6' : 'var(--primary)'
-                                        }}>
+                                        <span className={`badge-type ${sub.subType === 'aptitude' ? 'aptitude' : ''}`}>
                                             {sub.subType === 'aptitude' ? '📝 Aptitude' : sub.subType === 'global' ? '🌐 Global' : '💻 Code'}
                                         </span>
                                     </td>
-                                    <td><div style={{ color: 'var(--primary)', fontWeight: 500 }}>{sub.itemTitle || sub.testTitle}</div></td>
+                                    <td><div className="sub-title-cell">{sub.itemTitle || sub.testTitle}</div></td>
                                     <td>
-                                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)' }}>
+                                        <span className="badge-lang">
                                             {sub.subType === 'aptitude' ? 'N/A' : sub.subType === 'global' ? 'Mixed' : (sub.language?.toUpperCase() || 'N/A')}
                                         </span>
                                     </td>
-                                    <td style={{ fontWeight: 700, fontSize: '1.1rem', color: isResultLocked(sub) ? 'var(--text-muted)' : undefined }}>
+                                    <td className={`score-cell${isResultLocked(sub) ? ' locked' : ''}`}>
                                         {scoreText(sub.score)}
                                     </td>
                                     <td>
@@ -1624,47 +1505,17 @@ function Submissions({ user }) {
                                                 </span>
                                             )}
                                             {(sub.integrity?.integrityViolation || sub.tabSwitches > 0) && (
-                                                <span style={{
-                                                    fontSize: '0.65rem',
-                                                    padding: '2px 6px',
-                                                    borderRadius: '4px',
-                                                    background: 'rgba(245, 158, 11, 0.15)',
-                                                    color: '#f59e0b',
-                                                    border: '1px solid rgba(245, 158, 11, 0.3)',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '3px'
-                                                }}>
+                                                <span className="violation-badge warning">
                                                     <AlertTriangle size={10} /> {sub.integrity?.tabSwitches || sub.tabSwitches || 0} Tab
                                                 </span>
                                             )}
                                             {sub.cameraBlockedCount > 0 && (
-                                                <span style={{
-                                                    fontSize: '0.65rem',
-                                                    padding: '2px 6px',
-                                                    borderRadius: '4px',
-                                                    background: 'rgba(239, 68, 68, 0.15)',
-                                                    color: '#ef4444',
-                                                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '3px'
-                                                }}>
+                                                <span className="violation-badge danger">
                                                     📷 {sub.cameraBlockedCount} Cam
                                                 </span>
                                             )}
                                             {sub.phoneDetectionCount > 0 && (
-                                                <span style={{
-                                                    fontSize: '0.65rem',
-                                                    padding: '2px 6px',
-                                                    borderRadius: '4px',
-                                                    background: 'rgba(239, 68, 68, 0.15)',
-                                                    color: '#ef4444',
-                                                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '3px'
-                                                }}>
+                                                <span className="violation-badge danger">
                                                     📱 {sub.phoneDetectionCount} Phone
                                                 </span>
                                             )}
@@ -1672,27 +1523,26 @@ function Submissions({ user }) {
                                     </td>
                                     <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{new Date(sub.submittedAt).toLocaleString()}</td>
                                     <td>
-                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <div className="btn-group">
                                             {sub.subType === 'aptitude' ? (
                                                 isResultLocked(sub) ? (
-                                                    <span style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', padding: '0.4rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Shield size={14} /> {resultLockMessage(sub)}</span>
+                                                    <span className="result-locked-chip"><Shield size={14} /> {resultLockMessage(sub)}</span>
                                                 ) : (
-                                                    <button onClick={() => setViewAptitudeResult(sub)} style={{ background: 'rgba(139, 92, 246, 0.1)', border: 'none', color: '#8b5cf6', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Results</button>
+                                                    <button onClick={() => setViewAptitudeResult(sub)} className="tbl-action-btn purple"><Eye size={14} /> Results</button>
                                                 )
                                             ) : sub.subType === 'global' ? (
                                                 <>
                                                     {isResultLocked(sub) ? (
-                                                        <span style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', padding: '0.4rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Shield size={14} /> {resultLockMessage(sub)}</span>
+                                                        <span className="result-locked-chip"><Shield size={14} /> {resultLockMessage(sub)}</span>
                                                     ) : (
-                                                        <button onClick={() => setViewGlobalReport(sub.id)} style={{ background: 'var(--primary-alpha)', border: 'none', color: 'var(--primary)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Full Report</button>
+                                                        <button onClick={() => setViewGlobalReport(sub.id)} className="tbl-action-btn primary"><Eye size={14} /> Full Report</button>
                                                     )}
-                                                    <button onClick={() => handleDelete(sub)} style={{ background: 'var(--danger-alpha)', border: 'none', color: 'var(--danger)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}><Trash2 size={14} /></button>
+                                                    <button onClick={() => handleDelete(sub)} className="tbl-action-btn danger"><Trash2 size={14} /></button>
                                                 </>
-
                                             ) : (
                                                 <>
-                                                    <button onClick={() => setViewReport(sub)} style={{ background: 'var(--primary-alpha)', border: 'none', color: 'var(--primary)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Eye size={14} /> Report</button>
-                                                    <button onClick={() => handleDelete(sub)} style={{ background: 'var(--danger-alpha)', border: 'none', color: 'var(--danger)', padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}><Trash2 size={14} /></button>
+                                                    <button onClick={() => setViewReport(sub)} className="tbl-action-btn primary"><Eye size={14} /> Report</button>
+                                                    <button onClick={() => handleDelete(sub)} className="tbl-action-btn danger"><Trash2 size={14} /></button>
                                                 </>
                                             )}
                                         </div>
@@ -2122,7 +1972,7 @@ function GlobalTests({ user }) {
         axios.get(`${API_BASE}/global-test-submissions?studentId=${user.id}`).then(r => setSubmissions(Array.isArray(r.data) ? r.data : [])).catch(() => { })
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     if (showTestInterface && selectedTest) {
         return (
@@ -2649,7 +2499,7 @@ function AptitudeTests({ user }) {
 
     const latestSubmissions = getLatestSubmissions()
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     if (showTestInterface && selectedTest) {
         return (
@@ -3257,7 +3107,7 @@ function StudentAnalytics({ user }) {
         fetchData()
     }, [user.id])
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const tabs = [
         { id: 'learning-path', label: t('learning_path'), icon: <Radar size={16} /> },

@@ -931,11 +931,34 @@ async def get_all_comm_tests(request: Request):
         async with conn.cursor() as cur:
             await cur.execute("SELECT * FROM comm_tests ORDER BY created_at DESC")
             rows = await cur.fetchall()
+            test_ids = [str(r.get("id")) for r in (rows or []) if r.get("id")]
+            alloc_counts: dict[str, int] = {}
+            if test_ids:
+                await cur.execute(
+                    """CREATE TABLE IF NOT EXISTS comm_test_allocations (
+                        id CHAR(36) NOT NULL PRIMARY KEY,
+                        test_id INT NOT NULL,
+                        student_id VARCHAR(64) NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY uniq_comm_alloc (test_id, student_id)
+                    )"""
+                )
+                placeholders = ",".join(["%s"] * len(test_ids))
+                await cur.execute(
+                    f"""SELECT test_id, COUNT(*) AS cnt
+                        FROM comm_test_allocations
+                        WHERE test_id IN ({placeholders})
+                        GROUP BY test_id""",
+                    test_ids,
+                )
+                for row in (await cur.fetchall()) or []:
+                    alloc_counts[str(row.get("test_id"))] = int(row.get("cnt") or 0)
 
     result = []
     for r in rows:
         result.append({
             **r,
+            "allocatedCount": alloc_counts.get(str(r.get("id")), 0),
             "module_a_sentences": _safe_json(r.get("module_a_sentences")),
             "module_b_sentences": _safe_json(r.get("module_b_sentences")),
             "module_c_topics": _safe_json(r.get("module_c_topics")),

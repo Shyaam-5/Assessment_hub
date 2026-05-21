@@ -226,9 +226,9 @@ export default function DirectMessaging({ currentUser }) {
                 {/* Contacts List */}
                 <div style={{ flex: 1, overflowY: 'auto' }}>
                     {loading ? (
-                        <div style={{ padding: '3rem 1rem', textAlign: 'center' }}>
-                            <div className="loading-spinner" style={{ margin: '0 auto 1rem' }} />
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Loading contacts...</p>
+                        <div className="page-loading" style={{ flexDirection: 'column', gap: '0.75rem' }}>
+                            <div className="loading-spinner" />
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>Loading contacts...</p>
                         </div>
                     ) : filteredContacts.length === 0 ? (
                         <div style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -242,17 +242,7 @@ export default function DirectMessaging({ currentUser }) {
                         const hasUnread = conv?.unread > 0
                         return (
                             <div key={contact.id} onClick={() => openConversation(contact)}
-                                style={{
-                                    padding: '0.75rem 1rem', cursor: 'pointer',
-                                    borderBottom: '1px solid rgba(128,128,128,0.08)',
-                                    background: isSelected ? 'rgba(59,130,246,0.1)' : 'transparent',
-                                    borderLeft: isSelected ? '3px solid #3b82f6' : '3px solid transparent',
-                                    display: 'flex', alignItems: 'center', gap: '0.75rem',
-                                    transition: 'all 0.15s ease',
-                                    position: 'relative'
-                                }}
-                                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(59,130,246,0.04)' }}
-                                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
+                                className={`dm-contact-item${isSelected ? ' selected' : ''}`}>
                                 {/* Avatar */}
                                 <div style={{ position: 'relative', flexShrink: 0 }}>
                                     <div style={{ width: 44, height: 44, borderRadius: '50%', background: getAvatarColor(contact.name), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '0.95rem', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>

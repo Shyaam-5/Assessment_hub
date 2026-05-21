@@ -672,6 +672,12 @@ export default function CommTestManager() {
                                         <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#f1f5f9' }}>{test.title}</h3>
                                         <span style={{
                                             padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700,
+                                            background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', border: '1px solid rgba(99,102,241,0.35)'
+                                        }}>
+                                            {test.allocatedCount || 0} allocated
+                                        </span>
+                                        <span style={{
+                                            padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700,
                                             background: test.is_active ? '#dcfce7' : '#fee2e2',
                                             color: test.is_active ? '#16a34a' : '#dc2626'
                                         }}>

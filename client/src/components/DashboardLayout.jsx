@@ -50,13 +50,7 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
 
             {/* Offline Indicator */}
             {!isOnline && (
-                <div role="alert" style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
-                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                    color: '#fff', textAlign: 'center', padding: '0.5rem 1rem',
-                    fontSize: '0.85rem', fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-                }}>
+                <div role="alert" className="offline-banner">
                     <WifiOff size={16} /> {t('offline_message')}
                 </div>
             )}
@@ -147,21 +141,7 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                                 {item.icon}
                                 <span>{item.label}</span>
                                 {item.badge > 0 && (
-                                    <span style={{
-                                        marginLeft: 'auto',
-                                        background: '#ef4444',
-                                        color: 'white',
-                                        borderRadius: '50%',
-                                        minWidth: '20px',
-                                        height: '20px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        fontSize: '0.65rem',
-                                        fontWeight: 700,
-                                        padding: '0 4px',
-                                        animation: 'pulse 2s infinite'
-                                    }}>
+                                    <span className="nav-badge">
                                         {item.badge > 99 ? '99+' : item.badge}
                                     </span>
                                 )}
@@ -183,25 +163,14 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                             <span>{languages.find(l => l.code === locale)?.nativeName || 'English'}</span>
                         </button>
                         {showLangMenu && (
-                            <div style={{
-                                position: 'absolute', bottom: '100%', left: 0, right: 0,
-                                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                                borderRadius: '8px', marginBottom: '4px', overflow: 'hidden',
-                                boxShadow: '0 -4px 12px rgba(0,0,0,0.15)', zIndex: 100
-                            }} role="listbox" aria-label="Select language">
+                            <div className="lang-menu" role="listbox" aria-label="Select language">
                                 {languages.map(lang => (
                                     <button
                                         key={lang.code}
                                         role="option"
                                         aria-selected={locale === lang.code}
                                         onClick={() => { setLocale(lang.code); setShowLangMenu(false) }}
-                                        style={{
-                                            width: '100%', padding: '0.6rem 1rem', border: 'none',
-                                            background: locale === lang.code ? 'var(--primary-alpha)' : 'transparent',
-                                            color: 'var(--text)', cursor: 'pointer', textAlign: 'left',
-                                            display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                            fontSize: '0.85rem', fontWeight: locale === lang.code ? 600 : 400
-                                        }}
+                                        className={`lang-menu-item${locale === lang.code ? ' selected' : ''}`}
                                     >
                                         <span>{lang.flag}</span>
                                         <span>{lang.nativeName}</span>
@@ -257,15 +226,7 @@ function DashboardLayout({ children, navItems, title, subtitle }) {
                     </div>
                     <div className="header-right">
                         {/* Online Status */}
-                        <div
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                                fontSize: '0.8rem', color: isOnline ? 'var(--success)' : 'var(--warning)',
-                                fontWeight: 500
-                            }}
-                            role="status"
-                            aria-live="polite"
-                        >
+                        <div className={`online-status${isOnline ? '' : ' offline'}`} role="status" aria-live="polite">
                             {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
                             <span className="sr-only">{isOnline ? 'Online' : 'Offline'}</span>
                         </div>

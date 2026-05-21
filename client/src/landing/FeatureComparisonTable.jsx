@@ -26,7 +26,7 @@ function Cell({ val }) {
             ? <Check size={16} color="var(--success)" strokeWidth={3} />
             : <X size={16} color="var(--danger)" strokeWidth={3} />
     }
-    return <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>{val}</span>
+    return <span className="comparison-cell-text">{val}</span>
 }
 
 export default function FeatureComparisonTable() {

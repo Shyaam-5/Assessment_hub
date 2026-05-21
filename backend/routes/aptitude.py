@@ -278,8 +278,26 @@ async def list_aptitude_tests(
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(query, params)
             tests = await cur.fetchall()
+            test_ids = [str(t.get("id")) for t in (tests or []) if t.get("id")]
+            alloc_counts: dict[str, int] = {}
+            if test_ids:
+                placeholders = ",".join(["%s"] * len(test_ids))
+                await cur.execute(
+                    f"""SELECT test_id, COUNT(*) AS cnt
+                        FROM test_student_allocations
+                        WHERE test_id IN ({placeholders})
+                        GROUP BY test_id""",
+                    test_ids,
+                )
+                for row in (await cur.fetchall()) or []:
+                    alloc_counts[str(row.get("test_id"))] = int(row.get("cnt") or 0)
 
-    return [_clean_test(t) for t in tests]
+    cleaned = []
+    for t in tests:
+        item = _clean_test(t)
+        item["allocatedCount"] = alloc_counts.get(str(t.get("id")), 0)
+        cleaned.append(item)
+    return cleaned
 
 
 # ---------- Get single test with questions ----------

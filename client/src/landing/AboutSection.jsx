@@ -43,7 +43,7 @@ export default function AboutSection() {
     return (
         <section className="landing-section" id="about-section">
             {/* Header */}
-            <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
+            <div className="section-header">
                 <div className="section-badge">
                     <Brain size={12} />
                     About the Platform
@@ -60,81 +60,39 @@ export default function AboutSection() {
             </div>
 
             {/* 3-col highlight row */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: '1px',
-                background: 'var(--border-color)',
-                borderRadius: 'var(--radius-lg)',
-                overflow: 'hidden',
-                marginBottom: '3rem',
-                border: '1px solid var(--border-color)',
-            }}>
+            <div className="about-highlight-row">
                 {[
                     { num: '14+', label: 'Assessment Modules', sub: 'Coding, SQL, MCQ, AI Interview, Communication, and more' },
                     { num: '3', label: 'AI Agents', sub: 'Proctor, Behavior Analyzer, and Analytics Intelligence' },
                     { num: '40+', label: 'Languages Supported', sub: 'Multi-language coding execution via Judge0' },
                 ].map((item) => (
-                    <div key={item.label} style={{
-                        background: 'var(--bg-card)',
-                        padding: '2rem 1.5rem',
-                        textAlign: 'center',
-                    }}>
-                        <div style={{
-                            fontSize: '2.5rem',
-                            fontWeight: 900,
-                            background: 'linear-gradient(135deg, #60a5fa, #a855f7)',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            marginBottom: '0.35rem',
-                            lineHeight: 1.1
-                        }}>{item.num}</div>
-                        <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.95rem', marginBottom: '0.3rem' }}>{item.label}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.sub}</div>
+                    <div key={item.label} className="about-stat-cell">
+                        <div className="about-stat-num">{item.num}</div>
+                        <div className="about-stat-label">{item.label}</div>
+                        <div className="about-stat-sub">{item.sub}</div>
                     </div>
                 ))}
             </div>
 
             {/* Pillars grid */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                gap: '1.25rem',
-            }}>
+            <div className="about-pillars-grid">
                 {pillars.map((p) => (
                     <div key={p.title} className="glass-card">
-                        <div className="card-icon-wrapper" style={{
-                            background: p.color + '1a',
-                            color: p.color,
-                        }}>
+                        <div className="card-icon-wrapper" style={{ background: p.color + '1a', color: p.color }}>
                             {p.icon}
                         </div>
-                        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text)' }}>
-                            {p.title}
-                        </h3>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.65 }}>
-                            {p.desc}
-                        </p>
+                        <h3 className="glass-card-title">{p.title}</h3>
+                        <p className="glass-card-desc">{p.desc}</p>
                     </div>
                 ))}
             </div>
 
             {/* Who is it for */}
-            <div style={{ marginTop: '3.5rem', textAlign: 'center' }}>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '1.25rem' }}>
-                    Built for
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.75rem' }}>
+            <div className="about-built-for">
+                <p className="about-built-for-label">Built for</p>
+                <div className="about-built-for-tags">
                     {['Colleges & Universities', 'Placement Training Institutes', 'Recruitment Agencies', 'Corporate HR Teams', 'EdTech Platforms', 'Bootcamps'].map(label => (
-                        <span key={label} style={{
-                            background: 'var(--bg-card)',
-                            border: '1px solid var(--border-color)',
-                            color: 'var(--text-secondary)',
-                            padding: '0.45rem 1rem',
-                            borderRadius: '2rem',
-                            fontSize: '0.83rem',
-                            fontWeight: 500,
-                        }}>{label}</span>
+                        <span key={label} className="about-tag">{label}</span>
                     ))}
                 </div>
             </div>

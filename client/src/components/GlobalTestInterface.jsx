@@ -1977,17 +1977,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                                 justifyContent: 'center'
                                             }}
                                         >
-                                            <div style={{
-                                                width: '60px',
-                                                height: '5px',
-                                                background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
-                                                borderRadius: '3px',
-                                                opacity: 0.7,
-                                                transition: 'opacity 0.2s, width 0.2s'
-                                            }}
-                                                onMouseEnter={(e) => { e.target.style.opacity = '1'; e.target.style.width = '80px'; }}
-                                                onMouseLeave={(e) => { e.target.style.opacity = '0.7'; e.target.style.width = '60px'; }}
-                                            />
+                                            <div className="gti-resize-handle" />
                                         </div>
                                     )}
 
@@ -1995,22 +1985,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                     {!isConsoleOpen && (
                                         <div
                                             onClick={() => setIsConsoleOpen(true)}
-                                            style={{
-                                                flex: 1,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                padding: '0 1.5rem',
-                                                cursor: 'pointer',
-                                                background: 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
-                                                gap: '0.75rem',
-                                                color: '#94a3b8',
-                                                fontSize: '0.85rem',
-                                                justifyContent: 'space-between',
-                                                borderTop: '1px solid rgba(59, 130, 246, 0.2)',
-                                                transition: 'background 0.2s'
-                                            }}
-                                            onMouseEnter={(e) => e.currentTarget.style.background = 'linear-gradient(180deg, #1e293b 0%, #334155 100%)'}
-                                            onMouseLeave={(e) => e.currentTarget.style.background = 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)'}
+                                            className="gti-console-toggle"
                                         >
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                                 <div style={{

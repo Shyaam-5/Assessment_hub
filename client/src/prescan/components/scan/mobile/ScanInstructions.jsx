@@ -1,3 +1,5 @@
+import '../../../prescan.css'
+
 const STEPS = [
   { icon: '📷', title: 'Grant Camera Access', description: 'Allow camera access when prompted. This is required to scan your exam environment.' },
   { icon: '📡', title: 'Allow Motion Sensors', description: 'On iOS, tap "Allow" when asked for motion & orientation access. Required for angle tracking.' },
@@ -45,9 +47,8 @@ export default function ScanInstructions({ onStart, examTitle, candidateName }) 
       <div style={{ padding: '20px 24px', paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))', backgroundColor: '#0f172a' }}>
         <button
           onClick={onStart}
-          style={{ width: '100%', padding: '16px 24px', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.02em', boxShadow: '0 4px 20px rgba(37,99,235,0.4)', transition: 'opacity 0.15s' }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+          className="prescan-start-btn"
+          style={{ width: '100%', padding: '16px 24px', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.02em', boxShadow: '0 4px 20px rgba(37,99,235,0.4)' }}
         >
           Start Scanning
         </button>

@@ -1,0 +1,7 @@
+/* Prescan shared styles */
+
+.prescan-action-btn { transition: opacity 0.15s; }
+.prescan-action-btn:hover { opacity: 0.85; }
+
+.prescan-start-btn { transition: opacity 0.15s; }
+.prescan-start-btn:hover { opacity: 0.9; }

@@ -141,7 +141,7 @@ function Dashboard({ user }) {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
     if (error) return <div className="dashboard-panel">{error}</div>
     if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
 
@@ -584,7 +584,7 @@ function UploadProblems({ user }) {
         return completedCount === 0 || (completedCount >= students.length && students.length > 0);
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     // Separate problems into Coding and SQL
     const codingProblems = problems.filter(p => p.language !== 'SQL' && p.type !== 'SQL')
@@ -594,121 +594,32 @@ function UploadProblems({ user }) {
     return (
         <div className="animate-fadeIn">
             {/* Header with Create Button */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <div className="section-header" style={{ marginBottom: '2rem' }}>
                 <div>
-                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>Coding Problems</h2>
-                    <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0' }}>Manage your problem library (C, C++, Python, Java, SQL)</p>
+                    <h2 className="section-title">Coding Problems</h2>
+                    <p className="section-subtitle">Manage your problem library (C, C++, Python, Java, SQL)</p>
                 </div>
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div className="btn-group" style={{ flexWrap: 'wrap' }}>
                     <input type="file" accept=".csv" ref={csvInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} />
-                    <button
-                        onClick={() => csvInputRef.current?.click()}
-                        disabled={uploading}
-                        style={{
-                            padding: '0.75rem 1.25rem',
-                            background: 'linear-gradient(135deg, #10b981, #059669)',
-                            border: 'none',
-                            borderRadius: '8px',
-                            color: 'white',
-                            fontSize: '0.9rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                        }}
-                    >
+                    <button onClick={() => csvInputRef.current?.click()} disabled={uploading} className="btn-action-green">
                         <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV Upload'}
                     </button>
-                    <button
-                        onClick={() => setShowAIChat(true)}
-                        style={{
-                            padding: '0.75rem 1.25rem',
-                            background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
-                            border: 'none',
-                            borderRadius: '8px',
-                            color: 'white',
-                            fontSize: '0.9rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                        }}
-                    >
+                    <button onClick={() => setShowAIChat(true)} className="btn-action-purple">
                         <Sparkles size={18} /> AI Generate
                     </button>
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="btn-create-new"
-                        style={{ padding: '0.75rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                    >
+                    <button onClick={() => setShowModal(true)} className="btn-create-new">
                         <Plus size={20} /> Create Manually
                     </button>
                 </div>
             </div>
 
             {/* Tab Buttons */}
-            <div style={{
-                display: 'flex',
-                gap: '1rem',
-                marginBottom: '1.5rem',
-                padding: '0.5rem',
-                background: 'var(--bg-card)',
-                borderRadius: '12px',
-                width: 'fit-content'
-            }}>
-                <button
-                    onClick={() => setActiveTab('coding')}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease',
-                        background: activeTab === 'coding' ? 'var(--primary)' : 'transparent',
-                        color: activeTab === 'coding' ? 'white' : 'var(--text-muted)'
-                    }}
-                >
-                    <Code size={18} />
-                    Coding Problems
-                    <span style={{
-                        background: activeTab === 'coding' ? 'rgba(255,255,255,0.2)' : 'var(--bg-dark)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem'
-                    }}>{codingProblems.length}</span>
+            <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
+                <button onClick={() => setActiveTab('coding')} className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}>
+                    <Code size={18} /> Coding Problems <span className="tab-count">{codingProblems.length}</span>
                 </button>
-                <button
-                    onClick={() => setActiveTab('sql')}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease',
-                        background: activeTab === 'sql' ? 'linear-gradient(135deg, #06b6d4, #0891b2)' : 'transparent',
-                        color: activeTab === 'sql' ? 'white' : 'var(--text-muted)'
-                    }}
-                >
-                    <FileText size={18} />
-                    SQL Problems
-                    <span style={{
-                        background: activeTab === 'sql' ? 'rgba(255,255,255,0.2)' : 'var(--bg-dark)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem'
-                    }}>{sqlProblems.length}</span>
+                <button onClick={() => setActiveTab('sql')} className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}>
+                    <FileText size={18} /> SQL Problems <span className="tab-count">{sqlProblems.length}</span>
                 </button>
             </div>
 
@@ -741,66 +652,32 @@ function UploadProblems({ user }) {
                             ) : displayedProblems.map(p => (
                                 <tr key={p.id}>
                                     <td style={{ fontWeight: 600 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <div className="problem-card-badges">
                                             {p.title}
                                             {p.proctoring?.enabled && (
-                                                <span style={{
-                                                    fontSize: '0.6rem',
-                                                    padding: '2px 6px',
-                                                    borderRadius: '4px',
-                                                    background: 'rgba(239, 68, 68, 0.15)',
-                                                    color: '#ef4444',
-                                                    fontWeight: 700,
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '3px'
-                                                }}>
-                                                    <Eye size={10} /> Proctored
-                                                </span>
+                                                <span className="badge-proctored"><Eye size={10} /> Proctored</span>
                                             )}
                                         </div>
                                     </td>
-                                    <td>
-                                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
-                                            {p.type?.toUpperCase()}
-                                        </span>
-                                    </td>
+                                    <td><span className="badge-type">{p.type?.toUpperCase()}</span></td>
                                     <td><span style={{ fontWeight: 500 }}>{p.language}</span></td>
                                     <td><span className={`difficulty-badge ${p.difficulty?.toLowerCase()}`}>{p.difficulty}</span></td>
-                                    <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                                    <td className="text-muted-sm">{new Date(p.createdAt).toLocaleDateString()}</td>
                                     <td>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                            <div style={{ width: '80px', height: '6px', background: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
-                                                <div style={{
-                                                    width: `${students.length > 0 ? ((p.completedBy?.length || 0) / students.length) * 100 : 0}%`,
-                                                    height: '100%',
-                                                    background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)'
-                                                }}></div>
+                                        <div className="completion-bar-wrap">
+                                            <div className="completion-bar">
+                                                <div className="completion-fill" style={{ width: `${students.length > 0 ? ((p.completedBy?.length || 0) / students.length) * 100 : 0}%` }} />
                                             </div>
-                                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                {p.completedBy?.length || 0}/{students.length}
-                                            </span>
+                                            <span className="text-muted-sm">{p.completedBy?.length || 0}/{students.length}</span>
                                         </div>
                                     </td>
                                     <td><span className={`status-badge ${p.status}`}>{p.status}</span></td>
                                     <td>
-                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <div className="btn-group">
                                             <button
                                                 onClick={() => setSelectedProblemForTestCases(p)}
                                                 disabled={p.language === 'SQL' || p.type === 'SQL'}
-                                                style={{
-                                                    background: (p.language === 'SQL' || p.type === 'SQL') ? 'rgba(100, 116, 139, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-                                                    border: 'none',
-                                                    color: (p.language === 'SQL' || p.type === 'SQL') ? '#64748b' : '#10b981',
-                                                    padding: '0.4rem 0.75rem',
-                                                    borderRadius: '6px',
-                                                    cursor: (p.language === 'SQL' || p.type === 'SQL') ? 'not-allowed' : 'pointer',
-                                                    fontSize: '0.8rem',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '4px',
-                                                    opacity: (p.language === 'SQL' || p.type === 'SQL') ? 0.5 : 1
-                                                }}
+                                                className={`tbl-action-btn ${(p.language === 'SQL' || p.type === 'SQL') ? 'disabled' : 'success'}`}
                                                 title={(p.language === 'SQL' || p.type === 'SQL') ? 'Test cases not available for SQL problems' : 'Manage Test Cases'}
                                             >
                                                 <ClipboardList size={14} /> Tests
@@ -808,15 +685,7 @@ function UploadProblems({ user }) {
                                             <button
                                                 onClick={() => handleDelete(p.id)}
                                                 disabled={!canDelete(p)}
-                                                style={{
-                                                    background: canDelete(p) ? 'rgba(239, 68, 68, 0.1)' : 'rgba(148, 163, 184, 0.1)',
-                                                    border: 'none',
-                                                    color: canDelete(p) ? '#ef4444' : '#64748b',
-                                                    padding: '0.4rem 0.75rem',
-                                                    borderRadius: '6px',
-                                                    cursor: canDelete(p) ? 'pointer' : 'not-allowed',
-                                                    fontSize: '0.8rem'
-                                                }}
+                                                className={`tbl-action-btn ${canDelete(p) ? 'danger' : 'disabled'}`}
                                                 title={canDelete(p) ? 'Delete problem' : 'Cannot delete while students are in progress'}
                                             >
                                                 <Trash2 size={14} />
@@ -1132,7 +1001,7 @@ function Leaderboard({ user }) {
             .catch(res => setLoading(false))
     }, [user.id])
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const getRankStyle = (rank) => {
         if (rank === 1) return { color: '#fbbf24', transform: 'scale(1.2)' }
@@ -1560,7 +1429,7 @@ function AllSubmissions({ user }) {
 
     const filteredSubmissions = getFilteredSubmissions()
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <>
@@ -2089,7 +1958,7 @@ function MentorAnalytics({ user }) {
         setExporting(false)
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const tabs = [
         { id: 'plagiarism', label: t('plagiarism_detection'), icon: <Shield size={16} /> },

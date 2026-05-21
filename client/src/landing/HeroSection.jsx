@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import React, { useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Brain, CheckCircle, ArrowRight, Zap, Shield, BarChart3, Users, Globe, Award } from 'lucide-react'
 
@@ -142,13 +142,13 @@ export default function HeroSection() {
                 {/* Trust indicators */}
                 <div className="hero-trust-bar">
                     {trustItems.map((item, i) => (
-                        <>
-                            {i > 0 && <div key={`div-${i}`} className="hero-trust-divider" aria-hidden="true" />}
-                            <div key={item.text} className="hero-trust-item">
+                        <React.Fragment key={item.text}>
+                            {i > 0 && <div className="hero-trust-divider" aria-hidden="true" />}
+                            <div className="hero-trust-item">
                                 {item.icon}
                                 <span>{item.text}</span>
                             </div>
-                        </>
+                        </React.Fragment>
                     ))}
                 </div>
 

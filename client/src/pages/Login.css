@@ -357,6 +357,21 @@
     cursor: not-allowed;
 }
 
+/* Inline button spinner — used in Login loading states */
+.btn-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 .error-message {
     background: rgba(239, 68, 68, 0.1);
     color: #f87171;
@@ -442,21 +457,48 @@
 
 @media (max-width: 640px) {
     .login-nav {
-        padding: 1rem 1rem;
+        padding: 1rem;
     }
 
     .login-content {
-        gap: 2rem;
+        gap: 1.5rem;
+        padding: 4.5rem 1rem 1.5rem;
+    }
+
+    .hero-title {
+        font-size: clamp(1.75rem, 9vw, 2.5rem);
+        letter-spacing: -1px;
     }
 
     .hero-subtitle {
-        font-size: 1rem;
+        font-size: 0.95rem;
     }
 
     .login-card-inline {
-        padding: 1.5rem;
+        padding: 1.5rem 1.25rem;
         border-radius: 1rem;
+        max-width: 100%;
     }
+
+    .header-icon {
+        width: 52px;
+        height: 52px;
+        border-radius: 0.75rem;
+    }
+
+    .card-header h2 {
+        font-size: 1.4rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .login-nav { padding: 0.85rem; }
+    .nav-logo { font-size: 1.2rem; }
+    .login-content { padding: 4rem 0.85rem 1.25rem; }
+    .login-card-inline { padding: 1.25rem 1rem; }
+    .submit-btn { font-size: 0.9rem; padding: 0.75rem; }
+    .floating-icon { display: none; }
+    .ai-illustration { width: 240px; height: 240px; }
 }
 
 /* Floating Icons & Animations */

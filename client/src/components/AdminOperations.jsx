@@ -263,7 +263,7 @@ function SystemHealthDashboard() {
         }
     }, [fetchHealth, autoRefresh])
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
     if (!health) return <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '3rem' }}>Failed to load system health</div>
 
     const statusColor = health.status === 'healthy' ? '#10b981' : health.status === 'warning' ? '#f59e0b' : '#ef4444'
@@ -280,7 +280,7 @@ function SystemHealthDashboard() {
                         <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
                         Auto-refresh (10s)
                     </label>
-                    <button onClick={fetchHealth} style={buttonSecondary}><RefreshCw size={14} /> Refresh</button>
+                    <button onClick={fetchHealth} className="um-btn-secondary"><RefreshCw size={14} /> Refresh</button>
                 </div>
             </div>
 
@@ -377,7 +377,7 @@ function SystemHealthDashboard() {
 
             {/* Database Tables & Storage */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Database size={16} color="#3b82f6" /> Database Tables
                     </h3>
@@ -403,7 +403,7 @@ function SystemHealthDashboard() {
                     </div>
                 </div>
 
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Server size={16} color="#8b5cf6" /> System Details
                     </h3>
@@ -517,7 +517,7 @@ function BulkOperations() {
         setProcessing(false)
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const filteredStudents = students.filter(s =>
         s.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -562,7 +562,7 @@ function BulkOperations() {
 
             {activeOp === 'reassign' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '1.5rem' }}>
-                    <div style={cardStyle}>
+                    <div className="um-card">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
                             <div style={{ position: 'relative', flex: 1 }}>
                                 <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -575,7 +575,7 @@ function BulkOperations() {
                             </div>
                             <button
                                 onClick={() => setSelectedStudents(selectedStudents.length === filteredStudents.length ? [] : filteredStudents.map(s => s.id))}
-                                style={buttonSecondary}
+                                className="um-btn-secondary"
                             >
                                 {selectedStudents.length === filteredStudents.length ? 'Deselect All' : 'Select All'}
                             </button>
@@ -611,7 +611,7 @@ function BulkOperations() {
                     </div>
 
                     <div>
-                        <div style={cardStyle}>
+                        <div className="um-card">
                             <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Reassignment</h3>
                             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#3b82f6', marginBottom: '0.5rem' }}>{selectedStudents.length}</div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '1.5rem' }}>students selected</div>
@@ -641,12 +641,12 @@ function BulkOperations() {
 
             {activeOp === 'regrade' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '1.5rem' }}>
-                    <div style={cardStyle}>
+                    <div className="um-card">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
                             <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{submissions.length} submissions</span>
                             <button
                                 onClick={() => setSelectedSubmissions(selectedSubmissions.length === submissions.length ? [] : submissions.map(s => s.id))}
-                                style={buttonSecondary}
+                                className="um-btn-secondary"
                             >
                                 {selectedSubmissions.length === submissions.length ? 'Deselect All' : 'Select All'}
                             </button>
@@ -685,7 +685,7 @@ function BulkOperations() {
                     </div>
 
                     <div>
-                        <div style={cardStyle}>
+                        <div className="um-card">
                             <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Bulk Actions</h3>
                             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#8b5cf6', marginBottom: '0.5rem' }}>{selectedSubmissions.length}</div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '1.5rem' }}>submissions selected</div>
@@ -781,19 +781,19 @@ function AuditLogs() {
             {/* Stats Cards */}
             {stats && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                    <div style={cardStyle}>
+                    <div className="um-card">
                         <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#8b5cf6' }}>{stats.totalLogs}</div>
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Total Logs</div>
                     </div>
-                    <div style={cardStyle}>
+                    <div className="um-card">
                         <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3b82f6' }}>{stats.actionBreakdown?.length || 0}</div>
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Unique Actions</div>
                     </div>
-                    <div style={cardStyle}>
+                    <div className="um-card">
                         <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981' }}>{stats.userActivity?.length || 0}</div>
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Active Users</div>
                     </div>
-                    <div style={cardStyle}>
+                    <div className="um-card">
                         <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#06b6d4' }}>
                             {stats.recentActivity?.reduce((sum, r) => sum + r.count, 0) || 0}
                         </div>
@@ -840,8 +840,8 @@ function AuditLogs() {
             </div>
 
             {/* Log List */}
-            {loading ? <div className="loading-spinner" /> : (
-                <div style={cardStyle}>
+            {loading ? <div className="page-loading"><div className="loading-spinner" /></div> : (
+                <div className="um-card">
                     {logs.length === 0 ? (
                         <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
                             No audit logs found. Actions will be logged as you use admin features.
@@ -1004,7 +1004,7 @@ function ProblemSetTemplates() {
         }
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div>
@@ -1012,7 +1012,7 @@ function ProblemSetTemplates() {
                 <h2 style={{ margin: 0, color: 'var(--text)', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Layers size={20} color="#06b6d4" /> Problem Set Templates
                 </h2>
-                <button onClick={() => setShowCreate(true)} style={buttonPrimary}>
+                <button onClick={() => setShowCreate(true)} className="um-btn-primary">
                     <Plus size={16} /> New Template
                 </button>
             </div>
@@ -1076,7 +1076,7 @@ function ProblemSetTemplates() {
                         <div style={{ display: 'grid', gap: '1rem' }}>
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>Template Name</label>
-                                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Beginner Python Set" style={inputStyle} />
+                                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Beginner Python Set" className="um-input" />
                             </div>
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>Description</label>
@@ -1085,7 +1085,7 @@ function ProblemSetTemplates() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                                 <div>
                                     <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>Difficulty</label>
-                                    <select value={form.difficulty} onChange={e => setForm(p => ({ ...p, difficulty: e.target.value }))} style={selectStyle}>
+                                    <select value={form.difficulty} onChange={e => setForm(p => ({ ...p, difficulty: e.target.value }))} className="um-select">
                                         <option value="Mixed">Mixed</option>
                                         <option value="Easy">Easy</option>
                                         <option value="Medium">Medium</option>
@@ -1094,7 +1094,7 @@ function ProblemSetTemplates() {
                                 </div>
                                 <div>
                                     <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>Tags (comma-separated)</label>
-                                    <input value={form.tags} onChange={e => setForm(p => ({ ...p, tags: e.target.value }))} placeholder="python, loops, basics" style={inputStyle} />
+                                    <input value={form.tags} onChange={e => setForm(p => ({ ...p, tags: e.target.value }))} placeholder="python, loops, basics" className="um-input" />
                                 </div>
                             </div>
                             <div>
@@ -1130,7 +1130,7 @@ function ProblemSetTemplates() {
                         </div>
 
                         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
-                            <button onClick={() => setShowCreate(false)} style={buttonSecondary}>Cancel</button>
+                            <button onClick={() => setShowCreate(false)} className="um-btn-secondary">Cancel</button>
                             <button onClick={handleCreate} disabled={!form.name} style={{ ...buttonPrimary, opacity: !form.name ? 0.5 : 1 }}>
                                 <Save size={16} /> Create Template
                             </button>
@@ -1231,7 +1231,7 @@ function AutomatedBackups() {
         window.open(`${API_BASE}/admin/backups/${id}/download`, '_blank')
     }
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div>
@@ -1239,7 +1239,7 @@ function AutomatedBackups() {
                 <h2 style={{ margin: 0, color: 'var(--text)', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Database size={20} color="#10b981" /> Database Backups
                 </h2>
-                <button onClick={createBackup} disabled={creating} style={buttonPrimary}>
+                <button onClick={createBackup} disabled={creating} className="um-btn-primary">
                     {creating ? <RefreshCw size={16} className="spin" /> : <Archive size={16} />}
                     {creating ? 'Creating Backup...' : 'Create Backup Now'}
                 </button>
@@ -1258,7 +1258,7 @@ function AutomatedBackups() {
             </div>
 
             {/* Backup List */}
-            <div style={cardStyle}>
+            <div className="um-card">
                 {backups.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '3rem' }}>
                         <Database size={48} color="var(--text-muted)" style={{ marginBottom: '1rem', opacity: 0.3 }} />
@@ -1291,7 +1291,7 @@ function AutomatedBackups() {
                             </div>
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button onClick={() => downloadBackup(b.id)} style={buttonSecondary} title="Download">
+                            <button onClick={() => downloadBackup(b.id)} className="um-btn-secondary" title="Download">
                                 <Download size={14} />
                             </button>
                             <button onClick={() => deleteBackup(b.id)} style={{ ...buttonDanger, padding: '0.5rem 0.75rem' }} title="Delete">
@@ -1420,7 +1420,7 @@ function AdminAnalytics() {
             .catch(() => setLoading(false))
     }, [])
 
-    if (loading) return <div className="loading-spinner" />
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
     if (!data) return <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '3rem' }}>Failed to load analytics</div>
 
     const weeklyIcon = data.weeklyGrowth >= 0
@@ -1457,7 +1457,7 @@ function AdminAnalytics() {
             {/* Charts Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
                 {/* Submission Trends */}
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Submissions (30 Days)</h3>
                     {data.dailySubmissions?.length > 0 ? (
                         <ResponsiveContainer width="100%" height={250}>
@@ -1479,7 +1479,7 @@ function AdminAnalytics() {
                 </div>
 
                 {/* Language Distribution */}
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Language Distribution</h3>
                     {data.languageDistribution?.length > 0 ? (
                         <ResponsiveContainer width="100%" height={250}>
@@ -1496,7 +1496,7 @@ function AdminAnalytics() {
                 </div>
 
                 {/* Hourly Activity */}
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Activity by Hour (7 Days)</h3>
                     {data.hourlyActivity?.length > 0 ? (
                         <ResponsiveContainer width="100%" height={250}>
@@ -1512,7 +1512,7 @@ function AdminAnalytics() {
                 </div>
 
                 {/* Difficulty Stats */}
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Difficulty Analysis</h3>
                     {data.difficultyStats?.length > 0 ? (
                         <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -1539,7 +1539,7 @@ function AdminAnalytics() {
             {/* Top Students & Mentor Effectiveness */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
                 {/* Top Students */}
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Top Performing Students</h3>
                     {(data.topStudents || []).map((s, i) => (
                         <div key={i} style={{
@@ -1568,7 +1568,7 @@ function AdminAnalytics() {
                 </div>
 
                 {/* Mentor Effectiveness */}
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Mentor Effectiveness</h3>
                     {(data.mentorStats || []).map((m, i) => (
                         <div key={i} style={{
@@ -1601,7 +1601,7 @@ function AdminAnalytics() {
 
             {/* Batch Performance */}
             {data.batchPerformance?.length > 0 && (
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--text)' }}>Batch Performance</h3>
                     <ResponsiveContainer width="100%" height={250}>
                         <BarChart data={data.batchPerformance}>

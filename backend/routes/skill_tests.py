@@ -5,7 +5,7 @@ proctoring, reports, and admin operations (28 endpoints total).
 """
 
 from __future__ import annotations
-import asyncio, json, re, datetime as _dt
+import asyncio, json, re, datetime as _dt, uuid
 from datetime import datetime, timezone
 from typing import Any
 import pymysql.err
@@ -118,6 +118,15 @@ router.dependencies.append(Depends(_require_actor))
 
 # â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 BASE_TABLES = ["employees", "departments", "projects", "orders"]
+_ALLOC_TABLE_DDL = """
+    CREATE TABLE IF NOT EXISTS skill_test_allocations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        test_id INT NOT NULL,
+        student_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_skill_alloc (test_id, student_id)
+    )
+"""
 
 def _sandbox_names(test_id: int) -> dict[str, str]:
     return {t: f"st{test_id}_{t}" for t in BASE_TABLES}
@@ -203,6 +212,74 @@ def _calc_sql_stats(attempt: dict) -> dict:
 #  ADMIN: CREATE / MANAGE
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+@router.get("/org-students")
+async def list_skill_org_students(request: Request):
+    """Return org users available for skill test allocation (requires coding.assign)."""
+    await _require_skill_permission(request, ["coding.assign"])
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name"
+            )
+            rows = await cur.fetchall()
+    return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
+
+
+@router.get("/{test_id}/allocations")
+async def get_skill_test_allocations(test_id: int, request: Request):
+    """List students currently allocated to a skill test."""
+    await _require_skill_permission(request, ["coding.assign"])
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(_ALLOC_TABLE_DDL)
+            await cur.execute(
+                """SELECT a.student_id, u.name, u.email
+                   FROM skill_test_allocations a
+                   LEFT JOIN users u ON u.id = a.student_id
+                   WHERE a.test_id = %s ORDER BY u.name""",
+                (test_id,),
+            )
+            rows = await cur.fetchall()
+    return [{"studentId": r["student_id"], "name": r["name"], "email": r["email"]} for r in rows]
+
+
+@router.post("/{test_id}/allocations")
+async def set_skill_test_allocations(test_id: int, request: Request):
+    """Replace all student allocations for a skill test."""
+    actor = await _require_skill_permission(request, ["coding.assign"])
+    data = await request.json()
+    student_ids = data.get("studentIds", [])
+    if not isinstance(student_ids, list):
+        raise HTTPException(400, "studentIds must be a list")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(_ALLOC_TABLE_DDL)
+            await cur.execute("DELETE FROM skill_test_allocations WHERE test_id = %s", (test_id,))
+            for sid in student_ids:
+                sid = (sid or "").strip()
+                if sid:
+                    await cur.execute(
+                        "INSERT IGNORE INTO skill_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
+                        (str(uuid.uuid4()), test_id, sid),
+                    )
+        await conn.commit()
+
+    audit_logger.log_event(
+        AuditEventType.ADMIN_TEST_MODIFIED,
+        user_id=actor,
+        ip_address=_client_ip(request),
+        resource_id=str(test_id),
+        resource_type="skill_test",
+        action="Skill test allocations updated",
+        details={"studentCount": len(student_ids)},
+    )
+    return {"allocated": len(student_ids)}
+
+
 @router.post("/create")
 async def create_test(request: Request, body: dict = Body(...)):
     await _require_skill_permission(request, ["coding.create", "coding.assign"])
@@ -239,11 +316,25 @@ async def get_all_tests(request: Request):
             async with conn.cursor() as cur:
                 await cur.execute("SELECT * FROM skill_tests ORDER BY created_at DESC")
                 rows = await cur.fetchall()
+                test_ids = [str(r.get("id")) for r in (rows or []) if r.get("id")]
+                alloc_counts: dict[str, int] = {}
+                if test_ids:
+                    await cur.execute(_ALLOC_TABLE_DDL)
+                    placeholders = ",".join(["%s"] * len(test_ids))
+                    await cur.execute(
+                        f"""SELECT test_id, COUNT(*) AS cnt
+                            FROM skill_test_allocations
+                            WHERE test_id IN ({placeholders})
+                            GROUP BY test_id""",
+                        test_ids,
+                    )
+                    for row in (await cur.fetchall()) or []:
+                        alloc_counts[str(row.get("test_id"))] = int(row.get("cnt") or 0)
     except Exception as exc:
         if _is_missing_table_error(exc):
             return []
         raise
-    return [dict(r, skills=_safe_json(r.get("skills"))) for r in rows]
+    return [dict(r, skills=_safe_json(r.get("skills")), allocatedCount=alloc_counts.get(str(r.get("id")), 0)) for r in rows]
 
 @router.put("/{test_id}/toggle")
 async def toggle_test(test_id: int, request: Request):

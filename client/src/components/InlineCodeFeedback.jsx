@@ -91,7 +91,7 @@ export default function InlineCodeFeedback({ submissionId, code, mentorId, stude
     const feedbackStats = feedbacks.reduce((acc, f) => { acc[f.feedback_type] = (acc[f.feedback_type] || 0) + 1; return acc }, {})
 
     if (loading && feedbacks.length === 0) {
-        return <div style={{ textAlign: 'center', padding: '2rem' }}><div className="loading-spinner" /></div>
+        return <div className="page-loading"><div className="loading-spinner" /></div>
     }
 
     return (
@@ -124,9 +124,7 @@ export default function InlineCodeFeedback({ submissionId, code, mentorId, stude
                     return (
                         <div key={lineNum}>
                             {/* Code Line */}
-                            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.03)', background: hasFeedback ? 'rgba(59,130,246,0.04)' : 'transparent', position: 'relative' }}
-                                onMouseEnter={e => { if (!hasFeedback) e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
-                                onMouseLeave={e => { if (!hasFeedback) e.currentTarget.style.background = 'transparent' }}>
+                            <div className={`icf-code-line${hasFeedback ? ' has-feedback' : ''}`}>
                                 {/* Line number */}
                                 <div style={{ width: '50px', padding: '0.2rem 0.5rem', textAlign: 'right', color: 'var(--text-muted)', userSelect: 'none', borderRight: `2px solid ${hasFeedback ? '#3b82f6' : 'transparent'}`, fontSize: '0.7rem', lineHeight: '1.6', flexShrink: 0 }}>
                                     {lineNum}
@@ -145,9 +143,7 @@ export default function InlineCodeFeedback({ submissionId, code, mentorId, stude
                                     )}
                                     {!readOnly && (
                                         <button onClick={() => { setShowAddForm(showAddForm === lineNum ? null : lineNum); setFormData({ comment: '', feedbackType: 'suggestion' }) }}
-                                            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.15rem', opacity: 0.5 }}
-                                            onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                                            onMouseLeave={e => e.currentTarget.style.opacity = 0.5}>
+                                            className="icf-add-btn">
                                             <span style={{ fontSize: '1rem', lineHeight: 1 }}>+</span>
                                         </button>
                                     )}

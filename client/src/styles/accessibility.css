@@ -120,14 +120,16 @@ textarea:focus-visible,
 }
 
 /* ===== 5. TOUCH TARGET SIZES (WCAG 2.5.5 - AAA) ===== */
-button,
-[role="button"],
-a,
-input[type="checkbox"],
-input[type="radio"],
-select {
-    min-width: 44px;
-    min-height: 44px;
+/* Only enforce 44px targets on touch devices — not on desktop where compact UI is expected */
+@media (pointer: coarse) {
+    button,
+    [role="button"],
+    a,
+    input[type="checkbox"],
+    input[type="radio"],
+    select {
+        min-height: 44px;
+    }
 }
 
 /* ===== 6. TEXT SPACING (WCAG 1.4.12) ===== */

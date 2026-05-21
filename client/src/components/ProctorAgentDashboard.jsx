@@ -390,11 +390,7 @@ export default function ProctorAgentDashboard() {
 // ═══════════════════════════════════════════════════════════════
 
 function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
-    if (!dashboard) return (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-            <div className="loading-spinner" />
-        </div>
-    )
+    if (!dashboard) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const { total_analyses, average_fraud_score, risk_distribution, recent_flagged } = dashboard
 
@@ -427,18 +423,18 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
         <div>
             {/* Stat cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-                <div style={statCardStyle}>
+                <div className="um-card">
                     <Activity size={24} color="#3b82f6" />
                     <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#f1f5f9', marginTop: 8 }}>{total_analyses}</div>
                     <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Total Analyses</div>
                 </div>
-                <div style={statCardStyle}>
+                <div className="um-card">
                     <Target size={24} color={average_fraud_score > 35 ? '#ef4444' : '#10b981'} />
                     <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#f1f5f9', marginTop: 8 }}>{average_fraud_score}</div>
                     <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Avg Fraud Score</div>
                 </div>
                 {Object.entries(risk_distribution).map(([level, count]) => (
-                    <div key={level} style={statCardStyle}>
+                    <div key={level} className="um-card">
                         <div style={{ color: riskColors[level] || '#6b7280' }}>{riskIcons[level] || <Shield size={24} />}</div>
                         <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#f1f5f9', marginTop: 8 }}>{count}</div>
                         <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{riskLabels[level] || level}</div>
@@ -448,7 +444,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
 
             {/* Recent flagged sessions */}
             {recent_flagged && recent_flagged.length > 0 && (
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 12px', fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <AlertTriangle size={18} color="#f97316" /> Flagged Sessions
                     </h3>
@@ -493,7 +489,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
             )}
 
             {/* All recent analyses */}
-            <div style={cardStyle}>
+            <div className="um-card">
                 <h3 style={{ margin: '0 0 12px', fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Clock size={18} color="#3b82f6" /> Recent Analyses
                 </h3>
@@ -556,7 +552,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
 function AnalyzeTab({ form, setForm, onRun, result, loading }) {
     return (
         <div>
-            <div style={cardStyle}>
+            <div className="um-card">
                 <h3 style={{ margin: '0 0 16px', fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Search size={18} color="#3b82f6" /> Analyze a Session
                 </h3>
@@ -567,22 +563,22 @@ function AnalyzeTab({ form, setForm, onRun, result, loading }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 16 }}>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Session / Attempt ID *</label>
-                        <input value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} style={inputStyle} placeholder="e.g. abc123-def456" />
+                        <input value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} className="um-input" placeholder="e.g. abc123-def456" />
                     </div>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Source</label>
-                        <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} style={inputStyle}>
+                        <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="um-input">
                             <option value="comm">Communication Tests</option>
                             <option value="skill">Skill Tests</option>
                         </select>
                     </div>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>User ID (optional)</label>
-                        <input value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))} style={inputStyle} placeholder="student-001" />
+                        <input value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))} className="um-input" placeholder="student-001" />
                     </div>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Exam Title (optional)</label>
-                        <input value={form.exam_title} onChange={e => setForm(f => ({ ...f, exam_title: e.target.value }))} style={inputStyle} placeholder="Final Exam 2025" />
+                        <input value={form.exam_title} onChange={e => setForm(f => ({ ...f, exam_title: e.target.value }))} className="um-input" placeholder="Final Exam 2025" />
                     </div>
                 </div>
                 <button onClick={onRun} style={btnPrimary} disabled={loading || !form.session_id.trim()}>
@@ -603,7 +599,7 @@ function AnalyzeTab({ form, setForm, onRun, result, loading }) {
 function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onViewAnalysis }) {
     return (
         <div>
-            <div style={cardStyle}>
+            <div className="um-card">
                 <h3 style={{ margin: '0 0 16px', fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Users size={18} color="#8b5cf6" /> Batch Session Analysis
                 </h3>
@@ -627,7 +623,7 @@ function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onV
             </div>
 
             {results && (
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 12px', fontSize: '1rem', color: '#f1f5f9' }}>
                         Batch Results — {results.count} sessions analyzed
                     </h3>
@@ -680,7 +676,7 @@ function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onV
 function ReportTab({ form, setForm, onGenerate, result, loading }) {
     return (
         <div>
-            <div style={cardStyle}>
+            <div className="um-card">
                 <h3 style={{ margin: '0 0 16px', fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <FileText size={18} color="#10b981" /> Generate Integrity Report
                 </h3>
@@ -691,22 +687,22 @@ function ReportTab({ form, setForm, onGenerate, result, loading }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 16 }}>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Session ID *</label>
-                        <input value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} style={inputStyle} placeholder="session-id" />
+                        <input value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} className="um-input" placeholder="session-id" />
                     </div>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Source</label>
-                        <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} style={inputStyle}>
+                        <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="um-input">
                             <option value="comm">Communication Tests</option>
                             <option value="skill">Skill Tests</option>
                         </select>
                     </div>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Candidate Name</label>
-                        <input value={form.candidate_name} onChange={e => setForm(f => ({ ...f, candidate_name: e.target.value }))} style={inputStyle} placeholder="John Doe" />
+                        <input value={form.candidate_name} onChange={e => setForm(f => ({ ...f, candidate_name: e.target.value }))} className="um-input" placeholder="John Doe" />
                     </div>
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Exam Title</label>
-                        <input value={form.exam_title} onChange={e => setForm(f => ({ ...f, exam_title: e.target.value }))} style={inputStyle} placeholder="Final Assessment" />
+                        <input value={form.exam_title} onChange={e => setForm(f => ({ ...f, exam_title: e.target.value }))} className="um-input" placeholder="Final Assessment" />
                     </div>
                 </div>
                 <button onClick={onGenerate} style={{ ...btnPrimary, background: 'linear-gradient(135deg, #10b981, #059669)' }} disabled={loading || !form.session_id.trim()}>
@@ -727,7 +723,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading }) {
 function CollusionTab({ ids, setIds, source, setSource, onRun, result, loading }) {
     return (
         <div>
-            <div style={cardStyle}>
+            <div className="um-card">
                 <h3 style={{ margin: '0 0 16px', fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Shield size={18} color="#f97316" /> Collusion Detection
                 </h3>
@@ -751,7 +747,7 @@ function CollusionTab({ ids, setIds, source, setSource, onRun, result, loading }
             </div>
 
             {result && (
-                <div style={cardStyle}>
+                <div className="um-card">
                     <h3 style={{ margin: '0 0 12px', fontSize: '1rem', color: '#f1f5f9' }}>
                         Collusion Results — {result.sessions_analyzed} sessions analyzed
                     </h3>
@@ -797,7 +793,7 @@ function CollusionTab({ ids, setIds, source, setSource, onRun, result, loading }
 function AnalysisResultCard({ result }) {
     const ai = result.ai_analysis || {}
     return (
-        <div style={cardStyle}>
+        <div className="um-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h3 style={{ margin: 0, fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Brain size={18} color="#8b5cf6" /> Analysis Result
@@ -949,7 +945,7 @@ function IntegrityReportCard({ data }) {
     }
 
     return (
-        <div style={cardStyle}>
+        <div className="um-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h3 style={{ margin: 0, fontSize: '1rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <FileText size={18} color="#10b981" /> Integrity Report

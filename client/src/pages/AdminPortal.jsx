@@ -721,7 +721,7 @@ function Dashboard() {
             })
     }, [canViewAnalytics])
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
     if (error) return <div className="dashboard-panel">{error}</div>
     if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
 
@@ -1430,7 +1430,7 @@ function Allocations() {
             .catch(err => setLoading(false))
     }, [])
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div className="animate-fadeIn">
@@ -1521,7 +1521,7 @@ function StudentLeaderboard() {
             .catch(err => setLoading(false))
     }, [])
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const getRankIcon = (rank) => {
         if (rank === 1) return <Trophy size={24} style={{ color: '#fbbf24' }} />
@@ -1750,7 +1750,7 @@ function MentorLeaderboard() {
             .catch(err => setLoading(false))
     }, [])
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div className="card animate-fadeIn" style={{ padding: '0', overflow: 'hidden' }}>
@@ -1974,7 +1974,7 @@ function AllSubmissions() {
 
     const filteredSubmissions = getFilteredSubmissions()
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div className="animate-fadeIn">
@@ -1983,60 +1983,27 @@ function AllSubmissions() {
                     <h2 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>Submission Archives</h2>
                     <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0' }}>Global audit trail of all submissions</p>
                 </div>
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                        <button
-                            onClick={() => setActiveTab('all')}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                background: activeTab === 'all' ? 'var(--primary)' : 'transparent',
-                                border: 'none',
-                                color: activeTab === 'all' ? 'white' : 'var(--text-muted)',
-                                cursor: 'pointer',
-                                fontSize: '0.85rem'
-                            }}
-                        >All ({allSubmissions.length})</button>
-                        <button
-                            onClick={() => setActiveTab('code')}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                background: activeTab === 'code' ? 'var(--primary)' : 'transparent',
-                                border: 'none',
-                                color: activeTab === 'code' ? 'white' : 'var(--text-muted)',
-                                cursor: 'pointer',
-                                fontSize: '0.85rem'
-                            }}
-                        >💻 Code ({submissions.length})</button>
-
-                        <button
-                            onClick={() => setActiveTab('aptitude')}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                background: activeTab === 'aptitude' ? '#8b5cf6' : 'transparent',
-                                border: 'none',
-                                color: activeTab === 'aptitude' ? 'white' : 'var(--text-muted)',
-                                cursor: 'pointer',
-                                fontSize: '0.85rem'
-                            }}
-                        >📝 Aptitude ({aptitudeSubmissions.length})</button>
-                        <button
-                            onClick={() => setActiveTab('global')}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                background: activeTab === 'global' ? '#3b82f6' : 'transparent',
-                                border: 'none',
-                                color: activeTab === 'global' ? 'white' : 'var(--text-muted)',
-                                cursor: 'pointer',
-                                fontSize: '0.85rem'
-                            }}
-                        >🌐 Global ({globalSubmissions.length})</button>
+                <div className="filter-toolbar">
+                    <div className="tabs-bar">
+                        <button onClick={() => setActiveTab('all')} className={`tab-btn${activeTab === 'all' ? ' active' : ''}`}>
+                            All <span className="tab-count">{allSubmissions.length}</span>
+                        </button>
+                        <button onClick={() => setActiveTab('code')} className={`tab-btn${activeTab === 'code' ? ' active' : ''}`}>
+                            💻 Code <span className="tab-count">{submissions.length}</span>
+                        </button>
+                        <button onClick={() => setActiveTab('aptitude')} className={`tab-btn${activeTab === 'aptitude' ? ' active' : ''}`}>
+                            📝 Aptitude <span className="tab-count">{aptitudeSubmissions.length}</span>
+                        </button>
+                        <button onClick={() => setActiveTab('global')} className={`tab-btn${activeTab === 'global' ? ' active' : ''}`}>
+                            🌐 Global <span className="tab-count">{globalSubmissions.length}</span>
+                        </button>
                     </div>
-                    <div style={{ position: 'relative' }}>
-                        <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <div className="search-input-wrap">
+                        <Search size={16} className="search-icon" />
                         <input
                             type="text"
                             placeholder="Search student, problem or status..."
-                            style={{ padding: '0.6rem 1rem 0.6rem 2.5rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'white', width: '300px' }}
+                            className="search-input"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -2044,62 +2011,18 @@ function AllSubmissions() {
                     <button
                         onClick={downloadCSV}
                         disabled={filteredSubmissions.length === 0}
-                        style={{
-                            padding: '0.6rem 1rem',
-                            background: 'rgba(16, 185, 129, 0.1)',
-                            border: '1px solid rgba(16, 185, 129, 0.3)',
-                            borderRadius: '8px',
-                            color: '#10b981',
-                            cursor: filteredSubmissions.length === 0 ? 'not-allowed' : 'pointer',
-                            fontSize: '0.85rem',
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            opacity: filteredSubmissions.length === 0 ? 0.5 : 1,
-                            transition: 'all 0.2s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                            if (filteredSubmissions.length > 0) {
-                                e.target.style.background = 'rgba(16, 185, 129, 0.2)'
-                            }
-                        }}
-                        onMouseLeave={(e) => {
-                            e.target.style.background = 'rgba(16, 185, 129, 0.1)'
-                        }}
+                        className="tbl-action-btn success"
+                        style={{ padding: '0.55rem 1rem', border: '1px solid rgba(16,185,129,0.3)', fontSize: '0.85rem', fontWeight: 600 }}
                     >
-                        <Download size={16} />
-                        Download CSV
+                        <Download size={16} /> Download CSV
                     </button>
                     <button
                         onClick={handleResetAllSubmissions}
                         disabled={resetting || allSubmissions.length === 0}
-                        style={{
-                            padding: '0.6rem 1rem',
-                            background: 'rgba(239, 68, 68, 0.1)',
-                            border: '1px solid rgba(239, 68, 68, 0.3)',
-                            borderRadius: '8px',
-                            color: '#ef4444',
-                            cursor: resetting || allSubmissions.length === 0 ? 'not-allowed' : 'pointer',
-                            fontSize: '0.85rem',
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            opacity: resetting || allSubmissions.length === 0 ? 0.5 : 1,
-                            transition: 'all 0.2s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                            if (!resetting && allSubmissions.length > 0) {
-                                e.target.style.background = 'rgba(239, 68, 68, 0.2)'
-                            }
-                        }}
-                        onMouseLeave={(e) => {
-                            e.target.style.background = 'rgba(239, 68, 68, 0.1)'
-                        }}
+                        className="tbl-action-btn danger"
+                        style={{ padding: '0.55rem 1rem', border: '1px solid rgba(239,68,68,0.3)', fontSize: '0.85rem', fontWeight: 600 }}
                     >
-                        <Trash2 size={16} />
-                        {resetting ? 'Resetting...' : 'Reset All'}
+                        <Trash2 size={16} /> {resetting ? 'Resetting...' : 'Reset All'}
                     </button>
                 </div>
             </div>
@@ -2711,7 +2634,7 @@ function GlobalProblems() {
         setUploading(false)
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     // Separate problems into Coding and SQL
     const codingProblems = problems.filter(p => p.language !== 'SQL' && p.type !== 'SQL')
@@ -2839,66 +2762,14 @@ function GlobalProblems() {
             </div>
 
             {/* Tab Buttons */}
-            <div style={{
-                display: 'flex',
-                gap: '1rem',
-                marginBottom: '1.5rem',
-                padding: '0.5rem',
-                background: 'var(--bg-card)',
-                borderRadius: '12px',
-                width: 'fit-content'
-            }}>
-                <button
-                    onClick={() => setActiveTab('coding')}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease',
-                        background: activeTab === 'coding' ? 'var(--primary)' : 'transparent',
-                        color: activeTab === 'coding' ? 'white' : 'var(--text-muted)'
-                    }}
-                >
-                    <Code size={18} />
-                    Coding Problems
-                    <span style={{
-                        background: activeTab === 'coding' ? 'rgba(255,255,255,0.2)' : 'var(--bg-dark)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem'
-                    }}>{codingProblems.length}</span>
+            <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
+                <button onClick={() => setActiveTab('coding')} className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}>
+                    <Code size={18} /> Coding Problems
+                    <span className="tab-count">{codingProblems.length}</span>
                 </button>
-                <button
-                    onClick={() => setActiveTab('sql')}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease',
-                        background: activeTab === 'sql' ? 'linear-gradient(135deg, #06b6d4, #0891b2)' : 'transparent',
-                        color: activeTab === 'sql' ? 'white' : 'var(--text-muted)'
-                    }}
-                >
-                    <FileText size={18} />
-                    SQL Problems
-                    <span style={{
-                        background: activeTab === 'sql' ? 'rgba(255,255,255,0.2)' : 'var(--bg-dark)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem'
-                    }}>{sqlProblems.length}</span>
+                <button onClick={() => setActiveTab('sql')} className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}>
+                    <FileText size={18} /> SQL Problems
+                    <span className="tab-count">{sqlProblems.length}</span>
                 </button>
             </div>
 
@@ -4025,7 +3896,7 @@ function GlobalTestsAdmin() {
         setSqlQuestion({ question: '', schema: '', expectedOutput: '' })
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div className="animate-fadeIn">
@@ -4131,7 +4002,12 @@ function GlobalTestsAdmin() {
                     {tests.map(t => (
                         <div key={t.id} id={`global-test-${t.id}`} className="problem-card card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2))', color: '#10b981', fontWeight: 700 }}>GLOBAL TEST</span>
+                                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2))', color: '#10b981', fontWeight: 700 }}>GLOBAL TEST</span>
+                                    <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', border: '1px solid rgba(99,102,241,0.35)', fontWeight: 700 }}>
+                                        {t.allocatedCount || 0} allocated
+                                    </span>
+                                </div>
                                 <span style={{
                                     fontSize: '0.65rem',
                                     padding: '3px 8px',
@@ -4974,6 +4850,11 @@ function AptitudeTestsAdmin() {
     const [submissions, setSubmissions] = useState([])
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
+    const [allocatingTest, setAllocatingTest] = useState(null)
+    const [orgStudents, setOrgStudents] = useState([])
+    const [selectedStudents, setSelectedStudents] = useState(new Set())
+    const [allocSearch, setAllocSearch] = useState('')
+    const [allocSaving, setAllocSaving] = useState(false)
 
     const [newTest, setNewTest] = useState({
         title: '',
@@ -5177,7 +5058,52 @@ function AptitudeTestsAdmin() {
         }))
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    const openAllocate = async (test) => {
+        setAllocatingTest(test)
+        setAllocSearch('')
+        setAllocSaving(false)
+        try {
+            const [studentsRes, allocRes] = await Promise.all([
+                axios.get(`${API_BASE}/global-tests/org-students`),
+                axios.get(`${API_BASE}/aptitude/${test.id}/allocated-students`),
+            ])
+            const students = Array.isArray(studentsRes.data) ? studentsRes.data : []
+            const selected = new Set((allocRes.data?.studentIds || []).map(id => String(id)))
+            setOrgStudents(students)
+            setSelectedStudents(selected)
+        } catch (error) {
+            setOrgStudents([])
+            setSelectedStudents(new Set())
+            alert(error.response?.data?.detail || error.response?.data?.error || 'Failed to load allocation data')
+        }
+    }
+
+    const toggleStudent = (id) => {
+        const sid = String(id)
+        setSelectedStudents(prev => {
+            const next = new Set(prev)
+            if (next.has(sid)) next.delete(sid)
+            else next.add(sid)
+            return next
+        })
+    }
+
+    const saveAllocations = async () => {
+        if (!allocatingTest) return
+        setAllocSaving(true)
+        try {
+            await axios.post(`${API_BASE}/aptitude/${allocatingTest.id}/allocate-students`, {
+                studentIds: Array.from(selectedStudents),
+            })
+            setAllocatingTest(null)
+        } catch (error) {
+            alert(error.response?.data?.detail || error.response?.data?.error || 'Failed to save allocations')
+        } finally {
+            setAllocSaving(false)
+        }
+    }
+
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
         <div className="animate-fadeIn">
@@ -5348,7 +5274,20 @@ function AptitudeTestsAdmin() {
                                             }}>
                                                 <Target size={16} color="white" />
                                             </div>
-                                            <span style={{ fontWeight: 500 }}>{test.title}</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                <span style={{ fontWeight: 500 }}>{test.title}</span>
+                                                <span style={{
+                                                    fontSize: '0.7rem',
+                                                    padding: '2px 8px',
+                                                    borderRadius: '999px',
+                                                    background: 'rgba(99, 102, 241, 0.15)',
+                                                    color: '#6366f1',
+                                                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                                                    fontWeight: 600
+                                                }}>
+                                                    {test.allocatedCount || 0} allocated
+                                                </span>
+                                            </div>
                                         </div>
                                     </td>
                                     <td>
@@ -5408,6 +5347,20 @@ function AptitudeTestsAdmin() {
                                                 }}
                                             >
                                                 View
+                                            </button>
+                                            <button
+                                                onClick={() => openAllocate(test)}
+                                                style={{
+                                                    padding: '0.4rem 0.8rem',
+                                                    background: 'rgba(99, 102, 241, 0.1)',
+                                                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                                                    borderRadius: '6px',
+                                                    color: '#6366f1',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.8rem'
+                                                }}
+                                            >
+                                                Allocate
                                             </button>
                                             <button
                                                 onClick={() => handleToggleStatus(test)}
@@ -6122,6 +6075,59 @@ function AptitudeTestsAdmin() {
                     </div>
                 </div>
             )}
+
+            {allocatingTest && (
+                <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '1rem', padding: '1.5rem', width: '100%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h3 style={{ margin: 0 }}>Allocate Students</h3>
+                                <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>{allocatingTest.title}</p>
+                            </div>
+                            <button onClick={() => setAllocatingTest(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
+                        </div>
+
+                        <input
+                            type="text"
+                            placeholder="Search students..."
+                            value={allocSearch}
+                            onChange={e => setAllocSearch(e.target.value)}
+                            style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text)', fontSize: '0.85rem' }}
+                        />
+
+                        <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
+                            <button onClick={() => setSelectedStudents(new Set(orgStudents.map(s => String(s.id))))} style={{ background: 'var(--primary-alpha)', border: '1px solid var(--primary)', color: 'var(--primary)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Select All</button>
+                            <button onClick={() => setSelectedStudents(new Set())} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Clear</button>
+                            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>{selectedStudents.size} selected</span>
+                        </div>
+
+                        <div style={{ overflowY: 'auto', flex: 1, border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                            {orgStudents.length === 0 ? (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No students found in this organization.</div>
+                            ) : (
+                                orgStudents
+                                    .filter(s => !allocSearch || s.name?.toLowerCase().includes(allocSearch.toLowerCase()) || s.email?.toLowerCase().includes(allocSearch.toLowerCase()))
+                                    .map(s => (
+                                        <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', background: selectedStudents.has(String(s.id)) ? 'var(--primary-alpha)' : 'transparent' }}>
+                                            <input type="checkbox" checked={selectedStudents.has(String(s.id))} onChange={() => toggleStudent(s.id)} style={{ accentColor: 'var(--primary)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{s.name}</div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.email}{s.batch ? ` · ${s.batch}` : ''}</div>
+                                            </div>
+                                        </label>
+                                    ))
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button onClick={() => setAllocatingTest(null)} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
+                            <button onClick={saveAllocations} disabled={allocSaving} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', background: 'var(--primary)', color: 'white', border: 'none', cursor: allocSaving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                                {allocSaving ? 'Saving...' : 'Save Allocation'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
@@ -6167,7 +6173,7 @@ function AdminAnalyticsDashboard() {
         setExporting(false)
     }
 
-    if (loading) return <div className="loading-spinner"></div>
+    if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const tabs = [
         { id: 'overview', label: t('topic_analysis'), icon: <BarChart2 size={16} /> },
@@ -6179,16 +6185,9 @@ function AdminAnalyticsDashboard() {
     return (
         <div className="animate-fadeIn">
             {/* Tabs */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+            <div className="tabs-bar" style={{ marginBottom: '1.5rem' }}>
                 {tabs.map(tab => (
-                    <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-                        display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.2rem',
-                        borderRadius: '10px', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                        background: activeTab === tab.id ? 'var(--primary)' : 'var(--card-bg)',
-                        color: activeTab === tab.id ? '#fff' : 'var(--text-secondary)',
-                        boxShadow: activeTab === tab.id ? '0 4px 15px rgba(59,130,246,0.3)' : '0 1px 3px rgba(0,0,0,0.1)',
-                        transition: 'all 0.2s'
-                    }}>
+                    <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`tab-btn${activeTab === tab.id ? ' active' : ''}`}>
                         {tab.icon} {tab.label}
                     </button>
                 ))}
@@ -6521,7 +6520,7 @@ function AuditLogViewer({ user }) {
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', alignSelf: 'center' }}>{total.toLocaleString()} total records</span>
             </div>
 
-            {loading ? <div className="loading-spinner" /> : (
+            {loading ? <div className="page-loading"><div className="loading-spinner" /></div> : (
                 <div className="table-container card glass">
                     <table>
                         <thead>
@@ -6606,7 +6605,7 @@ function ErrorMonitoringDashboard({ user }) {
                 {data && <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{data.total_errors} errors in last {hours}h</span>}
             </div>
 
-            {loading ? <div className="loading-spinner" /> : !data ? <p style={{ color: 'var(--text-muted)' }}>No data available.</p> : (
+            {loading ? <div className="page-loading"><div className="loading-spinner" /></div> : !data ? <p style={{ color: 'var(--text-muted)' }}>No data available.</p> : (
                 <>
                     <div className="dashboard-stats-grid" style={{ marginBottom: '1.5rem' }}>
                         {(data.summary || []).map(s => (
