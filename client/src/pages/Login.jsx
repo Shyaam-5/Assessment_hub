@@ -317,7 +317,7 @@ function Login() {
 
                             {step === 'credentials' && (
                                 <>
-                                    <div className="card-header">
+                                    <div className="login-card-header">
                                         <div className="header-icon">
                                             <Brain size={32} />
                                         </div>
@@ -409,11 +409,12 @@ function Login() {
                                                         useOneTap={false}
                                                         use_fedcm_for_prompt={false}
                                                         use_fedcm_for_button={false}
-                                                        theme="filled_black"
+                                                        theme="filled_blue"
                                                         size="large"
-                                                        width="320"
+                                                        width="360"
                                                         text="continue_with"
-                                                        shape="pill"
+                                                        shape="rectangular"
+                                                        logo_alignment="left"
                                                     />
                                                 </div>
                                                 <p className="google-hint">
@@ -427,7 +428,7 @@ function Login() {
 
                             {step === 'otp' && (
                                 <>
-                                    <div className="card-header">
+                                    <div className="login-card-header">
                                         <div className="header-icon">
                                             <KeyRound size={32} />
                                         </div>
@@ -477,7 +478,7 @@ function Login() {
 
                             {step === 'firstPassword' && (
                                 <>
-                                    <div className="card-header">
+                                    <div className="login-card-header">
                                         <div className="header-icon">
                                             <Lock size={32} />
                                         </div>
