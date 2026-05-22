@@ -139,7 +139,7 @@ class Settings:
             v = os.getenv(var, "")
             if v.strip():
                 keys.append(v.strip())
-        for i in range(1, 10):
+        for i in range(1, 16):
             v = os.getenv(f"GROQ_API_KEY_{i}", "")
             if v.strip():
                 keys.append(v.strip())

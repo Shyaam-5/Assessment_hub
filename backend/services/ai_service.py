@@ -10,12 +10,15 @@ from logging_config import LogConfig
 import math
 import random
 import re
+import asyncio
 from typing import Any
 
 import httpx
 from config import settings
 
 logger = LogConfig.get_logger(__name__)
+_groq_rotation_lock = asyncio.Lock()
+_groq_rotation_index = 0
 
 # â"€â"€â"€ Topic pools for variety â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 TOPIC_POOLS = {
@@ -75,13 +78,19 @@ async def cerebras_chat(
     if not keys:
         raise RuntimeError("No Groq API keys configured.")
 
+    global _groq_rotation_index
+    async with _groq_rotation_lock:
+        start_index = _groq_rotation_index % len(keys)
+        _groq_rotation_index = (_groq_rotation_index + 1) % len(keys)
+    ordered_keys = keys[start_index:] + keys[:start_index]
+
     last_error: Exception | None = None
     model_candidates = _build_model_candidates(model)
 
     for model_name in model_candidates:
         model_missing = False
 
-        for api_key in keys:
+        for api_key in ordered_keys:
             try:
                 payload: dict = {
                     "model": model_name,

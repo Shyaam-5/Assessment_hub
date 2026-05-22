@@ -1,748 +1,490 @@
 # AI Assessment Hub
 
-A full-stack, AI-powered online assessment and proctoring platform for educational institutions. Supports coding, SQL, MCQ, aptitude, behavioral, and communication assessments with real-time integrity monitoring.
+Comprehensive full-stack assessment and proctoring platform with multi-tenant RBAC, AI-assisted assessment generation, real-time monitoring, and subscription-tier controls.
 
----
+This README is generated from the current codebase structure and behavior.
 
 ## Table of Contents
 
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Setup & Installation](#setup--installation)
-  - [1. Clone the Repository](#1-clone-the-repository)
-  - [2. Backend Setup](#2-backend-setup)
-  - [3. Frontend Setup](#3-frontend-setup)
-  - [4. Database Setup](#4-database-setup)
-  - [5. Running the Application](#5-running-the-application)
-- [Environment Variables](#environment-variables)
-- [API Reference](#api-reference)
-- [User Roles](#user-roles)
-- [Assessment Types](#assessment-types)
-- [Proctoring System](#proctoring-system)
-- [Pre-Scan (Environment Scan)](#pre-scan-environment-scan)
-- [AI Integration](#ai-integration)
-- [Code Execution Engine](#code-execution-engine)
-- [WebSocket Events](#websocket-events)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
+1. Platform Summary
+2. Architecture
+3. Runtime Lifecycle
+4. Backend Deep Dive
+5. Frontend Deep Dive
+6. Authentication and Authorization
+7. Multi-Tenancy Model
+8. Assessment Modules
+9. Proctoring and Environment Scan
+10. AI Integration
+11. API Surface Map
+12. Socket Events Map
+13. Data Model Overview
+14. Configuration
+15. Local Development
+16. End-to-End QA Workflows
+17. Testing and Validation
+18. Security Notes
+19. Troubleshooting
+20. API Endpoint Reference Table
+21. Maintenance Checklist
 
----
+## 1. Platform Summary
 
-## Features
+Core capabilities:
+- Multi-role portals: super admin, organization admin, role-based staff, exam taker
+- Assessment types: coding, global MCQ, skill tests (MCQ/coding/SQL/interview), aptitude, communication
+- Proctoring: live violation streams, proctor intelligence agent, behavior analysis, environment prescan
+- AI features: content generation, hints, chat, interview/report support
+- Multi-tenant isolation with per-organization tenant DBs
+- Subscription-aware RBAC with feature gating
 
-- **Multi-type Assessments** — Coding, SQL, MCQ, aptitude, global, behavioral, communication
-- **AI-Powered Proctoring** — Real-time face detection, object detection, tab-switch monitoring, copy-paste detection
-- **Pre-Scan System** — Environment verification before assessments (room scan via webcam, mobile QR-based scan)
-- **AI Problem Generation** — Auto-generate problems using Groq LLM (Llama 4 Scout)
-- **Live Code Execution** — In-browser execution for Python, JavaScript, C, Java, SQL
-- **Real-Time Monitoring** — Admin/mentor live dashboard via Socket.io
-- **Behavior Analysis** — ML ensemble model for anomaly detection
-- **Plagiarism Detection** — Submission-level similarity analysis
-- **Analytics Dashboards** — Per-role dashboards for admin, mentor, and student
-- **Communication Assessments** — Text-to-speech prompts, AI-evaluated responses
-- **PWA Support** — Offline fallback, installable on mobile/desktop
+## 2. Architecture
 
----
-
-## Tech Stack
-
-### Backend
-
-| Component | Technology |
-|-----------|------------|
-| Framework | FastAPI 0.115.0 |
-| Server | Uvicorn 0.30.6 (ASGI) |
-| Database | MySQL / TiDB Cloud |
-| Real-time | Python Socket.io 5.11.4 |
-| AI / LLM | Groq API (Llama 4 Scout, Llama 3.1 8B fallback) |
-| Password Hashing | BCrypt 4.2.0 |
-| TTS | edge-tts 6.1.12 |
-| HTTP Client | httpx 0.27.2 |
-
-### Frontend
-
-| Component | Technology |
-|-----------|------------|
-| Framework | React 19.2.0 |
-| Router | React Router DOM 7.13.0 |
-| Build Tool | Vite 7.2.4 |
-| Code Editor | Monaco Editor 4.7.0 |
-| ML / Vision | TensorFlow.js 4.22.0, BlazeFace 0.1.0, COCO-SSD 2.2.3 |
-| Real-time | Socket.io-client 4.7.2 |
-| Charts | Recharts 3.7.0 |
-| PDF Export | jsPDF 4.1.0 + html2canvas 1.4.1 |
-| In-browser SQL | sql.js 1.13.0 |
-| Icons | Lucide React 0.563.0 |
-
----
-
-## Project Structure
-
-```
-Assessmentt/
-├── backend/
-│   ├── main.py                  # FastAPI + Socket.io app entry point
-│   ├── config.py                # Settings loader (reads .env)
-│   ├── database.py              # MySQL connection pool + table creation
-│   ├── requirements.txt
-│   ├── .env                     # Backend environment variables
-│   ├── routes/                  # API route modules (18 modules)
-│   │   ├── auth.py              # Login, session verify
-│   │   ├── admin.py             # User management
-│   │   ├── problems.py          # Problem CRUD
-│   │   ├── submissions.py       # Code submission & evaluation
-│   │   ├── code_execution.py    # Multi-language code runner
-│   │   ├── skill_tests.py       # Skill test management
-│   │   ├── aptitude.py          # Aptitude tests
-│   │   ├── global_tests.py      # Global assessments
-│   │   ├── analytics.py         # Dashboard analytics
-│   │   ├── ai.py                # AI problem/question generation
-│   │   ├── chat.py              # AI chat endpoint
-│   │   ├── messaging.py         # User messaging
-│   │   ├── communication.py     # Communication assessments
-│   │   ├── proctor_agent.py     # AI proctoring analysis
-│   │   ├── behavior_agent.py    # Behavior analysis
-│   │   ├── hints.py             # AI hint generation
-│   │   ├── tasks.py             # Task management
-│   │   └── environment_scan.py  # Pre-scan system
-│   ├── services/
-│   │   ├── ai_service.py        # Groq API wrapper with key rotation
-│   │   ├── proctor_agent.py     # Proctoring analysis logic
-│   │   ├── behavior_agent.py    # Behavioral ML analysis
-│   │   ├── prescan_*.py         # Pre-scan services (7 files)
-│   │   ├── scan_aggregator.py   # Scan result aggregation
-│   │   ├── angle_tracker.py     # Device angle tracking
-│   │   ├── pagination.py        # Pagination helper
-│   │   └── comm_service.py      # Communication service
-│   ├── ml/
-│   │   ├── ensemble_predictor.py
-│   │   └── train_ensemble.py
-│   └── uploads/
-│       ├── proctoring/          # Webcam/screen captures
-│       └── tts/                 # TTS audio files
-│
-├── client/
-│   ├── index.html
-│   ├── vite.config.js
-│   ├── package.json
-│   ├── .env                     # Frontend environment variables
-│   ├── src/
-│   │   ├── App.jsx              # Root app + routing
-│   │   ├── main.jsx
-│   │   ├── pages/
-│   │   │   ├── Login.jsx
-│   │   │   ├── StudentPortal.jsx
-│   │   │   ├── MentorPortal.jsx
-│   │   │   └── AdminPortal.jsx
-│   │   ├── components/          # 36 React components
-│   │   ├── prescan/             # Pre-scan UI (pages, components, hooks)
-│   │   ├── services/
-│   │   │   ├── socketService.js
-│   │   │   └── offlineService.js
-│   │   ├── hooks/
-│   │   │   └── useProctoring.js
-│   │   └── styles/
-│   │       ├── accessibility.css
-│   │       └── darkmode.css
-│   └── public/
-│       ├── manifest.json        # PWA manifest
-│       ├── sw.js                # Service worker
-│       ├── offline.html
-│       └── sql-wasm.wasm        # SQL.js WASM binary
-│
-└── README.md
+```text
++-------------------------+        HTTP + Socket.IO        +-------------------------------+
+| React + Vite Frontend   | <----------------------------> | FastAPI + Socket.IO ASGI App  |
+| /admin /role /student   |                                | backend/main.py               |
++-------------------------+                                +-------------------------------+
+            |                                                               |
+            |                                                               |
+            v                                                               v
++-------------------------+                                   +-------------------------------+
+| Browser-side proctoring |                                   | MySQL-compatible databases    |
+| TFJS + camera signals   |                                   | - Primary platform DB         |
++-------------------------+                                   | - Tenant DB per organization  |
+            |                                                 +-------------------------------+
+            |
+            v
++-------------------------+
+| Groq API (LLM services) |
++-------------------------+
 ```
 
----
+## 3. Runtime Lifecycle
 
-## Prerequisites
+Server bootstrap (`backend/main.py`):
+1. Configure logging.
+2. Initialize DB pools.
+3. Ensure schemas for auth, RBAC, domain tables, proctoring, and audit.
+4. Reconcile active tenant schemas when enabled.
+5. Run startup DB preflight checks (optional, configurable).
+6. Seed default super admins.
+7. Mount routers and `/uploads` static path.
+8. Run as `socket_app` (FastAPI wrapped by Socket.IO ASGI app).
 
-Make sure the following are installed before proceeding:
+Request path behavior:
+- JWT validation enforced for protected `/api` routes.
+- Request gets `x-user-id` and `x-org-id` injected from token claims.
+- Tenant DB context resolved per request unless route is exempt.
+- Inactive orgs or missing tenant DB reject requests early.
 
-| Requirement | Minimum Version | Notes |
-|-------------|-----------------|-------|
-| Python | 3.10+ | Backend runtime |
-| Node.js | 18+ | Frontend build + dev server |
-| npm | 9+ | Package manager |
-| MySQL | 8.0+ | Or use TiDB Cloud (recommended) |
-| Groq API Key | — | Free tier available at console.groq.com |
+## 4. Backend Deep Dive
 
-**For code execution features:**
+## 4.1 Core Files
 
-- `gcc` — C compilation (`gcc` must be on system PATH)
-- `java` / `javac` — Java execution
-- `node` — JavaScript execution
-- Python is already required for the backend
+- `backend/main.py`: app lifecycle, middleware, router registration, socket events.
+- `backend/config.py`: settings from `.env`, Groq key loading, model fallback config.
+- `backend/database.py`: async wrapper around PyMySQL pools, schema creation/reconciliation helpers.
+- `backend/security.py`: minimal HS256 JWT create/decode utilities.
 
----
+## 4.2 Middleware and Error Handling
 
-## Setup & Installation
+`main.py` middleware stack:
+- `SecurityHeadersMiddleware`
+- `LoggingMiddleware`
+- `RateLimitMiddleware`
+- CORS middleware (explicit origins in prod, wildcard fallback in dev)
+- Custom tenant/auth middleware with org/tenant resolution
 
-### 1. Clone the Repository
+Global exception handler:
+- Returns standardized JSON error with `requestId`
+- Special case for missing tenant table (`1146`) with explicit tenant-schema guidance
 
-```bash
-git clone <repository-url>
-cd Assessmentt
-```
+## 4.3 Router Modules Registered
 
-### 2. Backend Setup
+All routers are mounted centrally in `backend/main.py`:
+- `auth`, `tasks`, `problems`, `submissions`, `code_execution`, `hints`, `chat`, `messaging`
+- `analytics`, `skill_tests`, `aptitude`, `global_tests`, `admin`, `communication`
+- `proctor_agent`, `behavior_agent`, `ai`, `environment_scan`, `attachments`, `rbac`, `public`
 
-#### Create and activate a virtual environment
+## 4.4 Service Layer Highlights
+
+`backend/services` responsibilities:
+- `ai_service.py`: Groq chat abstraction, model candidates, response parsing, fallback generators.
+- `proctor_agent.py`: proctor intelligence workflows and control actions.
+- `behavior_agent.py`: behavioral analysis endpoints and scoring surfaces.
+- `prescan_*`: environment scan session/token/socket orchestration.
+- `scan_aggregator.py`, `angle_tracker.py`: scan quality and orientation logic.
+- `comm_service.py`: communication test business logic.
+
+## 5. Frontend Deep Dive
+
+## 5.1 Entry and Routing
+
+- `client/src/App.jsx` manages:
+  - Session verification (`/api/auth/verify`)
+  - Route guards (`ProtectedRoute`)
+  - Role/permission-based workspace routing:
+    - `/admin` for platform/org admins
+    - `/role` for staff/content workspace
+    - `/student` for exam takers
+  - Google login + OTP flow support
+
+## 5.2 Portal Responsibilities
+
+- `client/src/pages/AdminPortal.jsx`:
+  - Platform operations (org lifecycle, tenant DB setup, usage/limits)
+  - RBAC user/role administration
+  - Assessment management depending on role and permissions
+  - Monitoring and analytics panels
+
+- `client/src/pages/MentorPortal.jsx`:
+  - Content creation and review views (permission-gated)
+  - Group analytics and live monitoring for mentees
+
+- `client/src/pages/StudentPortal.jsx`:
+  - Learning modules: coding, aptitude, global tests, skill tests, communication
+  - Progress modules: submissions, skill submissions, analytics
+  - Prescan gate integration for protected exam starts
+
+## 5.3 Real-Time and Prescan Client Modules
+
+- `client/src/hooks/useProctoring.js`: sends client-side monitoring events.
+- `client/src/services/socketService.js` and prescan socket services: monitoring and scan event transport.
+- `client/src/prescan/*`: mobile + desktop scan UX and room/session handling.
+
+## 6. Authentication and Authorization
+
+Auth flow supports:
+- Email/password login (`/api/auth/login`)
+- Google credential login (`/api/auth/google`)
+- OTP verification (`/api/auth/verify-otp`)
+- First-login forced password completion (`/api/auth/complete-first-login`)
+- Session verify (`/api/auth/verify`)
+
+Authorization model:
+- JWT claims validated on protected routes.
+- Token `sub` must align with requested user context.
+- Role and permission checks enforced both in backend and UI gating.
+- Protected socket joins validate token + user context.
+
+## 7. Multi-Tenancy Model
+
+Primary DB stores platform-wide entities (users, orgs, RBAC, metadata).
+Tenant DB per organization stores assessment-domain data.
+
+Per-request tenant resolution:
+1. Determine authenticated user and organization from token.
+2. Validate org is active.
+3. Resolve tenant pool for org.
+4. Bind pool to request context for route-level DB calls.
+
+Startup integrity guards:
+- tenant schema reconciliation for active orgs
+- optional DB preflight checks for primary and tenant schemas
+
+## 8. Assessment Modules
+
+## 8.1 Coding / Problems / Tasks
+
+- CRUD for coding problems and tasks
+- Student assignment retrieval and submission pipelines
+- Code execution endpoint for multiple languages
+
+## 8.2 Skill Tests
+
+`/api/skill-tests` covers:
+- test creation and allocation
+- student available tests and attempt lifecycle
+- MCQ, coding, SQL, and interview sections
+- proctoring logs and reports
+- admin submission reset/cleanup endpoints
+
+## 8.3 Aptitude
+
+`/api/aptitude` covers:
+- test CRUD
+- allocation and student listing
+- submission and detailed question result tracking
+- proctoring logging
+
+## 8.4 Global Tests
+
+`/api/global-tests` covers:
+- test CRUD and question management
+- student allocations
+- submission and reporting
+- proctoring logs
+
+## 8.5 Communication
+
+`/api/communication` covers:
+- module A/B/C/D prompts and answer submission
+- full communication test creation/allocation/attempt flow
+- proctoring logs + status checks
+- history and report retrieval
+
+## 9. Proctoring and Environment Scan
+
+## 9.1 Monitoring Events
+
+Students emit events like:
+- `submission_started`
+- `submission_completed`
+- `proctoring_violation`
+- `progress_update`
+- `test_failed`
+
+Server forwards scoped alerts to org admin room and mentor room when valid.
+
+## 9.2 Proctor Agent and Behavior Agent
+
+REST modules:
+- `/api/proctor-agent/*`: analysis, warnings, terminate, clear-flag, dashboards.
+- `/api/behavior/*`: log-events, analyze, reports, dashboards, session traces.
+
+## 9.3 Environment Prescan
+
+`/api/prescan` + socket handlers provide:
+- scan session creation and tracking
+- mobile token links for QR scan handoff
+- frame-level scan ingestion and status updates
+- retry and scan completion lifecycle
+
+## 10. AI Integration
+
+Current AI provider: Groq Chat Completions API.
+
+Key implementation facts (`backend/services/ai_service.py`):
+- Model candidate list built from primary + fallback models.
+- Key rotation is cyclic across configured keys.
+- If a key fails, request retries next key automatically.
+- If model unavailable, fallback models are attempted.
+- JSON parsing helper handles fenced JSON responses.
+
+Key slots supported in config:
+- `GROQ_API_KEY`
+- `GROQ_API_KEY_1` through `GROQ_API_KEY_15`
+
+## 11. API Surface Map
+
+Major prefixes and examples (not exhaustive):
+- `/api/auth/*`: login, google, otp, verify
+- `/api/admin/*`: admin user CRUD/status/reset
+- `/api/rbac/*`, `/api/platform/*`, `/api/orgs/*`: roles, organizations, tenant DB setup, limits
+- `/api/analytics/*`: admin/mentor/student analytics + export + logs/errors
+- `/api/skill-tests/*`: full skill-test lifecycle
+- `/api/aptitude*`: aptitude lifecycle
+- `/api/global-tests*`: global tests lifecycle
+- `/api/communication/*`: module and full communication test lifecycle
+- `/api/submissions*`: submission creation, feedback, escalation
+- `/api/run`: language execution endpoint
+- `/api/prescan/*`: environment scan flows
+- `/api/proctor-agent/*`, `/api/behavior/*`: integrity intelligence
+- `/api/public/config`, `/api/health`
+
+## 12. Socket Events Map
+
+Client -> server join events:
+- `join_monitoring`
+- `join_student_session`
+- prescan-specific join events from `prescan_socket_handlers`
+
+Client -> server activity events:
+- `submission_started`
+- `submission_completed`
+- `proctoring_violation`
+- `progress_update`
+- `test_failed`
+
+Server -> client examples:
+- `monitoring_connected`
+- `monitoring_error`
+- `live_update`
+- `live_alert`
+- prescan status/result events
+
+## 13. Data Model Overview
+
+Domain tables include (from DB bootstrap):
+- content/work: `problems`, `tasks`, `submissions`, completion/allocation tables
+- aptitude: tests, questions, submissions, question results, allocations
+- skill tests: test/attempt/allocation tables
+- global tests: tests, questions, submissions, section/question results
+- communication: tests, allocations, attempts
+- integrity: unified proctoring events, proctor analyses, behavior analyses, reports
+
+Note: platform DB and tenant DB separation is enforced by request context and org mapping.
+
+## 14. Configuration
+
+## 14.1 Backend `.env`
+
+Required/important:
+- `DATABASE_URL`
+- `PORT`
+- `SECRET_KEY`
+- `PRESCAN_SECRET_KEY`
+- `ALLOWED_ORIGINS`
+- `FRONTEND_URL`
+- `GROQ_API_KEY` + optional `GROQ_API_KEY_1..15`
+- `GROQ_MODEL`, `GROQ_FALLBACK_MODELS`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- OTP controls (`OTP_EXPIRY_MINUTES`, `OTP_MAX_FAILED_ATTEMPTS`, etc.)
+
+Operational toggles:
+- `STARTUP_DB_PREFLIGHT`
+- `STARTUP_DB_PREFLIGHT_TENANTS`
+- `STARTUP_TENANT_SCHEMA_RECONCILE`
+
+## 14.2 Frontend `.env`
+
+- `VITE_API_URL`
+- `VITE_PUBLIC_APP_URL`
+- `VITE_DEV_ALLOWED_HOSTS`
+- `VITE_GOOGLE_CLIENT_ID`
+
+## 15. Local Development
+
+## 15.1 Backend
 
 ```bash
 cd backend
-
-# Create virtual environment
 python -m venv .venv
-
-# Activate on Windows
 .venv\Scripts\activate
-
-# Activate on macOS/Linux
-source .venv/bin/activate
-```
-
-#### Install Python dependencies
-
-```bash
 pip install -r requirements.txt
-```
-
-#### Configure backend environment variables
-
-Create a `.env` file inside `backend/`:
-
-```env
-# Database (MySQL or TiDB Cloud)
-DATABASE_URL=mysql://username:password@host:port/mentor_hub
-
-# Groq AI API Keys (primary + fallbacks for rate-limit rotation)
-GROQ_API_KEY=gsk_your_primary_key_here
-GROQ_API_KEY_1=gsk_your_fallback_key_1
-GROQ_API_KEY_2=gsk_your_fallback_key_2
-
-# AI Model
-GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
-
-# Server
-PORT=8000
-
-# Frontend URL (for CORS — use localhost in development)
-FRONTEND_URL=http://localhost:5173
-
-# Pre-scan security
-PRESCAN_SECRET_KEY=your-random-secret-string-here
-```
-
-### 3. Frontend Setup
-
-```bash
-cd client
-
-# Install dependencies
-npm install
-```
-
-#### Configure frontend environment variables
-
-Create a `.env` file inside `client/`:
-
-```env
-# Backend API base URL
-VITE_API_URL=http://localhost:8000
-```
-
-### 4. Database Setup
-
-The application **automatically creates all required tables** on startup. You only need to:
-
-1. Create an empty MySQL database:
-
-```sql
-CREATE DATABASE mentor_hub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-2. Ensure your `DATABASE_URL` in `.env` points to it.
-
-Tables created automatically on first run:
-
-| Table | Purpose |
-|-------|---------|
-| `users` | User accounts (admin, mentor, student) |
-| `problems` | Coding/SQL problem bank |
-| `submissions` | Code submissions and results |
-| `skill_tests` | Skill test definitions and sessions |
-| `aptitude_tests` | Aptitude test data |
-| `global_tests` | Global assessment definitions |
-| `tasks` | Learning task assignments |
-| `prescan_exams` | Pre-scan exam definitions |
-| `prescan_exam_sessions` | Candidate scan sessions |
-| `prescan_room_scans` | Room scan results |
-| `prescan_scan_frames` | Frame-by-frame analysis data |
-| `prescan_scan_audit_log` | Audit trail |
-| `prescan_scan_overrides` | Manual proctor overrides |
-
-#### Create initial admin user
-
-```bash
-cd backend
-python create_user.py
-```
-
-Follow the prompts to create an admin account.
-
-### 5. Running the Application
-
-#### Start the backend server
-
-```bash
-cd backend
 uvicorn main:socket_app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The API will be available at `http://localhost:8000`.
-Interactive API docs: `http://localhost:8000/docs`
-
-#### Start the frontend dev server
+## 15.2 Frontend
 
 ```bash
 cd client
+npm install
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`.
+## 15.3 HTTPS Tunnel for Prescan/OAuth
 
-#### Verify health
+For real-device prescan:
+1. Start backend and frontend.
+2. Tunnel frontend (`ngrok http 5173`).
+3. Set backend `FRONTEND_URL` and frontend `VITE_PUBLIC_APP_URL`/`VITE_API_URL` to tunnel origin.
+4. Restart backend and frontend.
 
-```
-GET http://localhost:8000/api/health
-```
+## 16. End-to-End QA Workflows
 
-Expected response: `{ "status": "healthy" }`
+## Common Phase (All Tiers)
 
----
+1. Login as super admin.
+2. Create organization with selected subscription tier.
+3. Login as org admin and complete first-login setup.
+4. Configure tenant DB and verify status is active.
 
-## Environment Variables
+## Free Trial
 
-### Backend (`backend/.env`)
+Validate:
+- limited RBAC controls (no custom role creation)
+- content creator can manage allowed test types only
+- student can attempt assigned tests and view own submissions
+- blocked actions are hidden and denied
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | MySQL connection string |
-| `GROQ_API_KEY` | Yes | Primary Groq API key |
-| `GROQ_API_KEY_1` | No | Fallback API key 1 |
-| `GROQ_API_KEY_2` | No | Fallback API key 2 |
-| `GROQ_MODEL` | No | LLM model ID (default: llama-4-scout) |
-| `PORT` | No | Server port (default: 8000) |
-| `FRONTEND_URL` | Yes | Allowed CORS origin |
-| `PRESCAN_SECRET_KEY` | Yes | Secret for prescan session tokens |
+## Basic
 
-### Frontend (`client/.env`)
+Validate:
+- custom roles creation enabled
+- broader assessment creation/evaluation flows
+- staff workflow in `/role` and learner workflow in `/student`
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_API_URL` | Yes | Backend base URL |
+## Pro
 
----
+Validate:
+- all monitoring, override/manage, and export capabilities
+- full analytics and operations surfaces
 
-## API Reference
+## 17. Testing and Validation
 
-Base URL: `http://localhost:8000/api`
-
-### Authentication
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/auth/login` | Validate email + password; returns OTP challenge (`requiresOtp`, `challengeId`, …), not a session yet |
-| POST | `/auth/google` | Validate Google ID token; same OTP challenge pattern |
-| POST | `/auth/verify-otp` | Submit `{ challengeId, otp }`; returns `user`, or `mustChangePassword` + `setupToken` for first-time setup |
-| POST | `/auth/complete-first-login` | Submit `{ setupToken, newPassword }` after OTP when `must_change_password` is set |
-| POST | `/auth/verify` | Verify stored session; **401** if user still must change password |
-| GET | `/users/{id}` | Get user by ID |
-| GET | `/users` | List all users |
-
-**Login request body (step 1):**
-```json
-{
-  "email": "user@example.com",
-  "password": "yourpassword"
-}
-```
-
-**Login response (step 1 — OTP sent):**
-```json
-{
-  "requiresOtp": true,
-  "challengeId": "uuid",
-  "expiresIn": 600,
-  "emailMasked": "u***@example.com"
-}
-```
-
-**Verify OTP request:**
-```json
-{
-  "challengeId": "uuid",
-  "otp": "123456"
-}
-```
-
-**Verify OTP response (normal):**
-```json
-{
-  "success": true,
-  "mustChangePassword": false,
-  "user": {
-    "id": "student-abc123",
-    "name": "John Doe",
-    "email": "user@example.com",
-    "role": "student",
-    "mustChangePassword": false
-  }
-}
-```
-
-**Verify OTP response (first login after admin created user):**
-```json
-{
-  "success": true,
-  "mustChangePassword": true,
-  "setupToken": "uuid",
-  "user": { "...": "...", "mustChangePassword": true }
-}
-```
-
-**Legacy note:** The SPA stores `user` in `localStorage` only after OTP (and optional first-password step), then calls `/auth/verify` on reload.
-
-### Admin
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/admin/users` | List all users |
-| POST | `/admin/users` | Create a new user |
-| PUT | `/admin/users/{id}` | Update user details |
-| DELETE | `/admin/users/{id}` | Delete a user |
-| POST | `/admin/users/{id}/reset-password` | Reset user password |
-
-### Problems
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/problems` | List all problems |
-| POST | `/problems` | Create a problem |
-| GET | `/problems/{id}` | Get problem details |
-| PUT | `/problems/{id}` | Update a problem |
-| DELETE | `/problems/{id}` | Delete a problem |
-
-### Code Execution
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/run` | Execute code in any supported language |
-
-**Request body:**
-```json
-{
-  "language": "python",
-  "code": "print('Hello, World!')",
-  "input": "",
-  "time_limit": 5
-}
-```
-
-**Supported languages:** `python`, `javascript`, `c`, `java`, `sql`
-
-### Submissions
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/submissions` | Submit code for evaluation |
-| GET | `/submissions/{id}` | Get submission result |
-| POST | `/submissions/{id}/plagiarism` | Run plagiarism check |
-| POST | `/submissions/upload` | Upload file submission |
-
-### AI Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/generate-problem` | Generate a problem with AI |
-| POST | `/generate-coding-problem` | Generate a coding problem |
-| POST | `/chat` | AI chat assistant |
-| POST | `/hints` | Get hint for a problem |
-
-**Generate problem request:**
-```json
-{
-  "topic": "Binary Trees",
-  "difficulty": "medium",
-  "type": "coding"
-}
-```
-
-### Analytics
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/analytics/admin` | Admin overview analytics |
-| GET | `/analytics/student/{id}` | Student-level analytics |
-| GET | `/analytics/mentor/{id}` | Mentor-level analytics |
-
-### Pre-Scan (Environment Scan)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/prescan/exams` | List available prescan exams |
-| POST | `/prescan/sessions` | Create a prescan session |
-| POST | `/prescan/sessions/{token}/start-scan` | Begin environment scan |
-| POST | `/prescan/sessions/{token}/frames` | Submit scan frames |
-| GET | `/prescan/sessions/{token}/status` | Get scan status |
-| POST | `/prescan/sessions/{token}/complete` | Complete the scan |
-
-### Proctoring
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/proctor-agent/analyze` | Analyze proctoring data |
-| POST | `/proctor-agent/report` | Generate integrity report |
-| POST | `/proctor-agent/collusion-detect` | Detect collusion between submissions |
-
----
-
-## User Roles
-
-The platform supports three roles, each with a dedicated portal:
-
-| Role | Portal | Capabilities |
-|------|--------|-------------|
-| **Admin** | `/admin` | Full platform management: create users, assign mentors, configure tests, view all analytics, live monitoring |
-| **Mentor** | `/mentor` | Manage assigned students, create/assign problems and tests, view student progress, monitor assessments |
-| **Student** | `/student` | Take assessments, view results and feedback, access AI chatbot and hints |
-
----
-
-## Assessment Types
-
-### Coding Tests
-- Problems with custom test cases
-- Monaco editor with syntax highlighting
-- Real-time code execution feedback
-- Auto-evaluated with test case pass/fail
-
-### SQL Tests
-- SQL query problems with schema context
-- In-browser execution via sql.js (WASM)
-- Server-side validation against expected output
-
-### MCQ / Aptitude Tests
-- Multiple choice questions with configurable time limits
-- Randomized question ordering
-- Auto-scored with detailed result breakdown
-
-### Global Tests
-- Organization-wide assessments combining multiple question types
-- Configurable sections and time allocations
-
-### Behavioral Assessments
-- ML-based analysis of response patterns
-- Ensemble model for anomaly detection
-
-### Communication Assessments
-- AI-generated prompts delivered via text-to-speech
-- Recorded responses evaluated by Groq LLM
-- Scoring across multiple communication dimensions
-
----
-
-## Proctoring System
-
-The platform includes a multi-layered proctoring system:
-
-### Client-Side Detection (TensorFlow.js)
-- **Face Detection** — BlazeFace model detects if no face or multiple faces are visible
-- **Object Detection** — COCO-SSD model flags unauthorized objects (phones, books, etc.)
-- **Tab Switch Detection** — `visibilitychange` and `blur` events tracked
-- **Copy-Paste Detection** — Clipboard events intercepted and logged
-
-### Server-Side Analysis (AI Proctoring Agent)
-- Aggregates client-side events per session
-- Groq LLM analyzes behavioral patterns for fraud risk scoring
-- Generates structured integrity reports with evidence
-- Collusion detection across multiple submissions
-
-### Real-Time Alerts (Socket.io)
-- Proctoring events streamed to mentor/admin dashboards
-- Per-student rooms: `student_{id}`, `mentor_{id}`, `admin_room`
-- Configurable alert thresholds
-
----
-
-## Pre-Scan (Environment Scan)
-
-Before high-stakes assessments, students complete a mandatory environment scan:
-
-1. **Desktop Scan** — Webcam captures 360° room panorama frames
-2. **Mobile Scan** — Student scans a QR code on their phone; mobile camera provides additional angle coverage
-3. **Analysis** — Frames are analyzed server-side for:
-   - Unauthorized persons in the room
-   - Multiple monitors
-   - Prohibited devices
-   - Environment angle coverage completeness
-4. **Result** — Pass/Fail decision with manual override capability for proctors
-
----
-
-## AI Integration
-
-The platform uses **Groq API** with automatic key rotation across up to 3 API keys to handle rate limits.
-
-### Supported Models
-- Primary: `meta-llama/llama-4-scout-17b-16e-instruct`
-- Fallback: `llama-3.1-8b-instant`
-
-### AI Features
-| Feature | Endpoint | Description |
-|---------|----------|-------------|
-| Problem Generation | `POST /api/generate-problem` | Creates problem statements with test cases |
-| Coding Problem Generation | `POST /api/generate-coding-problem` | Generates complete coding challenges |
-| Hint Generation | `POST /api/hints` | Context-aware hints for students |
-| AI Chat Assistant | `POST /api/chat` | General assistant for students |
-| Communication Evaluation | Internal | Evaluates spoken/written responses |
-| Proctoring Analysis | `POST /api/proctor-agent/analyze` | Fraud risk scoring from events |
-| Plagiarism Detection | `POST /api/submissions/{id}/plagiarism` | Similarity analysis |
-
----
-
-## Code Execution Engine
-
-Supports server-side execution in 5 languages:
-
-| Language | Runtime Required | Notes |
-|----------|-----------------|-------|
-| Python | `python3` | Uses subprocess with timeout |
-| JavaScript | `node` | Node.js required |
-| C | `gcc` | Compiled and executed per submission |
-| Java | `java`, `javac` | JDK required |
-| SQL | Internal | SQLite-based execution |
-
-All executions run with a configurable time limit (default: 5 seconds) to prevent infinite loops.
-
----
-
-## WebSocket Events
-
-The platform uses Socket.io for real-time features. Connect to `ws://localhost:8000`.
-
-### Client → Server Events
-
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `join_student_room` | `{ student_id }` | Join student monitoring room |
-| `join_mentor_room` | `{ mentor_id }` | Join mentor dashboard room |
-| `join_admin_room` | `{}` | Join admin monitoring room |
-| `proctor_event` | `{ student_id, event_type, data }` | Report proctoring violation |
-| `prescan_frame` | `{ token, frame_data }` | Upload prescan frame |
-
-### Server → Client Events
-
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `proctor_alert` | `{ student_id, alert_type, severity }` | Proctoring violation alert |
-| `student_status_update` | `{ student_id, status }` | Student status change |
-| `prescan_update` | `{ token, status, progress }` | Pre-scan progress update |
-| `analysis_complete` | `{ session_id, result }` | AI analysis finished |
-
----
-
-## Deployment
-
-### Frontend (Netlify)
+Backend tests:
 
 ```bash
-cd client
-npm run build
-# Deploy the dist/ folder to Netlify
+cd backend
+pytest -q
 ```
 
-The `client/public/_redirects` file is pre-configured for Netlify SPA routing:
-```
-/*  /index.html  200
-```
-
-### Backend (Any ASGI-compatible host)
+DB preflight utility:
 
 ```bash
-# Production start command
-uvicorn main:socket_app --host 0.0.0.0 --port 8000 --workers 1
+cd backend
+python scripts/db_preflight.py --db-url "mysql://user:password@host:port/database"
 ```
 
-> Note: Socket.io requires a single worker or sticky sessions. Do not use `--workers > 1` without a Socket.io adapter (e.g., Redis adapter).
+Suggested verification after config updates:
+- `/api/health`
+- auth login + verify route
+- tenant DB status route
+- one assessment create/start/submit cycle
+- live monitoring socket connection
 
-### Using ngrok for Development/Demo
+## 18. Security Notes
 
-```bash
-# Expose backend
-ngrok http 8000
+- Keep all secrets in environment variables only.
+- Rotate keys if leaked.
+- Restrict CORS to known domains in production.
+- Restrict Google OAuth origins/redirect URIs.
+- Use HTTPS in production for auth, prescan, and proctoring flows.
 
-# Update client/.env with the ngrok URL
-VITE_API_URL=https://your-ngrok-url.ngrok-free.app
+## 19. Troubleshooting
 
-# Update backend/.env
-FRONTEND_URL=https://your-frontend-url
-```
+- `401 Missing bearer token`: protected route called without auth header.
+- `401 Invalid or expired token`: token expired/signature mismatch.
+- `403 Organization context mismatch`: token org and request org differ.
+- `503 Tenant database is not configured`: org tenant DB setup incomplete.
+- `500 Tenant database schema is incomplete`: run schema reconciliation/preflight.
+- Prescan mobile issues: verify HTTPS origin and `FRONTEND_URL` consistency.
+- Groq failures: verify key validity, model IDs, and fallback configuration.
 
-### Environment Notes for Production
+## 20. API Endpoint Reference Table
 
-- Set `allow_origins` in `backend/main.py` CORS config to your specific frontend domain (not `"*"`)
-- Use a strong, unique `PRESCAN_SECRET_KEY`
-- Ensure `uploads/proctoring/` and `uploads/tts/` directories have write permissions
-- Use environment variables for all secrets — never commit `.env` files
+Grouped by backend route modules (prefix + key endpoints).
+
+| Module | Prefix | Key Endpoints | Typical Roles |
+|---|---|---|---|
+| Auth | `/api` | `/auth/login`, `/auth/google`, `/auth/verify-otp`, `/auth/complete-first-login`, `/auth/verify` | All |
+| Admin Users | `/api/admin` | `/users` (GET/POST), `/users/{user_id}` (PUT/DELETE), `/users/{user_id}/reset-password`, `/users/{user_id}/status` | Super Admin, Org Admin |
+| RBAC + Org Management | `/api` | `/rbac/permissions`, `/platform/organizations`, `/platform/organizations/{org_id}/status`, `/orgs/{org_id}/roles`, `/orgs/{org_id}/users`, `/orgs/{org_id}/tenant-db` | Super Admin, Org Admin |
+| Public | `/api/public` | `/config` | Public |
+| Health | `/api` | `/health` | Public |
+| Problems | `/api` | `/problems` (GET/POST), `/problems/{problem_id}` (DELETE), `/students/{student_id}/problems` | Staff, Students |
+| Tasks | `/api` | `/tasks` (GET/POST), `/tasks/{task_id}` (DELETE), `/students/{student_id}/tasks` | Staff, Students |
+| Submissions | `/api` | `/submissions` (GET/POST), `/submissions/proctored`, `/submissions/{submission_id}/feedback`, `/submissions/{submission_id}/escalate` | Staff, Students |
+| Code Execution | `/api` | `/run` | Staff, Students |
+| Hints | `/api` | `/hints` | Staff, Students |
+| Chat | `/api` | `/chat` | Staff, Students |
+| Messaging | `/api` | `/messages/{user_id}`, `/messages/{user_id}/{other_user_id}`, `/messages` (POST) | Staff, Students |
+| AI Content | `/api/ai` | `/generate-problem`, `/generate-coding-problem`, `/generate-sql-problem`, `/generate-aptitude`, `/chat` | Staff |
+| Analytics | `/api/analytics` | `/admin`, `/mentor/{mentor_id}`, `/student/{student_id}`, `/topics`, `/plagiarism`, `/time-to-solve`, `/export/json`, `/export/csv`, `/audit-logs`, `/system-errors` | Staff, Admin |
+| Skill Tests | `/api/skill-tests` | `/create`, `/all`, `/student/available`, `/{test_id}/allocations`, `/{test_id}/start`, `/mcq/*`, `/coding/*`, `/sql/*`, `/interview/*`, `/report/{attempt_id}`, `/admin/all-submissions` | Staff, Students, Admin |
+| Aptitude | `/api` | `/aptitude` (GET/POST), `/aptitude/{test_id}`, `/aptitude/{test_id}/submit`, `/aptitude/{test_id}/allocate-students`, `/aptitude/proctoring/log`, `/aptitude-submissions` | Staff, Students |
+| Global Tests | `/api` | `/global-tests` (GET/POST), `/global-tests/{test_id}` (GET/PUT/DELETE), `/global-tests/{test_id}/allocations`, `/global-tests/{test_id}/submit`, `/global-test-submissions`, `/global-tests/proctoring/log` | Staff, Students |
+| Communication | `/api/communication` | `/moduleA|B|C|D`, `/tests/create`, `/tests/all`, `/tests/{test_id}/allocations`, `/tests/student/available`, `/tests/{test_id}/start`, `/tests/attempt/{attempt_id}/submit-module`, `/tests/attempt/{attempt_id}/finish`, `/proctoring/log` | Staff, Students |
+| Proctor Agent | `/api/proctor-agent` | `/dashboard`, `/analyses`, `/analyze`, `/analyze/batch`, `/report`, `/terminate`, `/warn`, `/clear-flag`, `/analysis/{analysis_id}` | Admin, Mentors |
+| Behavior Agent | `/api/behavior` | `/log-events`, `/analyze`, `/report`, `/sessions`, `/dashboard`, `/analyses`, `/analysis/{analysis_id}`, `/session/{session_id}`, `/clear` | Admin, Mentors |
+| Environment Scan | `/api/prescan` | `/exams`, `/sessions` (POST/GET), `/sessions/{session_id}`, `/scans/{scan_id}`, `/scans/{scan_id}/retry`, `/scans/{scan_id}/frames`, `/mobile/{token}` | Students, Staff |
+| Attachments | `/api/attachments` | `/upload` | Staff, Students |
+
+Notes:
+- Role access is enforced by token + permission checks; “Typical Roles” is a usage guide, not a bypass rule.
+- Many modules include additional endpoints; this table lists high-signal operational routes.
+
+## 21. Maintenance Checklist
+
+Whenever code changes in routes/services/config:
+1. Update this README sections affected by flow changes.
+2. Re-verify endpoint names and prefixes.
+3. Re-verify startup flags and env variables.
+4. Re-run backend tests and DB preflight.
+5. Confirm tier-based gating remains aligned with RBAC permissions.
 
 ---
 
-## Troubleshooting
-
-### Backend won't start
-
-- Check that MySQL is running and `DATABASE_URL` is correct
-- Ensure all dependencies are installed: `pip install -r requirements.txt`
-- Check Python version: `python --version` (must be 3.10+)
-
-### Frontend shows blank page or API errors
-
-- Verify `VITE_API_URL` in `client/.env` matches the running backend URL
-- Check browser console for CORS errors — ensure `FRONTEND_URL` in backend `.env` matches the frontend origin
-- Run `npm install` to ensure all packages are installed
-
-### Code execution not working
-
-- Verify the required runtime is installed and on PATH:
-  - Python: `python3 --version`
-  - Node.js: `node --version`
-  - Java: `java --version` and `javac --version`
-  - C: `gcc --version`
-
-### AI features returning errors
-
-- Verify `GROQ_API_KEY` is set and valid
-- Check Groq API rate limits — add `GROQ_API_KEY_1` and `GROQ_API_KEY_2` as fallbacks
-- Test the key at `https://console.groq.com`
-
-### Webcam / proctoring not working
-
-- Ensure the browser has camera permissions for the origin
-- Use HTTPS in production — browsers block camera on non-HTTPS origins (except `localhost`)
-- Check browser console for TensorFlow.js model loading errors
-
-### Socket.io connection issues
-
-- Confirm backend is running on the correct port
-- Check that `vite.config.js` proxy is configured for `/socket.io` in development
-- In production, ensure your reverse proxy supports WebSocket upgrades
-
----
-
-## License
-
-This project is intended for educational and institutional use. See [LICENSE](LICENSE) for details.
+Last updated: May 22, 2026.
