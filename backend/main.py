@@ -476,7 +476,7 @@ async def add_corp_header(request, call_next):
         "/openapi.json",
     )
     auth_exempt = any(path.startswith(p) for p in auth_exempt_prefixes)
-    if path.startswith("/api") and not auth_exempt:
+    if path.startswith("/api") and not auth_exempt and request.method != "OPTIONS":
         token = _read_auth_token(request)
         if not token:
             return JSONResponse({"detail": "Missing bearer token"}, status_code=401)
