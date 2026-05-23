@@ -1346,6 +1346,30 @@
     margin-bottom: 3.5rem;
 }
 
+/* Guard landing headings/layout from global portal class collisions */
+.landing-section .section-header {
+    display: block;
+    text-align: center;
+    margin-bottom: 3.5rem;
+}
+
+.landing-section .section-title {
+    display: block;
+    margin: 0 0 1rem;
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.8px;
+    color: var(--text);
+}
+
+.landing-section .section-subtitle {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    line-height: 1.7;
+    max-width: 600px;
+}
+
 /* Section variant: full-bleed with outer padding */
 .landing-section.full-bleed {
     background: transparent;
@@ -1361,5 +1385,9 @@
 
     .landing-container {
         padding: 0 1rem;
+    }
+
+    .landing-section .section-header {
+        margin-bottom: 2.5rem;
     }
 }
