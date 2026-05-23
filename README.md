@@ -1,490 +1,625 @@
 # AI Assessment Hub
 
-Comprehensive full-stack assessment and proctoring platform with multi-tenant RBAC, AI-assisted assessment generation, real-time monitoring, and subscription-tier controls.
+Comprehensive full-stack assessment and proctoring platform with multi-tenant RBAC, AI-assisted content generation, real-time monitoring, and subscription-tier controls.
 
-This README is generated from the current codebase structure and behavior.
+**Stack:** FastAPI + Socket.IO (Python) · React + Vite (JavaScript) · MySQL-compatible DB · Groq LLM
+
+---
 
 ## Table of Contents
 
-1. Platform Summary
-2. Architecture
-3. Runtime Lifecycle
-4. Backend Deep Dive
-5. Frontend Deep Dive
-6. Authentication and Authorization
-7. Multi-Tenancy Model
-8. Assessment Modules
-9. Proctoring and Environment Scan
-10. AI Integration
-11. API Surface Map
-12. Socket Events Map
-13. Data Model Overview
-14. Configuration
-15. Local Development
-16. End-to-End QA Workflows
-17. Testing and Validation
-18. Security Notes
-19. Troubleshooting
-20. API Endpoint Reference Table
-21. Maintenance Checklist
+1. [Architecture](#1-architecture)
+2. [Deployment — Render.com (Recommended)](#2-deployment--rendercom-recommended)
+3. [Deployment — Railway](#3-deployment--railway)
+4. [Deployment — VPS / Self-Hosted](#4-deployment--vps--self-hosted)
+5. [Environment Variables Reference](#5-environment-variables-reference)
+6. [Database Setup (TiDB Cloud / PlanetScale / RDS)](#6-database-setup)
+7. [Google OAuth Setup](#7-google-oauth-setup)
+8. [Local Development](#8-local-development)
+9. [Post-Deployment Checklist](#9-post-deployment-checklist)
+10. [Architecture Deep Dive](#10-architecture-deep-dive)
+11. [API Reference](#11-api-reference)
+12. [Troubleshooting](#12-troubleshooting)
 
-## 1. Platform Summary
+---
 
-Core capabilities:
-- Multi-role portals: super admin, organization admin, role-based staff, exam taker
-- Assessment types: coding, global MCQ, skill tests (MCQ/coding/SQL/interview), aptitude, communication
-- Proctoring: live violation streams, proctor intelligence agent, behavior analysis, environment prescan
-- AI features: content generation, hints, chat, interview/report support
-- Multi-tenant isolation with per-organization tenant DBs
-- Subscription-aware RBAC with feature gating
+## 1. Architecture
 
-## 2. Architecture
-
-```text
-+-------------------------+        HTTP + Socket.IO        +-------------------------------+
-| React + Vite Frontend   | <----------------------------> | FastAPI + Socket.IO ASGI App  |
-| /admin /role /student   |                                | backend/main.py               |
-+-------------------------+                                +-------------------------------+
-            |                                                               |
-            |                                                               |
-            v                                                               v
-+-------------------------+                                   +-------------------------------+
-| Browser-side proctoring |                                   | MySQL-compatible databases    |
-| TFJS + camera signals   |                                   | - Primary platform DB         |
-+-------------------------+                                   | - Tenant DB per organization  |
-            |                                                 +-------------------------------+
-            |
-            v
-+-------------------------+
-| Groq API (LLM services) |
-+-------------------------+
+```
++-------------------------+    HTTP + Socket.IO    +-------------------------------+
+|  React + Vite SPA       | <------------------->  |  FastAPI + Socket.IO backend  |
+|  client/                |                        |  backend/main.py              |
+|  /admin  /role /student |                        |  Port 8000                    |
++-------------------------+                        +-------------------------------+
+           |                                                       |
+           | TensorFlow.js (camera/proctoring)                     | aiomysql
+           v                                                       v
++-------------------------+                        +-------------------------------+
+|  Groq API (LLM)         |                        |  MySQL-compatible DB          |
+|  Content gen, hints,    |                        |  - Platform DB (users, orgs)  |
+|  chat, AI interview     |                        |  - Tenant DB per organization |
++-------------------------+                        +-------------------------------+
 ```
 
-## 3. Runtime Lifecycle
-
-Server bootstrap (`backend/main.py`):
-1. Configure logging.
-2. Initialize DB pools.
-3. Ensure schemas for auth, RBAC, domain tables, proctoring, and audit.
-4. Reconcile active tenant schemas when enabled.
-5. Run startup DB preflight checks (optional, configurable).
-6. Seed default super admins.
-7. Mount routers and `/uploads` static path.
-8. Run as `socket_app` (FastAPI wrapped by Socket.IO ASGI app).
-
-Request path behavior:
-- JWT validation enforced for protected `/api` routes.
-- Request gets `x-user-id` and `x-org-id` injected from token claims.
-- Tenant DB context resolved per request unless route is exempt.
-- Inactive orgs or missing tenant DB reject requests early.
-
-## 4. Backend Deep Dive
-
-## 4.1 Core Files
-
-- `backend/main.py`: app lifecycle, middleware, router registration, socket events.
-- `backend/config.py`: settings from `.env`, Groq key loading, model fallback config.
-- `backend/database.py`: async wrapper around PyMySQL pools, schema creation/reconciliation helpers.
-- `backend/security.py`: minimal HS256 JWT create/decode utilities.
-
-## 4.2 Middleware and Error Handling
-
-`main.py` middleware stack:
-- `SecurityHeadersMiddleware`
-- `LoggingMiddleware`
-- `RateLimitMiddleware`
-- CORS middleware (explicit origins in prod, wildcard fallback in dev)
-- Custom tenant/auth middleware with org/tenant resolution
-
-Global exception handler:
-- Returns standardized JSON error with `requestId`
-- Special case for missing tenant table (`1146`) with explicit tenant-schema guidance
-
-## 4.3 Router Modules Registered
-
-All routers are mounted centrally in `backend/main.py`:
-- `auth`, `tasks`, `problems`, `submissions`, `code_execution`, `hints`, `chat`, `messaging`
-- `analytics`, `skill_tests`, `aptitude`, `global_tests`, `admin`, `communication`
-- `proctor_agent`, `behavior_agent`, `ai`, `environment_scan`, `attachments`, `rbac`, `public`
-
-## 4.4 Service Layer Highlights
-
-`backend/services` responsibilities:
-- `ai_service.py`: Groq chat abstraction, model candidates, response parsing, fallback generators.
-- `proctor_agent.py`: proctor intelligence workflows and control actions.
-- `behavior_agent.py`: behavioral analysis endpoints and scoring surfaces.
-- `prescan_*`: environment scan session/token/socket orchestration.
-- `scan_aggregator.py`, `angle_tracker.py`: scan quality and orientation logic.
-- `comm_service.py`: communication test business logic.
-
-## 5. Frontend Deep Dive
-
-## 5.1 Entry and Routing
-
-- `client/src/App.jsx` manages:
-  - Session verification (`/api/auth/verify`)
-  - Route guards (`ProtectedRoute`)
-  - Role/permission-based workspace routing:
-    - `/admin` for platform/org admins
-    - `/role` for staff/content workspace
-    - `/student` for exam takers
-  - Google login + OTP flow support
-
-## 5.2 Portal Responsibilities
-
-- `client/src/pages/AdminPortal.jsx`:
-  - Platform operations (org lifecycle, tenant DB setup, usage/limits)
-  - RBAC user/role administration
-  - Assessment management depending on role and permissions
-  - Monitoring and analytics panels
-
-- `client/src/pages/MentorPortal.jsx`:
-  - Content creation and review views (permission-gated)
-  - Group analytics and live monitoring for mentees
-
-- `client/src/pages/StudentPortal.jsx`:
-  - Learning modules: coding, aptitude, global tests, skill tests, communication
-  - Progress modules: submissions, skill submissions, analytics
-  - Prescan gate integration for protected exam starts
+**Key design points:**
+- Backend is a single ASGI process — FastAPI wrapped by Socket.IO (`socket_app`)
+- Frontend is a pure SPA — build output (`client/dist`) served as static files
+- Multi-tenant: one platform DB + one MySQL DB schema per organization
+- Groq key rotation: up to 16 keys cycled automatically (`GROQ_API_KEY` + `GROQ_API_KEY_1..15`)
+- JWT-authenticated REST + Socket.IO with org-scoped rooms
 
-## 5.3 Real-Time and Prescan Client Modules
+---
 
-- `client/src/hooks/useProctoring.js`: sends client-side monitoring events.
-- `client/src/services/socketService.js` and prescan socket services: monitoring and scan event transport.
-- `client/src/prescan/*`: mobile + desktop scan UX and room/session handling.
+## 2. Deployment — Render.com (Recommended)
 
-## 6. Authentication and Authorization
+Render supports both the FastAPI backend (as a Web Service) and the React frontend (as a Static Site) on a free/paid plan. The `client/render.yaml` SPA rewrite rule is already committed.
 
-Auth flow supports:
-- Email/password login (`/api/auth/login`)
-- Google credential login (`/api/auth/google`)
-- OTP verification (`/api/auth/verify-otp`)
-- First-login forced password completion (`/api/auth/complete-first-login`)
-- Session verify (`/api/auth/verify`)
+### Step 1 — Database
 
-Authorization model:
-- JWT claims validated on protected routes.
-- Token `sub` must align with requested user context.
-- Role and permission checks enforced both in backend and UI gating.
-- Protected socket joins validate token + user context.
+Provision a MySQL-compatible database **before** deploying the app. Options:
 
-## 7. Multi-Tenancy Model
+| Provider | Notes |
+|---|---|
+| [TiDB Cloud](https://tidbcloud.com) (free tier) | MySQL-compatible, serverless, already used in dev |
+| [PlanetScale](https://planetscale.com) | Serverless MySQL, generous free tier |
+| [Aiven for MySQL](https://aiven.io) | Free 1-node MySQL |
+| AWS RDS / GCP Cloud SQL | Production-grade, requires paid plan |
 
-Primary DB stores platform-wide entities (users, orgs, RBAC, metadata).
-Tenant DB per organization stores assessment-domain data.
+Copy the connection string — you will need it as `DATABASE_URL`:
 
-Per-request tenant resolution:
-1. Determine authenticated user and organization from token.
-2. Validate org is active.
-3. Resolve tenant pool for org.
-4. Bind pool to request context for route-level DB calls.
+```
+mysql://USER:PASSWORD@HOST:PORT/DATABASE_NAME
+```
 
-Startup integrity guards:
-- tenant schema reconciliation for active orgs
-- optional DB preflight checks for primary and tenant schemas
-
-## 8. Assessment Modules
+### Step 2 — Deploy the Backend (Web Service)
 
-## 8.1 Coding / Problems / Tasks
+1. Go to [render.com](https://render.com) → **New** → **Web Service**
+2. Connect your GitHub repository
+3. Set the following in Render's UI:
 
-- CRUD for coding problems and tasks
-- Student assignment retrieval and submission pipelines
-- Code execution endpoint for multiple languages
+| Setting | Value |
+|---|---|
+| **Root Directory** | `backend` |
+| **Environment** | `Python 3` |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `uvicorn main:socket_app --host 0.0.0.0 --port $PORT` |
+| **Plan** | Starter ($7/mo) or free (limited) |
 
-## 8.2 Skill Tests
+4. Add all [environment variables](#5-environment-variables-reference) under **Environment** → **Add Environment Variable**
 
-`/api/skill-tests` covers:
-- test creation and allocation
-- student available tests and attempt lifecycle
-- MCQ, coding, SQL, and interview sections
-- proctoring logs and reports
-- admin submission reset/cleanup endpoints
-
-## 8.3 Aptitude
-
-`/api/aptitude` covers:
-- test CRUD
-- allocation and student listing
-- submission and detailed question result tracking
-- proctoring logging
-
-## 8.4 Global Tests
-
-`/api/global-tests` covers:
-- test CRUD and question management
-- student allocations
-- submission and reporting
-- proctoring logs
-
-## 8.5 Communication
-
-`/api/communication` covers:
-- module A/B/C/D prompts and answer submission
-- full communication test creation/allocation/attempt flow
-- proctoring logs + status checks
-- history and report retrieval
-
-## 9. Proctoring and Environment Scan
-
-## 9.1 Monitoring Events
-
-Students emit events like:
-- `submission_started`
-- `submission_completed`
-- `proctoring_violation`
-- `progress_update`
-- `test_failed`
-
-Server forwards scoped alerts to org admin room and mentor room when valid.
-
-## 9.2 Proctor Agent and Behavior Agent
-
-REST modules:
-- `/api/proctor-agent/*`: analysis, warnings, terminate, clear-flag, dashboards.
-- `/api/behavior/*`: log-events, analyze, reports, dashboards, session traces.
-
-## 9.3 Environment Prescan
-
-`/api/prescan` + socket handlers provide:
-- scan session creation and tracking
-- mobile token links for QR scan handoff
-- frame-level scan ingestion and status updates
-- retry and scan completion lifecycle
-
-## 10. AI Integration
-
-Current AI provider: Groq Chat Completions API.
-
-Key implementation facts (`backend/services/ai_service.py`):
-- Model candidate list built from primary + fallback models.
-- Key rotation is cyclic across configured keys.
-- If a key fails, request retries next key automatically.
-- If model unavailable, fallback models are attempted.
-- JSON parsing helper handles fenced JSON responses.
-
-Key slots supported in config:
-- `GROQ_API_KEY`
-- `GROQ_API_KEY_1` through `GROQ_API_KEY_15`
-
-## 11. API Surface Map
-
-Major prefixes and examples (not exhaustive):
-- `/api/auth/*`: login, google, otp, verify
-- `/api/admin/*`: admin user CRUD/status/reset
-- `/api/rbac/*`, `/api/platform/*`, `/api/orgs/*`: roles, organizations, tenant DB setup, limits
-- `/api/analytics/*`: admin/mentor/student analytics + export + logs/errors
-- `/api/skill-tests/*`: full skill-test lifecycle
-- `/api/aptitude*`: aptitude lifecycle
-- `/api/global-tests*`: global tests lifecycle
-- `/api/communication/*`: module and full communication test lifecycle
-- `/api/submissions*`: submission creation, feedback, escalation
-- `/api/run`: language execution endpoint
-- `/api/prescan/*`: environment scan flows
-- `/api/proctor-agent/*`, `/api/behavior/*`: integrity intelligence
-- `/api/public/config`, `/api/health`
-
-## 12. Socket Events Map
-
-Client -> server join events:
-- `join_monitoring`
-- `join_student_session`
-- prescan-specific join events from `prescan_socket_handlers`
-
-Client -> server activity events:
-- `submission_started`
-- `submission_completed`
-- `proctoring_violation`
-- `progress_update`
-- `test_failed`
-
-Server -> client examples:
-- `monitoring_connected`
-- `monitoring_error`
-- `live_update`
-- `live_alert`
-- prescan status/result events
-
-## 13. Data Model Overview
-
-Domain tables include (from DB bootstrap):
-- content/work: `problems`, `tasks`, `submissions`, completion/allocation tables
-- aptitude: tests, questions, submissions, question results, allocations
-- skill tests: test/attempt/allocation tables
-- global tests: tests, questions, submissions, section/question results
-- communication: tests, allocations, attempts
-- integrity: unified proctoring events, proctor analyses, behavior analyses, reports
-
-Note: platform DB and tenant DB separation is enforced by request context and org mapping.
-
-## 14. Configuration
-
-## 14.1 Backend `.env`
-
-Required/important:
-- `DATABASE_URL`
-- `PORT`
-- `SECRET_KEY`
-- `PRESCAN_SECRET_KEY`
-- `ALLOWED_ORIGINS`
-- `FRONTEND_URL`
-- `GROQ_API_KEY` + optional `GROQ_API_KEY_1..15`
-- `GROQ_MODEL`, `GROQ_FALLBACK_MODELS`
-- `GOOGLE_OAUTH_CLIENT_ID`
-- OTP controls (`OTP_EXPIRY_MINUTES`, `OTP_MAX_FAILED_ATTEMPTS`, etc.)
-
-Operational toggles:
-- `STARTUP_DB_PREFLIGHT`
-- `STARTUP_DB_PREFLIGHT_TENANTS`
-- `STARTUP_TENANT_SCHEMA_RECONCILE`
-
-## 14.2 Frontend `.env`
-
-- `VITE_API_URL`
-- `VITE_PUBLIC_APP_URL`
-- `VITE_DEV_ALLOWED_HOSTS`
-- `VITE_GOOGLE_CLIENT_ID`
-
-## 15. Local Development
-
-## 15.1 Backend
+   Minimum required:
+   ```
+   DATABASE_URL=mysql://...
+   SECRET_KEY=<generate a 64-char random string>
+   PRESCAN_SECRET_KEY=<generate a 64-char random string>
+   GROQ_API_KEY=gsk_...
+   ALLOWED_ORIGINS=https://YOUR-FRONTEND.onrender.com
+   FRONTEND_URL=https://YOUR-FRONTEND.onrender.com
+   PORT=10000
+   ```
+
+5. Deploy. On first boot the backend automatically:
+   - Creates all platform DB tables
+   - Reconciles tenant schemas
+   - Seeds super-admin accounts (from `SUPER_ADMIN_*` env vars)
+
+6. Note your backend URL: `https://YOUR-BACKEND.onrender.com`
+
+### Step 3 — Deploy the Frontend (Static Site)
+
+1. Go to Render → **New** → **Static Site**
+2. Connect the same repository
+
+| Setting | Value |
+|---|---|
+| **Root Directory** | `client` |
+| **Build Command** | `npm install && npm run build` |
+| **Publish Directory** | `dist` |
+
+3. Add environment variables:
+
+   ```
+   VITE_API_URL=https://YOUR-BACKEND.onrender.com
+   VITE_GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
+   ```
+
+4. Under **Redirects/Rewrites**, add a rewrite rule (the `render.yaml` in `client/` handles this automatically if you use Render Blueprints):
+
+   | Source | Destination | Action |
+   |---|---|---|
+   | `/*` | `/index.html` | Rewrite |
+
+5. Deploy. Note your frontend URL: `https://YOUR-FRONTEND.onrender.com`
+
+### Step 4 — Update CORS
+
+Go back to your **backend** service on Render → Environment:
+
+```
+ALLOWED_ORIGINS=https://YOUR-FRONTEND.onrender.com
+FRONTEND_URL=https://YOUR-FRONTEND.onrender.com
+```
+
+Trigger a redeploy.
+
+---
+
+## 3. Deployment — Railway
+
+### Backend
+
+```toml
+# railway.toml  (create in backend/)
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "uvicorn main:socket_app --host 0.0.0.0 --port $PORT"
+restartPolicyType = "on_failure"
+```
+
+Add environment variables in the Railway dashboard (see [Section 5](#5-environment-variables-reference)).
+
+### Frontend
+
+```toml
+# railway.toml  (create in client/)
+[build]
+builder = "nixpacks"
+buildCommand = "npm install && npm run build"
+
+[deploy]
+startCommand = "npx serve dist -s -l $PORT"
+```
+
+Or deploy the frontend to Vercel / Netlify instead (easier, free):
+
+**Vercel:**
+```bash
+cd client
+npx vercel --prod
+# Set VITE_API_URL and VITE_GOOGLE_CLIENT_ID in Vercel project settings
+```
+
+**Netlify:**
+```bash
+cd client
+npx netlify deploy --build --prod --dir dist
+```
+
+Add a `client/_redirects` file (already present in `public/`):
+```
+/*  /index.html  200
+```
+
+---
+
+## 4. Deployment — VPS / Self-Hosted
+
+### Requirements
+- Ubuntu 22.04 / Debian 12 (or equivalent)
+- Python 3.11+
+- Node.js 18+
+- Nginx (reverse proxy)
+- SSL certificate (Let's Encrypt via Certbot)
+
+### Backend setup
+
+```bash
+# Clone repo and enter backend
+git clone https://github.com/YOUR_ORG/YOUR_REPO.git
+cd YOUR_REPO/backend
+
+# Create virtualenv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Copy and edit .env
+cp .env.example .env
+nano .env   # fill in all required values
+
+# Run (production — use a process manager like systemd or pm2)
+uvicorn main:socket_app --host 127.0.0.1 --port 8000
+```
+
+**systemd service** (`/etc/systemd/system/assessment-backend.service`):
+```ini
+[Unit]
+Description=Assessment Hub Backend
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/YOUR_REPO/backend
+EnvironmentFile=/home/ubuntu/YOUR_REPO/backend/.env
+ExecStart=/home/ubuntu/YOUR_REPO/backend/.venv/bin/uvicorn main:socket_app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable assessment-backend
+sudo systemctl start assessment-backend
+```
+
+### Frontend build
+
+```bash
+cd client
+cp .env.example .env
+# Set VITE_API_URL=https://your-domain.com
+npm install
+npm run build   # output: dist/
+```
+
+### Nginx config
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    # Serve React SPA
+    root /home/ubuntu/YOUR_REPO/client/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy API + Socket.IO to FastAPI
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # Socket.IO long-polling and WebSocket
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 300s;
+    }
+}
+
+server {
+    listen 80;
+    server_name your-domain.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+---
+
+## 5. Environment Variables Reference
+
+### Backend (`backend/.env`)
+
+Copy `backend/.env.example` to `backend/.env` and fill in all values.
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | **Yes** | `mysql://USER:PASSWORD@HOST:PORT/DB_NAME` |
+| `SECRET_KEY` | **Yes** | JWT signing key — generate with `openssl rand -hex 32` |
+| `PRESCAN_SECRET_KEY` | **Yes** | Prescan session signing key — generate separately |
+| `GROQ_API_KEY` | **Yes** | Primary Groq API key from [console.groq.com](https://console.groq.com) |
+| `GROQ_API_KEY_1` ... `GROQ_API_KEY_15` | No | Additional Groq keys for rotation (recommended in prod) |
+| `GROQ_MODEL` | No | Default: `meta-llama/llama-4-scout-17b-16e-instruct` |
+| `GROQ_FALLBACK_MODELS` | No | Comma-separated fallback model IDs |
+| `PORT` | No | Default: `8000`. Render/Railway set this automatically |
+| `ALLOWED_ORIGINS` | **Yes** | Comma-separated frontend origins, e.g. `https://app.example.com` |
+| `FRONTEND_URL` | **Yes** | Public HTTPS URL of the frontend (used for prescan mobile QR links) |
+| `GOOGLE_OAUTH_CLIENT_ID` | No | Google Web Client ID (leave empty to disable Google Sign-In) |
+| `OTP_EXPIRY_MINUTES` | No | Default: `10` |
+| `OTP_MAX_FAILED_ATTEMPTS` | No | Default: `5` |
+| `SMTP_HOST` | No | SMTP server hostname. If empty, OTPs are logged to console |
+| `SMTP_PORT` | No | Default: `587` |
+| `SMTP_USER` | No | SMTP username |
+| `SMTP_PASSWORD` | No | SMTP password |
+| `SMTP_FROM` | No | Sender address, e.g. `noreply@example.com` |
+| `SMTP_USE_TLS` | No | Default: `true` |
+| `SUPER_ADMIN_SEED_ENABLED` | No | `true` to auto-create super admins on boot |
+| `SUPER_ADMIN_ROTATE_PASSWORDS_ON_STARTUP` | No | `true` to reset passwords every restart |
+| `SUPER_ADMIN_1_ID` | No | Super admin 1 username/ID |
+| `SUPER_ADMIN_1_NAME` | No | Super admin 1 display name |
+| `SUPER_ADMIN_1_EMAIL` | No | Super admin 1 email |
+| `SUPER_ADMIN_1_PASSWORD` | No | Super admin 1 password |
+| `SUPER_ADMIN_2_*` | No | Same fields for super admin 2 |
+| `STARTUP_DB_PREFLIGHT` | No | Default: `true`. Set `false` to skip schema checks on boot |
+| `STARTUP_DB_PREFLIGHT_TENANTS` | No | Default: `false` |
+| `STARTUP_TENANT_SCHEMA_RECONCILE` | No | Default: `true` |
+
+### Frontend (`client/.env`)
+
+Copy `client/.env.example` to `client/.env`. These are baked into the build.
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_API_URL` | **Yes** | Backend origin, e.g. `https://YOUR-BACKEND.onrender.com` |
+| `VITE_GOOGLE_CLIENT_ID` | No | Same value as `GOOGLE_OAUTH_CLIENT_ID` in backend |
+| `VITE_PUBLIC_APP_URL` | No | Public HTTPS frontend URL (needed for ngrok tunnels) |
+| `VITE_STRICT_CROSS_ORIGIN_ISOLATION` | No | Default: `false`. Do not enable — it breaks Google Sign-In |
+
+---
+
+## 6. Database Setup
+
+The backend creates all tables automatically on first startup. You only need to provide a working `DATABASE_URL`.
+
+### TiDB Cloud (Free — currently used)
+
+1. Sign up at [tidbcloud.com](https://tidbcloud.com)
+2. Create a **Serverless** cluster
+3. Go to **Connect** → copy the connection string
+4. Use it as `DATABASE_URL=mysql://user:password@gateway.tidbcloud.com:4000/your_db`
+
+### PlanetScale
+
+1. Create a database at [planetscale.com](https://planetscale.com)
+2. Create a branch (use `main`)
+3. Go to **Connect** → **Connect with** → **General** → copy the URL
+4. PlanetScale uses `pscale://` — use the MySQL-compatible URL format shown
+
+### AWS RDS / GCP Cloud SQL
+
+Standard MySQL 8.x. Ensure the DB server is accessible from your backend host (VPC peering or public endpoint with firewall rules).
+
+---
+
+## 7. Google OAuth Setup
+
+Skip this section if you do not need Google Sign-In.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → **APIs & Services** → **Credentials**
+2. Create an **OAuth 2.0 Client ID** → **Web application**
+3. Add **Authorized JavaScript origins**:
+   - `https://YOUR-FRONTEND.onrender.com`
+   - `http://localhost:5173` (for local dev)
+4. Add **Authorized redirect URIs**:
+   - `https://YOUR-FRONTEND.onrender.com`
+   - `http://localhost:5173`
+5. Copy the **Client ID** → set as `GOOGLE_OAUTH_CLIENT_ID` (backend) and `VITE_GOOGLE_CLIENT_ID` (frontend)
+
+---
+
+## 8. Local Development
+
+### Backend
 
 ```bash
 cd backend
 python -m venv .venv
+
+# Windows
 .venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
+cp .env.example .env   # fill in DATABASE_URL, SECRET_KEY, GROQ_API_KEY
 uvicorn main:socket_app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## 15.2 Frontend
+Backend is now at `http://localhost:8000`. Health check: `http://localhost:8000/api/health`
+
+### Frontend
 
 ```bash
 cd client
 npm install
+cp .env.example .env   # set VITE_API_URL=http://localhost:8000
 npm run dev
 ```
 
-## 15.3 HTTPS Tunnel for Prescan/OAuth
+Frontend is now at `http://localhost:5173`. The Vite dev server proxies `/api` and `/socket.io` to port 8000.
 
-For real-device prescan:
-1. Start backend and frontend.
-2. Tunnel frontend (`ngrok http 5173`).
-3. Set backend `FRONTEND_URL` and frontend `VITE_PUBLIC_APP_URL`/`VITE_API_URL` to tunnel origin.
-4. Restart backend and frontend.
+### HTTPS tunnel for prescan / Google OAuth on mobile
 
-## 16. End-to-End QA Workflows
+```bash
+# Start ngrok (or any tunnel)
+ngrok http 5173
 
-## Common Phase (All Tiers)
+# Then update both .env files:
+# backend/.env
+FRONTEND_URL=https://YOUR-SUBDOMAIN.ngrok-free.app
+ALLOWED_ORIGINS=https://YOUR-SUBDOMAIN.ngrok-free.app
 
-1. Login as super admin.
-2. Create organization with selected subscription tier.
-3. Login as org admin and complete first-login setup.
-4. Configure tenant DB and verify status is active.
+# client/.env
+VITE_API_URL=http://localhost:8000
+VITE_PUBLIC_APP_URL=https://YOUR-SUBDOMAIN.ngrok-free.app
+```
 
-## Free Trial
+Restart both servers after changing `.env` files.
 
-Validate:
-- limited RBAC controls (no custom role creation)
-- content creator can manage allowed test types only
-- student can attempt assigned tests and view own submissions
-- blocked actions are hidden and denied
-
-## Basic
-
-Validate:
-- custom roles creation enabled
-- broader assessment creation/evaluation flows
-- staff workflow in `/role` and learner workflow in `/student`
-
-## Pro
-
-Validate:
-- all monitoring, override/manage, and export capabilities
-- full analytics and operations surfaces
-
-## 17. Testing and Validation
-
-Backend tests:
+### Run backend tests
 
 ```bash
 cd backend
 pytest -q
 ```
 
-DB preflight utility:
+### DB preflight utility
 
 ```bash
 cd backend
 python scripts/db_preflight.py --db-url "mysql://user:password@host:port/database"
 ```
 
-Suggested verification after config updates:
-- `/api/health`
-- auth login + verify route
-- tenant DB status route
-- one assessment create/start/submit cycle
-- live monitoring socket connection
+---
 
-## 18. Security Notes
+## 9. Post-Deployment Checklist
 
-- Keep all secrets in environment variables only.
-- Rotate keys if leaked.
-- Restrict CORS to known domains in production.
-- Restrict Google OAuth origins/redirect URIs.
-- Use HTTPS in production for auth, prescan, and proctoring flows.
+After deploying, verify each item:
 
-## 19. Troubleshooting
-
-- `401 Missing bearer token`: protected route called without auth header.
-- `401 Invalid or expired token`: token expired/signature mismatch.
-- `403 Organization context mismatch`: token org and request org differ.
-- `503 Tenant database is not configured`: org tenant DB setup incomplete.
-- `500 Tenant database schema is incomplete`: run schema reconciliation/preflight.
-- Prescan mobile issues: verify HTTPS origin and `FRONTEND_URL` consistency.
-- Groq failures: verify key validity, model IDs, and fallback configuration.
-
-## 20. API Endpoint Reference Table
-
-Grouped by backend route modules (prefix + key endpoints).
-
-| Module | Prefix | Key Endpoints | Typical Roles |
-|---|---|---|---|
-| Auth | `/api` | `/auth/login`, `/auth/google`, `/auth/verify-otp`, `/auth/complete-first-login`, `/auth/verify` | All |
-| Admin Users | `/api/admin` | `/users` (GET/POST), `/users/{user_id}` (PUT/DELETE), `/users/{user_id}/reset-password`, `/users/{user_id}/status` | Super Admin, Org Admin |
-| RBAC + Org Management | `/api` | `/rbac/permissions`, `/platform/organizations`, `/platform/organizations/{org_id}/status`, `/orgs/{org_id}/roles`, `/orgs/{org_id}/users`, `/orgs/{org_id}/tenant-db` | Super Admin, Org Admin |
-| Public | `/api/public` | `/config` | Public |
-| Health | `/api` | `/health` | Public |
-| Problems | `/api` | `/problems` (GET/POST), `/problems/{problem_id}` (DELETE), `/students/{student_id}/problems` | Staff, Students |
-| Tasks | `/api` | `/tasks` (GET/POST), `/tasks/{task_id}` (DELETE), `/students/{student_id}/tasks` | Staff, Students |
-| Submissions | `/api` | `/submissions` (GET/POST), `/submissions/proctored`, `/submissions/{submission_id}/feedback`, `/submissions/{submission_id}/escalate` | Staff, Students |
-| Code Execution | `/api` | `/run` | Staff, Students |
-| Hints | `/api` | `/hints` | Staff, Students |
-| Chat | `/api` | `/chat` | Staff, Students |
-| Messaging | `/api` | `/messages/{user_id}`, `/messages/{user_id}/{other_user_id}`, `/messages` (POST) | Staff, Students |
-| AI Content | `/api/ai` | `/generate-problem`, `/generate-coding-problem`, `/generate-sql-problem`, `/generate-aptitude`, `/chat` | Staff |
-| Analytics | `/api/analytics` | `/admin`, `/mentor/{mentor_id}`, `/student/{student_id}`, `/topics`, `/plagiarism`, `/time-to-solve`, `/export/json`, `/export/csv`, `/audit-logs`, `/system-errors` | Staff, Admin |
-| Skill Tests | `/api/skill-tests` | `/create`, `/all`, `/student/available`, `/{test_id}/allocations`, `/{test_id}/start`, `/mcq/*`, `/coding/*`, `/sql/*`, `/interview/*`, `/report/{attempt_id}`, `/admin/all-submissions` | Staff, Students, Admin |
-| Aptitude | `/api` | `/aptitude` (GET/POST), `/aptitude/{test_id}`, `/aptitude/{test_id}/submit`, `/aptitude/{test_id}/allocate-students`, `/aptitude/proctoring/log`, `/aptitude-submissions` | Staff, Students |
-| Global Tests | `/api` | `/global-tests` (GET/POST), `/global-tests/{test_id}` (GET/PUT/DELETE), `/global-tests/{test_id}/allocations`, `/global-tests/{test_id}/submit`, `/global-test-submissions`, `/global-tests/proctoring/log` | Staff, Students |
-| Communication | `/api/communication` | `/moduleA|B|C|D`, `/tests/create`, `/tests/all`, `/tests/{test_id}/allocations`, `/tests/student/available`, `/tests/{test_id}/start`, `/tests/attempt/{attempt_id}/submit-module`, `/tests/attempt/{attempt_id}/finish`, `/proctoring/log` | Staff, Students |
-| Proctor Agent | `/api/proctor-agent` | `/dashboard`, `/analyses`, `/analyze`, `/analyze/batch`, `/report`, `/terminate`, `/warn`, `/clear-flag`, `/analysis/{analysis_id}` | Admin, Mentors |
-| Behavior Agent | `/api/behavior` | `/log-events`, `/analyze`, `/report`, `/sessions`, `/dashboard`, `/analyses`, `/analysis/{analysis_id}`, `/session/{session_id}`, `/clear` | Admin, Mentors |
-| Environment Scan | `/api/prescan` | `/exams`, `/sessions` (POST/GET), `/sessions/{session_id}`, `/scans/{scan_id}`, `/scans/{scan_id}/retry`, `/scans/{scan_id}/frames`, `/mobile/{token}` | Students, Staff |
-| Attachments | `/api/attachments` | `/upload` | Staff, Students |
-
-Notes:
-- Role access is enforced by token + permission checks; “Typical Roles” is a usage guide, not a bypass rule.
-- Many modules include additional endpoints; this table lists high-signal operational routes.
-
-## 21. Maintenance Checklist
-
-Whenever code changes in routes/services/config:
-1. Update this README sections affected by flow changes.
-2. Re-verify endpoint names and prefixes.
-3. Re-verify startup flags and env variables.
-4. Re-run backend tests and DB preflight.
-5. Confirm tier-based gating remains aligned with RBAC permissions.
+- [ ] `GET /api/health` returns `{"status": "ok"}`
+- [ ] Login page loads at the frontend URL
+- [ ] Email/password login works (check server logs if OTP is not emailed)
+- [ ] Super admin can log in (seeded from `SUPER_ADMIN_*` env vars)
+- [ ] Create an organization → set up tenant DB → status shows active
+- [ ] Create an org admin user → log in as org admin → complete first login
+- [ ] Create and allocate one assessment → student can attempt and submit
+- [ ] Live monitoring socket connects (check browser console for WebSocket frames)
+- [ ] Prescan flow works end-to-end on mobile (requires HTTPS + correct `FRONTEND_URL`)
+- [ ] AI content generation works (Groq key valid, model ID correct)
+- [ ] Google Sign-In button appears and completes flow (if configured)
 
 ---
 
-Last updated: May 22, 2026.
+## 10. Architecture Deep Dive
+
+### Runtime lifecycle (backend startup)
+
+1. Configure structured logging
+2. Initialize async MySQL connection pools
+3. Create platform DB tables (users, orgs, RBAC, audit, etc.)
+4. Reconcile active tenant DB schemas (if `STARTUP_TENANT_SCHEMA_RECONCILE=true`)
+5. Run DB preflight checks (if `STARTUP_DB_PREFLIGHT=true`)
+6. Seed super-admin accounts (if `SUPER_ADMIN_SEED_ENABLED=true`)
+7. Mount all 22 API routers + `/uploads` static path
+8. Start ASGI server as `socket_app`
+
+### Request path
+
+```
+HTTP Request
+    → CORS middleware
+    → SecurityHeadersMiddleware
+    → LoggingMiddleware (request ID, timing)
+    → RateLimitMiddleware
+    → JWT validation (extracts user_id, org_id → injected as x-user-id, x-org-id)
+    → Tenant DB resolution (per org_id, validates org is active)
+    → Route handler
+```
+
+### Multi-tenancy
+
+- **Platform DB**: users, organizations, roles, permissions, audit logs
+- **Tenant DB** (one per org): all assessment content, submissions, proctoring data
+- Tenant DB URL is stored in the platform DB per organization
+- Super admin sets up the tenant DB connection via `/api/orgs/{org_id}/tenant-db`
+
+### Assessment types
+
+| Type | Route prefix | Sections |
+|---|---|---|
+| Coding problems | `/api/problems`, `/api/submissions` | Code execution, hints |
+| Skill tests | `/api/skill-tests` | MCQ, coding, SQL, interview |
+| Aptitude tests | `/api/aptitude` | MCQ |
+| Global tests | `/api/global-tests` | Multi-section MCQ |
+| Communication | `/api/communication` | Modules A, B, C, D |
+
+### AI integration (Groq)
+
+- Provider: Groq Chat Completions API (`backend/services/ai_service.py`)
+- Key rotation: cycles through `GROQ_API_KEY`, `GROQ_API_KEY_1` … `GROQ_API_KEY_15`
+- Model fallback: if primary model unavailable, tries `GROQ_FALLBACK_MODELS` list
+- Features: content generation, hints, chat, AI interview, behavior analysis reports
+
+### Proctoring
+
+- Client-side: TensorFlow.js + COCO-SSD object detection, camera monitoring
+- Server-side: Socket.IO rooms scoped per org/mentor/student
+- `useProctoring.js` emits violation events → backend routes to proctor dashboard
+- Environment prescan: mobile QR handoff, frame-by-frame room scan validation
+
+### Socket.IO events
+
+Client → Server:
+- `join_monitoring` — admin/mentor subscribes to live alerts
+- `join_student_session` — student registers for session tracking
+- `submission_started`, `submission_completed`, `proctoring_violation`, `progress_update`, `test_failed`
+
+Server → Client:
+- `monitoring_connected`, `live_update`, `live_alert`, `monitoring_error`
+- Prescan: `prescan_status`, `prescan_result`, `prescan_frame_ack`
+
+---
+
+## 11. API Reference
+
+| Module | Prefix | Key endpoints |
+|---|---|---|
+| Auth | `/api` | `/auth/login` `/auth/google` `/auth/verify-otp` `/auth/complete-first-login` `/auth/verify` |
+| Health | `/api` | `/health` |
+| Admin users | `/api/admin` | `/users` `/users/{id}` `/users/{id}/reset-password` `/users/{id}/status` |
+| Organizations | `/api/platform` | `/organizations` `/organizations/{id}/status` |
+| RBAC | `/api` | `/rbac/permissions` `/orgs/{id}/roles` `/orgs/{id}/users` `/orgs/{id}/tenant-db` |
+| Analytics | `/api/analytics` | `/admin` `/mentor/{id}` `/student/{id}` `/export/json` `/export/csv` `/audit-logs` |
+| Problems | `/api` | `/problems` `/submissions` `/run` `/hints` `/chat` |
+| Skill tests | `/api/skill-tests` | `/create` `/all` `/student/available` `/{id}/start` `/report/{attempt_id}` |
+| Aptitude | `/api` | `/aptitude` `/aptitude/{id}/submit` `/aptitude/{id}/allocate-students` |
+| Global tests | `/api` | `/global-tests` `/global-tests/{id}/submit` `/global-test-submissions` |
+| Communication | `/api/communication` | `/tests/create` `/tests/all` `/tests/{id}/start` `/tests/attempt/{id}/finish` |
+| Proctor agent | `/api/proctor-agent` | `/dashboard` `/analyze` `/terminate` `/warn` `/clear-flag` |
+| Behavior agent | `/api/behavior` | `/log-events` `/analyze` `/report` `/sessions` `/dashboard` |
+| Prescan | `/api/prescan` | `/sessions` `/scans/{id}/frames` `/mobile/{token}` |
+| AI | `/api/ai` | `/generate-problem` `/generate-aptitude` `/chat` |
+| Attachments | `/api/attachments` | `/upload` |
+| Public | `/api/public` | `/config` |
+
+Full interactive docs available at `http://localhost:8000/docs` (Swagger UI) when running locally.
+
+---
+
+## 12. Troubleshooting
+
+| Error | Cause | Fix |
+|---|---|---|
+| `401 Missing bearer token` | Protected route called without auth header | Log in first; token sent automatically by frontend |
+| `401 Invalid or expired token` | Token expired or wrong `SECRET_KEY` | Re-login; verify `SECRET_KEY` matches what issued the token |
+| `403 Organization context mismatch` | Token org ≠ request org | Use the correct org account |
+| `503 Tenant database is not configured` | Org tenant DB not set up | Super admin must configure tenant DB for that org |
+| `500 Tenant database schema is incomplete` | Tenant DB exists but missing tables | Restart backend — reconciliation runs on startup |
+| Backend crashes on boot | `DATABASE_URL` invalid or DB unreachable | Check DB URL, firewall rules, DB is running |
+| Google Sign-In fails | Wrong `GOOGLE_OAUTH_CLIENT_ID` or origin not allowlisted | Check Google Cloud Console authorized origins |
+| Prescan QR link doesn't work on mobile | `FRONTEND_URL` not set to public HTTPS URL | Set `FRONTEND_URL` to your HTTPS domain and restart backend |
+| Groq errors in AI features | Invalid key, rate limited, or wrong model ID | Check key at console.groq.com; add more keys (`GROQ_API_KEY_1..15`) |
+| Socket.IO not connecting | CORS mismatch or missing WebSocket support | Ensure `ALLOWED_ORIGINS` includes the frontend origin; nginx must proxy `/socket.io/` with upgrade headers |
+| Render free plan sleeps | Free web services sleep after inactivity | Upgrade to Starter plan ($7/mo) or use UptimeRobot to ping `/api/health` every 5 min |
+
+### Generating secure secrets
+
+```bash
+# On Linux/macOS
+openssl rand -hex 32
+
+# On Windows PowerShell
+-join ((1..32) | ForEach-Object { '{0:X2}' -f (Get-Random -Max 256) })
+```
+
+---
+
+## Security checklist before going live
+
+- [ ] `SECRET_KEY` and `PRESCAN_SECRET_KEY` are unique random values (not the example defaults)
+- [ ] `ALLOWED_ORIGINS` lists only your production frontend URL (not `*`)
+- [ ] Super admin passwords changed from defaults
+- [ ] `DATABASE_URL` credentials are production-specific (not dev credentials)
+- [ ] HTTPS enforced on both frontend and backend domains
+- [ ] Google OAuth origins restricted to production domains only
+- [ ] `.env` files not committed to git (verify with `git status`)
+
+---
+
+Last updated: May 23, 2026.
