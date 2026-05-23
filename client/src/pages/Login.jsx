@@ -469,9 +469,7 @@ function Login() {
                                                 </>
                                             )}
                                         </button>
-                                        <p className="google-hint" style={{ marginTop: '1rem' }}>
-                                            If email did not arrive, confirm SMTP settings on the server or check the API log for the code in development.
-                                        </p>
+                                        
                                     </form>
                                 </>
                             )}
