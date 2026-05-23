@@ -800,6 +800,9 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
         raise HTTPException(403, "Permission denied")
     if not body.studentIds:
         raise HTTPException(400, "studentIds must be a non-empty array")
+    student_ids = [str(sid or "").strip() for sid in body.studentIds if str(sid or "").strip()]
+    if not student_ids:
+        raise HTTPException(400, "studentIds must be a non-empty array")
 
     pool = await get_pool()
 
@@ -813,15 +816,34 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
                 raise HTTPException(404, "Test not found")
             if trow and trow.get("title"):
                 test_title = trow["title"]
+            placeholders = ",".join(["%s"] * len(student_ids))
+            await cur.execute(
+                f"""
+                SELECT DISTINCT u.id
+                FROM users u
+                JOIN user_role_assignments ura ON ura.user_id = u.id
+                JOIN roles r ON r.id = ura.role_id
+                WHERE u.id IN ({placeholders})
+                  AND u.role = 'org_user'
+                  AND (
+                    LOWER(TRIM(r.slug)) = 'exam-taker'
+                    OR LOWER(TRIM(r.name)) = 'exam taker'
+                  )
+                """,
+                student_ids,
+            )
+            allowed_ids = {str(r["id"]) for r in (await cur.fetchall() or [])}
+            invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
+            if invalid_ids:
+                raise HTTPException(400, "Only users with Exam Taker role can be allocated")
             await cur.execute("DELETE FROM test_student_allocations WHERE test_id = %s", (test_id,))
 
-            for sid in body.studentIds:
+            for sid in student_ids:
                 await cur.execute(
                     "INSERT INTO test_student_allocations (id, test_id, student_id) VALUES (%s,%s,%s)",
                     (str(uuid.uuid4()), test_id, sid),
                 )
-            placeholders = ",".join(["%s"] * len(body.studentIds))
-            await cur.execute(f"SELECT name, email FROM users WHERE id IN ({placeholders})", body.studentIds)
+            await cur.execute(f"SELECT name, email FROM users WHERE id IN ({placeholders})", student_ids)
             rows = await cur.fetchall()
             emails = [(r.get("name") or "User", r.get("email") or "") for r in (rows or []) if (r.get("email") or "").strip()]
 
@@ -842,7 +864,7 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
         except Exception:
             pass
 
-    return {"success": True, "allocatedCount": len(body.studentIds)}
+    return {"success": True, "allocatedCount": len(student_ids)}
 
 
 @router.get("/aptitude/{test_id}/allocated-students")
