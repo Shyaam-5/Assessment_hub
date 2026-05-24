@@ -278,9 +278,11 @@ function Login() {
                     <Brain className="logo-icon-svg" size={28} />
                     <span className="logo-text">Assessment Hub</span>
                 </div>
-                <button className="nav-login-btn" onClick={() => setShowLoginPanel(true)}>
-                    Login <ArrowRight size={16} />
-                </button>
+                {!showLoginPanel && (
+                    <button className="nav-login-btn" onClick={() => setShowLoginPanel(true)}>
+                        Login <ArrowRight size={16} />
+                    </button>
+                )}
             </nav>
 
             {/* Main Content */}
@@ -300,9 +302,11 @@ function Login() {
                         with real-time monitoring, intelligent cheating detection, and
                         comprehensive analytics.
                     </p>
-                    <button className="cta-button" onClick={() => setShowLoginPanel(true)}>
-                        Get Started <ArrowRight size={18} />
-                    </button>
+                    {!showLoginPanel && (
+                        <button className="cta-button" onClick={() => setShowLoginPanel(true)}>
+                            Get Started <ArrowRight size={18} />
+                        </button>
+                    )}
                 </div>
 
                 {/* Right - Dynamic Content (Illustration or Login Card) */}
