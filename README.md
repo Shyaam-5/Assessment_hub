@@ -6,20 +6,111 @@ Comprehensive full-stack assessment and proctoring platform with multi-tenant RB
 
 ---
 
+## About the Project
+
+AI Assessment Hub is a multi-module online assessment platform for organizations.
+
+It supports:
+- Role-based workspaces (`admin`, `organization_admin`, `org_user`, learner flows)
+- Multiple assessment types (Global Tests, Aptitude, Skill, Communication)
+- Exam allocation and permission-based access control
+- Proctoring features (tab switch tracking, camera checks, monitoring dashboards)
+- AI-assisted features (question/content generation, analysis workflows)
+- Multi-tenant architecture with one platform DB plus tenant DB per organization
+
+Core folders:
+- `client/` - React + Vite frontend SPA
+- `backend/` - FastAPI + Socket.IO API and services
+
+---
+
+## How to Setup (Local)
+
+### 1) Prerequisites
+
+- Python `3.11+`
+- Node.js `18+` and npm
+- MySQL-compatible database (TiDB / MySQL / PlanetScale, etc.)
+
+### 2) Backend Setup
+
+```bash
+cd backend
+python -m venv .venv
+```
+
+Windows PowerShell:
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+macOS/Linux:
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+Create `backend/.env` and set at least:
+```env
+DATABASE_URL=mysql://USER:PASSWORD@HOST:PORT/DB_NAME
+SECRET_KEY=replace_with_long_random_value
+PRESCAN_SECRET_KEY=replace_with_long_random_value
+GROQ_API_KEY=your_groq_key
+ALLOWED_ORIGINS=http://localhost:5173
+FRONTEND_URL=http://localhost:5173
+```
+
+Run backend:
+```bash
+uvicorn main:socket_app --host 0.0.0.0 --port 8000 --reload
+```
+
+Backend docs:
+- Swagger UI: `http://localhost:8000/docs`
+
+### 3) Frontend Setup
+
+```bash
+cd client
+npm install
+```
+
+Create `client/.env`:
+```env
+VITE_API_URL=http://localhost:8000
+VITE_GOOGLE_CLIENT_ID=your_google_client_id
+```
+
+Run frontend:
+```bash
+npm run dev
+```
+
+Frontend runs at:
+- `http://localhost:5173`
+
+### 4) First Login Notes
+
+- On first startup, backend initializes core tables automatically.
+- Seeded super admin users depend on `SUPER_ADMIN_*` env vars.
+- Organization users and roles are managed from Admin/RBAC screens after login.
+
+---
+
 ## Table of Contents
 
 1. [Architecture](#1-architecture)
-2. [Deployment — Render.com (Recommended)](#2-deployment--rendercom-recommended)
-3. [Deployment — Railway](#3-deployment--railway)
-4. [Deployment — VPS / Self-Hosted](#4-deployment--vps--self-hosted)
-5. [Environment Variables Reference](#5-environment-variables-reference)
-6. [Database Setup (TiDB Cloud / PlanetScale / RDS)](#6-database-setup)
-7. [Google OAuth Setup](#7-google-oauth-setup)
-8. [Local Development](#8-local-development)
-9. [Post-Deployment Checklist](#9-post-deployment-checklist)
-10. [Architecture Deep Dive](#10-architecture-deep-dive)
-11. [API Reference](#11-api-reference)
-12. [Troubleshooting](#12-troubleshooting)
+2. [Environment Variables Reference](#5-environment-variables-reference)
+3. [Database Setup (TiDB Cloud / PlanetScale / RDS)](#6-database-setup)
+4. [Google OAuth Setup](#7-google-oauth-setup)
+5. [Local Development](#8-local-development)
+6. [Architecture Deep Dive](#10-architecture-deep-dive)
+7. [API Reference](#11-api-reference)
+8. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -47,267 +138,6 @@ Comprehensive full-stack assessment and proctoring platform with multi-tenant RB
 - Multi-tenant: one platform DB + one MySQL DB schema per organization
 - Groq key rotation: up to 16 keys cycled automatically (`GROQ_API_KEY` + `GROQ_API_KEY_1..15`)
 - JWT-authenticated REST + Socket.IO with org-scoped rooms
-
----
-
-## 2. Deployment — Render.com (Recommended)
-
-Render supports both the FastAPI backend (as a Web Service) and the React frontend (as a Static Site) on a free/paid plan. The `client/render.yaml` SPA rewrite rule is already committed.
-
-### Step 1 — Database
-
-Provision a MySQL-compatible database **before** deploying the app. Options:
-
-| Provider | Notes |
-|---|---|
-| [TiDB Cloud](https://tidbcloud.com) (free tier) | MySQL-compatible, serverless, already used in dev |
-| [PlanetScale](https://planetscale.com) | Serverless MySQL, generous free tier |
-| [Aiven for MySQL](https://aiven.io) | Free 1-node MySQL |
-| AWS RDS / GCP Cloud SQL | Production-grade, requires paid plan |
-
-Copy the connection string — you will need it as `DATABASE_URL`:
-
-```
-mysql://USER:PASSWORD@HOST:PORT/DATABASE_NAME
-```
-
-### Step 2 — Deploy the Backend (Web Service)
-
-1. Go to [render.com](https://render.com) → **New** → **Web Service**
-2. Connect your GitHub repository
-3. Set the following in Render's UI:
-
-| Setting | Value |
-|---|---|
-| **Root Directory** | `backend` |
-| **Environment** | `Python 3` |
-| **Build Command** | `pip install -r requirements.txt` |
-| **Start Command** | `uvicorn main:socket_app --host 0.0.0.0 --port $PORT` |
-| **Plan** | Starter ($7/mo) or free (limited) |
-
-4. Add all [environment variables](#5-environment-variables-reference) under **Environment** → **Add Environment Variable**
-
-   Minimum required:
-   ```
-   DATABASE_URL=mysql://...
-   SECRET_KEY=<generate a 64-char random string>
-   PRESCAN_SECRET_KEY=<generate a 64-char random string>
-   GROQ_API_KEY=gsk_...
-   ALLOWED_ORIGINS=https://YOUR-FRONTEND.onrender.com
-   FRONTEND_URL=https://YOUR-FRONTEND.onrender.com
-   PORT=10000
-   ```
-
-5. Deploy. On first boot the backend automatically:
-   - Creates all platform DB tables
-   - Reconciles tenant schemas
-   - Seeds super-admin accounts (from `SUPER_ADMIN_*` env vars)
-
-6. Note your backend URL: `https://YOUR-BACKEND.onrender.com`
-
-### Step 3 — Deploy the Frontend (Static Site)
-
-1. Go to Render → **New** → **Static Site**
-2. Connect the same repository
-
-| Setting | Value |
-|---|---|
-| **Root Directory** | `client` |
-| **Build Command** | `npm install && npm run build` |
-| **Publish Directory** | `dist` |
-
-3. Add environment variables:
-
-   ```
-   VITE_API_URL=https://YOUR-BACKEND.onrender.com
-   VITE_GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
-   ```
-
-4. Under **Redirects/Rewrites**, add a rewrite rule (the `render.yaml` in `client/` handles this automatically if you use Render Blueprints):
-
-   | Source | Destination | Action |
-   |---|---|---|
-   | `/*` | `/index.html` | Rewrite |
-
-5. Deploy. Note your frontend URL: `https://YOUR-FRONTEND.onrender.com`
-
-### Step 4 — Update CORS
-
-Go back to your **backend** service on Render → Environment:
-
-```
-ALLOWED_ORIGINS=https://YOUR-FRONTEND.onrender.com
-FRONTEND_URL=https://YOUR-FRONTEND.onrender.com
-```
-
-Trigger a redeploy.
-
----
-
-## 3. Deployment — Railway
-
-### Backend
-
-```toml
-# railway.toml  (create in backend/)
-[build]
-builder = "nixpacks"
-
-[deploy]
-startCommand = "uvicorn main:socket_app --host 0.0.0.0 --port $PORT"
-restartPolicyType = "on_failure"
-```
-
-Add environment variables in the Railway dashboard (see [Section 5](#5-environment-variables-reference)).
-
-### Frontend
-
-```toml
-# railway.toml  (create in client/)
-[build]
-builder = "nixpacks"
-buildCommand = "npm install && npm run build"
-
-[deploy]
-startCommand = "npx serve dist -s -l $PORT"
-```
-
-Or deploy the frontend to Vercel / Netlify instead (easier, free):
-
-**Vercel:**
-```bash
-cd client
-npx vercel --prod
-# Set VITE_API_URL and VITE_GOOGLE_CLIENT_ID in Vercel project settings
-```
-
-**Netlify:**
-```bash
-cd client
-npx netlify deploy --build --prod --dir dist
-```
-
-Add a `client/_redirects` file (already present in `public/`):
-```
-/*  /index.html  200
-```
-
----
-
-## 4. Deployment — VPS / Self-Hosted
-
-### Requirements
-- Ubuntu 22.04 / Debian 12 (or equivalent)
-- Python 3.11+
-- Node.js 18+
-- Nginx (reverse proxy)
-- SSL certificate (Let's Encrypt via Certbot)
-
-### Backend setup
-
-```bash
-# Clone repo and enter backend
-git clone https://github.com/YOUR_ORG/YOUR_REPO.git
-cd YOUR_REPO/backend
-
-# Create virtualenv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Copy and edit .env
-cp .env.example .env
-nano .env   # fill in all required values
-
-# Run (production — use a process manager like systemd or pm2)
-uvicorn main:socket_app --host 127.0.0.1 --port 8000
-```
-
-**systemd service** (`/etc/systemd/system/assessment-backend.service`):
-```ini
-[Unit]
-Description=Assessment Hub Backend
-After=network.target
-
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/YOUR_REPO/backend
-EnvironmentFile=/home/ubuntu/YOUR_REPO/backend/.env
-ExecStart=/home/ubuntu/YOUR_REPO/backend/.venv/bin/uvicorn main:socket_app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable assessment-backend
-sudo systemctl start assessment-backend
-```
-
-### Frontend build
-
-```bash
-cd client
-cp .env.example .env
-# Set VITE_API_URL=https://your-domain.com
-npm install
-npm run build   # output: dist/
-```
-
-### Nginx config
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-
-    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
-
-    # Serve React SPA
-    root /home/ubuntu/YOUR_REPO/client/dist;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # Proxy API + Socket.IO to FastAPI
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-    }
-
-    # Socket.IO long-polling and WebSocket
-    location /socket.io/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 300s;
-    }
-}
-
-server {
-    listen 80;
-    server_name your-domain.com;
-    return 301 https://$host$request_uri;
-}
-```
-
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
 
 ---
 
@@ -468,24 +298,6 @@ python scripts/db_preflight.py --db-url "mysql://user:password@host:port/databas
 
 ---
 
-## 9. Post-Deployment Checklist
-
-After deploying, verify each item:
-
-- [ ] `GET /api/health` returns `{"status": "ok"}`
-- [ ] Login page loads at the frontend URL
-- [ ] Email/password login works (check server logs if OTP is not emailed)
-- [ ] Super admin can log in (seeded from `SUPER_ADMIN_*` env vars)
-- [ ] Create an organization → set up tenant DB → status shows active
-- [ ] Create an org admin user → log in as org admin → complete first login
-- [ ] Create and allocate one assessment → student can attempt and submit
-- [ ] Live monitoring socket connects (check browser console for WebSocket frames)
-- [ ] Prescan flow works end-to-end on mobile (requires HTTPS + correct `FRONTEND_URL`)
-- [ ] AI content generation works (Groq key valid, model ID correct)
-- [ ] Google Sign-In button appears and completes flow (if configured)
-
----
-
 ## 10. Architecture Deep Dive
 
 ### Runtime lifecycle (backend startup)
@@ -623,3 +435,4 @@ openssl rand -hex 32
 ---
 
 Last updated: May 23, 2026.
+
