@@ -566,6 +566,7 @@ async def list_org_students(request: Request):
                     JOIN user_role_assignments ura ON ura.user_id = u.id
                     JOIN roles r ON r.id = ura.role_id
                     WHERE u.role = 'org_user'
+                      AND ura.is_primary = 1
                       AND (
                         LOWER(TRIM(r.slug)) = 'exam-taker'
                         OR LOWER(TRIM(r.name)) = 'exam taker'
@@ -633,6 +634,7 @@ async def set_test_allocations(test_id: str, request: Request):
                         JOIN roles r ON r.id = ura.role_id
                         WHERE u.id IN ({placeholders})
                           AND u.role = 'org_user'
+                          AND ura.is_primary = 1
                           AND (
                             LOWER(TRIM(r.slug)) = 'exam-taker'
                             OR LOWER(TRIM(r.name)) = 'exam taker'
@@ -880,6 +882,8 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
             "proctoring": normalized_proctoring,
             "resultVisibility": result_visibility,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")

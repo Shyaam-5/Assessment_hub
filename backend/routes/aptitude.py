@@ -825,6 +825,7 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
                 JOIN roles r ON r.id = ura.role_id
                 WHERE u.id IN ({placeholders})
                   AND u.role = 'org_user'
+                  AND ura.is_primary = 1
                   AND (
                     LOWER(TRIM(r.slug)) = 'exam-taker'
                     OR LOWER(TRIM(r.name)) = 'exam taker'

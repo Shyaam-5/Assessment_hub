@@ -226,6 +226,7 @@ async def list_skill_org_students(request: Request):
                 JOIN user_role_assignments ura ON ura.user_id = u.id
                 JOIN roles r ON r.id = ura.role_id
                 WHERE u.role = 'org_user'
+                  AND ura.is_primary = 1
                   AND (
                     LOWER(TRIM(r.slug)) = 'exam-taker'
                     OR LOWER(TRIM(r.name)) = 'exam taker'
@@ -280,6 +281,7 @@ async def set_skill_test_allocations(test_id: int, request: Request):
                     JOIN roles r ON r.id = ura.role_id
                     WHERE u.id IN ({placeholders})
                       AND u.role = 'org_user'
+                      AND ura.is_primary = 1
                       AND (
                         LOWER(TRIM(r.slug)) = 'exam-taker'
                         OR LOWER(TRIM(r.name)) = 'exam taker'
