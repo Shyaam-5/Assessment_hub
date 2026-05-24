@@ -316,6 +316,17 @@ _CORE_DOMAIN_TABLES_SQL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS global_test_allocations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(64) NOT NULL,
+        student_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_global_alloc (test_id, student_id),
+        INDEX idx_gta_test_id (test_id),
+        INDEX idx_gta_student_id (student_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS global_test_submissions (
         id VARCHAR(50) NOT NULL PRIMARY KEY,
         test_id VARCHAR(50) NULL,
