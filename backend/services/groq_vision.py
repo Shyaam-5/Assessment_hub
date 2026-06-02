@@ -8,16 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+import time
 from logging_config import LogConfig
 logger = LogConfig.get_logger(__name__)
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from config import settings
 
 logger = LogConfig.get_logger(__name__)
+_groq_vision_rotation_lock = asyncio.Lock()
+_groq_vision_rotation_index = 0
 
 UNAUTHORIZED_CLASSES = {"cell phone", "laptop", "tablet", "smartwatch", "remote"}
 STUDY_MATERIAL_CLASSES = {"book", "notebook", "paper", "magazine"}
@@ -87,10 +88,9 @@ class GroqVisionService:
     """Groq Vision service for exam environment analysis."""
 
     def __init__(self) -> None:
-        self._api_key = settings.GROQ_API_KEY
         self._model = settings.GROQ_VISION_MODEL  # Must be a vision-capable model
         self._fallback_model = settings.GROQ_FALLBACK_MODEL
-        self._client = None
+        self._clients: Dict[str, Any] = {}
         self._vision_fallback_candidates = [
             m for m in (
                 self._fallback_model,
@@ -100,14 +100,16 @@ class GroqVisionService:
             if m
         ]
 
-    def _get_client(self):
-        if self._client is None:
+    def _get_client(self, api_key: str):
+        client = self._clients.get(api_key)
+        if client is None:
             try:
                 from groq import Groq
-                self._client = Groq(api_key=self._api_key)
+                client = Groq(api_key=api_key)
+                self._clients[api_key] = client
             except ImportError:
                 raise RuntimeError("groq package not installed. Run: pip install groq")
-        return self._client
+        return client
 
     def _create_chat_completion(self, client, model: str, image_b64: str):
         # Keep payload OpenAI-compatible for multimodal Groq vision models.
@@ -135,8 +137,37 @@ class GroqVisionService:
     def _is_decommissioned_error(exc: Exception) -> bool:
         return "model_decommissioned" in str(exc).lower() or "decommissioned" in str(exc).lower()
 
-    def _call_groq_sync(self, image_b64: str) -> Dict[str, Any]:
-        client = self._get_client()
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        retry_tokens = (
+            "429",
+            "rate limit",
+            "too many requests",
+            "timeout",
+            "timed out",
+            "connection reset",
+            "temporarily unavailable",
+            "service unavailable",
+            "internal server error",
+            "bad gateway",
+            "gateway timeout",
+            "api_connection_error",
+        )
+        return any(token in text for token in retry_tokens)
+
+    async def _get_ordered_keys(self) -> List[str]:
+        keys = settings.GROQ_API_KEYS
+        if not keys:
+            raise RuntimeError("No Groq API keys configured.")
+
+        global _groq_vision_rotation_index
+        async with _groq_vision_rotation_lock:
+            start_index = _groq_vision_rotation_index % len(keys)
+            _groq_vision_rotation_index = (_groq_vision_rotation_index + 1) % len(keys)
+        return keys[start_index:] + keys[:start_index]
+
+    def _call_groq_sync(self, image_b64: str, ordered_keys: List[str]) -> Dict[str, Any]:
         candidates: List[str] = []
         for candidate in [self._model, *self._vision_fallback_candidates]:
             if candidate and candidate not in candidates:
@@ -146,22 +177,39 @@ class GroqVisionService:
         response = None
         model_used = self._model
 
-        for idx, candidate in enumerate(candidates):
+        for candidate_index, candidate in enumerate(candidates):
             if not self._is_vision_model(candidate):
                 continue
-            try:
-                response = self._create_chat_completion(client, candidate, image_b64)
-                model_used = candidate
-                if idx > 0:
-                    logger.warning("Groq model fallback: using '%s'.", candidate)
-                self._model = candidate
+            for key_index, api_key in enumerate(ordered_keys):
+                client = self._get_client(api_key)
+                try:
+                    response = self._create_chat_completion(client, candidate, image_b64)
+                    model_used = candidate
+                    if candidate_index > 0:
+                        logger.warning("Groq vision model fallback: using '%s'.", candidate)
+                    if key_index > 0:
+                        logger.warning("Groq vision key fallback: using alternate API key for model '%s'.", candidate)
+                    self._model = candidate
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if self._is_decommissioned_error(exc):
+                        break
+                    if self._is_retryable_error(exc):
+                        backoff_seconds = min(1.5, 0.4 * (key_index + 1))
+                        logger.warning(
+                            "Groq vision transient error with key ...%s on model '%s': %s. Retrying in %.1fs.",
+                            api_key[-5:],
+                            candidate,
+                            exc,
+                            backoff_seconds,
+                        )
+                        time.sleep(backoff_seconds)
+                        continue
+                    raise
+
+            if response is not None:
                 break
-            except Exception as exc:
-                last_exc = exc
-                # Try next only for model-availability issues; fail fast for request-shape issues.
-                if self._is_decommissioned_error(exc):
-                    continue
-                raise
 
         if response is None:
             if last_exc is not None:
@@ -227,7 +275,8 @@ class GroqVisionService:
             image_b64 = image_b64.split(",", 1)[1]
 
         try:
-            result = await asyncio.to_thread(self._call_groq_sync, image_b64)
+            ordered_keys = await self._get_ordered_keys()
+            result = await asyncio.to_thread(self._call_groq_sync, image_b64, ordered_keys)
             parsed = self._parse_groq_response(result.get("raw_text", "{}"))
             verdict = self._build_frame_verdict(frame_index, parsed)
             logger.debug("Frame %d: people=%d flagged=%s", frame_index, verdict.people_count, verdict.is_flagged)
