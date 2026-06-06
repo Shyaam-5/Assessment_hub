@@ -133,8 +133,11 @@ _CORE_DOMAIN_TABLES_SQL = [
         id VARCHAR(50) NOT NULL PRIMARY KEY,
         student_id VARCHAR(50) NULL,
         problem_id VARCHAR(50) NULL,
+        task_id VARCHAR(50) NULL,
         mentor_id VARCHAR(50) NULL,
         code LONGTEXT NULL,
+        submission_type VARCHAR(50) NULL,
+        file_name VARCHAR(255) NULL,
         language VARCHAR(50) NULL,
         output LONGTEXT NULL,
         score INT NULL,
@@ -142,12 +145,24 @@ _CORE_DOMAIN_TABLES_SQL = [
         test_cases_total INT NULL,
         test_cases_passed INT NULL,
         status VARCHAR(30) NULL,
+        feedback LONGTEXT NULL,
+        ai_explanation LONGTEXT NULL,
+        analysis_correctness INT NULL,
+        analysis_efficiency INT NULL,
+        analysis_code_style INT NULL,
+        analysis_best_practices INT NULL,
+        plagiarism_detected VARCHAR(10) NULL,
+        plagiarism_score DECIMAL(5,2) NULL,
+        copied_from VARCHAR(50) NULL,
+        copied_from_name VARCHAR(255) NULL,
+        tab_switches INT NULL,
+        integrity_violation VARCHAR(10) NULL,
         submitted_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
         execution_time_ms INT NULL,
         memory_kb INT NULL,
-        plagiarism_score DECIMAL(5,2) NULL,
         INDEX idx_submissions_student (student_id),
         INDEX idx_submissions_problem (problem_id),
+        INDEX idx_submissions_task (task_id),
         INDEX idx_submissions_mentor (mentor_id)
     )
     """,
@@ -510,6 +525,71 @@ _CORE_DOMAIN_TABLES_SQL = [
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_prescan_users_email (email)
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS comm_tests (
+        id                  INT AUTO_INCREMENT PRIMARY KEY,
+        title               VARCHAR(255)   NOT NULL,
+        description         TEXT,
+        module_a_sentences  JSON,
+        module_b_sentences  JSON,
+        module_c_topics     JSON,
+        module_d_questions  JSON,
+        module_a_count      INT DEFAULT 5,
+        module_b_count      INT DEFAULT 5,
+        module_c_count      INT DEFAULT 3,
+        module_d_count      INT DEFAULT 5,
+        duration_minutes    INT DEFAULT 60,
+        proctoring_enabled  BOOLEAN DEFAULT TRUE,
+        proctoring_config   JSON,
+        attempt_limit       INT DEFAULT 3,
+        is_active           BOOLEAN DEFAULT TRUE,
+        created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS comm_test_attempts (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        test_id         INT NOT NULL,
+        student_id      VARCHAR(50) NOT NULL,
+        student_name    VARCHAR(100),
+        attempt_number  INT DEFAULT 1,
+        module_a_data   JSON,
+        module_b_data   JSON,
+        module_c_data   JSON,
+        module_d_data   JSON,
+        module_a_score  FLOAT DEFAULT 0,
+        module_b_score  FLOAT DEFAULT 0,
+        module_c_score  FLOAT DEFAULT 0,
+        module_d_score  FLOAT DEFAULT 0,
+        overall_score   FLOAT DEFAULT 0,
+        current_module  VARCHAR(20) DEFAULT 'A',
+        status          VARCHAR(20) DEFAULT 'in_progress',
+        proctoring_violations INT DEFAULT 0,
+        violation_details   JSON,
+        auto_terminated     TINYINT DEFAULT 0,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at    TIMESTAMP NULL,
+        FOREIGN KEY (test_id) REFERENCES comm_tests(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS comm_test_allocations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        test_id INT NOT NULL,
+        student_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_comm_alloc (test_id, student_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS skill_test_allocations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        test_id INT NOT NULL,
+        student_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_skill_alloc (test_id, student_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
 ]
 
@@ -904,6 +984,40 @@ async def ensure_core_domain_tables(pool: "PyMySQLPool | None" = None) -> None:
                 if not await cur.fetchone():
                     await cur.execute(
                         f"ALTER TABLE `{table_name}` ADD COLUMN result_visibility VARCHAR(32) NULL DEFAULT 'immediate'"
+                    )
+
+            # Migrate existing submissions tables that are missing columns added after initial schema
+            _submissions_migrations = [
+                ("task_id",              "VARCHAR(50) NULL"),
+                ("submission_type",      "VARCHAR(50) NULL"),
+                ("file_name",            "VARCHAR(255) NULL"),
+                ("feedback",             "LONGTEXT NULL"),
+                ("ai_explanation",       "LONGTEXT NULL"),
+                ("analysis_correctness", "INT NULL"),
+                ("analysis_efficiency",  "INT NULL"),
+                ("analysis_code_style",  "INT NULL"),
+                ("analysis_best_practices", "INT NULL"),
+                ("plagiarism_detected",  "VARCHAR(10) NULL"),
+                ("copied_from",          "VARCHAR(50) NULL"),
+                ("copied_from_name",     "VARCHAR(255) NULL"),
+                ("tab_switches",         "INT NULL"),
+                ("integrity_violation",  "VARCHAR(10) NULL"),
+            ]
+            for col_name, col_def in _submissions_migrations:
+                await cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'submissions'
+                      AND COLUMN_NAME = %s
+                    LIMIT 1
+                    """,
+                    (col_name,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute(
+                        f"ALTER TABLE `submissions` ADD COLUMN `{col_name}` {col_def}"
                     )
 
 
