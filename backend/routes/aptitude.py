@@ -457,7 +457,11 @@ async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Requ
             user_answer = body.answers.get(q["question_id"])
             options = [q["option_1"], q["option_2"], q["option_3"], q["option_4"]]
             options = [o for o in options if o]
-            correct_text = options[q["correct_answer"]] if q["correct_answer"] < len(options) else ""
+            try:
+                idx = int(q["correct_answer"])
+                correct_text = options[idx] if idx < len(options) else ""
+            except (ValueError, TypeError, IndexError):
+                correct_text = str(q.get("correct_answer") or "")
             is_correct = user_answer == correct_text
             if is_correct:
                 correct_count += 1

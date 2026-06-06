@@ -1298,6 +1298,8 @@ async def start_comm_test(test_id: int, request: Request):
             test = await cur.fetchone()
             if not test:
                 raise HTTPException(404, "Test not found")
+            if not test.get("is_active"):
+                raise HTTPException(400, "This test is not active")
             await cur.execute(
                 "SELECT 1 FROM comm_test_allocations WHERE test_id=%s AND student_id=%s LIMIT 1",
                 (test_id, student_id),
