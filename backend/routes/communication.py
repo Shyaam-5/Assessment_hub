@@ -1,4 +1,4 @@
-﻿"""Communication Skills API routes â€“ integrated from the standalone coms module.
+"""Communication Skills API routes â€“ integrated from the standalone coms module.
 
 Prefix: /api/communication
 Tag: communication
@@ -582,9 +582,9 @@ async def proctoring_status(request: Request, userId: str, sessionId: str = "def
     return {"success": True, "violations": violations}
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  ADMIN: Communication Test Management
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 _COMM_TESTS_TABLE = """
 CREATE TABLE IF NOT EXISTS comm_tests (
@@ -764,13 +764,25 @@ async def _ai_generate_grammar(count: int, topic: str = "") -> list[dict]:
 
 @router.get("/org-students")
 async def list_comm_org_students(request: Request):
-    """Return org users available for test allocation (requires communication.assign)."""
+    """Return exam takers available for test allocation (requires communication.assign)."""
     await _require_comm_permission(request, ["communication.assign"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name"
+                """
+                SELECT DISTINCT u.id, u.name, u.email, u.batch
+                FROM users u
+                JOIN user_role_assignments ura ON ura.user_id = u.id
+                JOIN roles r ON r.id = ura.role_id
+                WHERE u.role = 'org_user'
+                  AND ura.is_primary = 1
+                  AND (
+                    LOWER(TRIM(r.slug)) = 'exam-taker'
+                    OR LOWER(TRIM(r.name)) = 'exam taker'
+                  )
+                ORDER BY u.name
+                """
             )
             rows = await cur.fetchall()
     return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
@@ -1088,6 +1100,7 @@ async def set_comm_test_allocations(test_id: int, request: Request):
     student_ids = data.get("studentIds", [])
     if not isinstance(student_ids, list):
         raise HTTPException(400, "studentIds must be a list")
+    student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1101,14 +1114,34 @@ async def set_comm_test_allocations(test_id: int, request: Request):
                     UNIQUE KEY uniq_comm_alloc (test_id, student_id)
                 )"""
             )
+            if student_ids:
+                placeholders = ",".join(["%s"] * len(student_ids))
+                await cur.execute(
+                    f"""
+                    SELECT DISTINCT u.id
+                    FROM users u
+                    JOIN user_role_assignments ura ON ura.user_id = u.id
+                    JOIN roles r ON r.id = ura.role_id
+                    WHERE u.id IN ({placeholders})
+                      AND u.role = 'org_user'
+                      AND ura.is_primary = 1
+                      AND (
+                        LOWER(TRIM(r.slug)) = 'exam-taker'
+                        OR LOWER(TRIM(r.name)) = 'exam taker'
+                      )
+                    """,
+                    student_ids,
+                )
+                allowed_ids = {str(r["id"]) for r in (await cur.fetchall() or [])}
+                invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
+                if invalid_ids:
+                    raise HTTPException(400, "Only users with Exam Taker role can be allocated")
             await cur.execute("DELETE FROM comm_test_allocations WHERE test_id = %s", (test_id,))
             for sid in student_ids:
-                sid = (sid or "").strip()
-                if sid:
-                    await cur.execute(
-                        "INSERT IGNORE INTO comm_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
-                        (str(_uuid.uuid4()), test_id, sid),
-                    )
+                await cur.execute(
+                    "INSERT IGNORE INTO comm_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
+                    (str(_uuid.uuid4()), test_id, sid),
+                )
         await conn.commit()
 
     audit_logger.log_event(

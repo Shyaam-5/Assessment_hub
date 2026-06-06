@@ -1,4 +1,4 @@
-﻿"""Global test routes: CRUD for tests, questions, submissions, and AI reports."""
+"""Global test routes: CRUD for tests, questions, submissions, and AI reports."""
 
 import json
 import asyncio
@@ -548,10 +548,66 @@ _ALLOC_TABLE_DDL = """
     )
 """
 
+_GLOBAL_TESTS_TABLE_DDL = """
+    CREATE TABLE IF NOT EXISTS global_tests (
+        id VARCHAR(50) NOT NULL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL,
+        difficulty VARCHAR(20) NULL,
+        duration INT NULL,
+        total_questions INT NULL,
+        passing_score INT NULL DEFAULT 60,
+        status VARCHAR(20) NULL DEFAULT 'draft',
+        created_by VARCHAR(50) NULL,
+        created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+        description TEXT NULL,
+        start_time DATETIME NULL,
+        deadline DATETIME NULL,
+        max_attempts INT NULL DEFAULT 1,
+        max_tab_switches INT NULL DEFAULT 3,
+        section_config JSON NULL,
+        proctoring_config JSON NULL,
+        result_visibility VARCHAR(32) NULL DEFAULT 'immediate',
+        INDEX idx_global_tests_created_by (created_by),
+        INDEX idx_global_tests_status (status)
+    )
+"""
+
+_TEST_QUESTIONS_TABLE_DDL = """
+    CREATE TABLE IF NOT EXISTS test_questions (
+        question_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        test_id VARCHAR(50) NULL,
+        section VARCHAR(32) NOT NULL,
+        question_type VARCHAR(32) NULL DEFAULT 'mcq',
+        question TEXT NOT NULL,
+        option_1 TEXT NULL,
+        option_2 TEXT NULL,
+        option_3 TEXT NULL,
+        option_4 TEXT NULL,
+        correct_answer TEXT NULL,
+        test_cases JSON NULL,
+        starter_code TEXT NULL,
+        solution_code TEXT NULL,
+        explanation TEXT NULL,
+        category VARCHAR(100) NULL,
+        difficulty VARCHAR(20) NULL,
+        points INT NULL DEFAULT 1,
+        time_limit INT NULL,
+        INDEX idx_test_questions_test_id (test_id),
+        INDEX idx_test_questions_section (section)
+    )
+"""
+
+
+async def _ensure_global_test_tables(cur) -> None:
+    await cur.execute(_GLOBAL_TESTS_TABLE_DDL)
+    await cur.execute(_TEST_QUESTIONS_TABLE_DDL)
+    await cur.execute(_ALLOC_TABLE_DDL)
+
 
 @router.get("/global-tests/org-students")
 async def list_org_students(request: Request):
-    """Return org students available for test allocation (requires tests.assign)."""
+    """Return exam takers available for test allocation (requires tests.assign)."""
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["tests.assign"]):
         raise HTTPException(403, "Permission denied")
@@ -560,7 +616,19 @@ async def list_org_students(request: Request):
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute(
-                    "SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name"
+                    """
+                    SELECT DISTINCT u.id, u.name, u.email, u.batch
+                    FROM users u
+                    JOIN user_role_assignments ura ON ura.user_id = u.id
+                    JOIN roles r ON r.id = ura.role_id
+                    WHERE u.role = 'org_user'
+                      AND ura.is_primary = 1
+                      AND (
+                        LOWER(TRIM(r.slug)) = 'exam-taker'
+                        OR LOWER(TRIM(r.name)) = 'exam taker'
+                      )
+                    ORDER BY u.name
+                    """
                 )
                 rows = await cur.fetchall()
         return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
@@ -606,16 +674,37 @@ async def set_test_allocations(test_id: str, request: Request):
     student_ids: list = body.get("studentIds", [])
     if not isinstance(student_ids, list):
         raise HTTPException(400, "studentIds must be a list")
+    student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                await _ensure_global_test_tables(cur)
                 await cur.execute(_ALLOC_TABLE_DDL)
+                if student_ids:
+                    placeholders = ",".join(["%s"] * len(student_ids))
+                    await cur.execute(
+                        f"""
+                        SELECT DISTINCT u.id
+                        FROM users u
+                        JOIN user_role_assignments ura ON ura.user_id = u.id
+                        JOIN roles r ON r.id = ura.role_id
+                        WHERE u.id IN ({placeholders})
+                          AND u.role = 'org_user'
+                          AND ura.is_primary = 1
+                          AND (
+                            LOWER(TRIM(r.slug)) = 'exam-taker'
+                            OR LOWER(TRIM(r.name)) = 'exam taker'
+                          )
+                        """,
+                        student_ids,
+                    )
+                    allowed_ids = {str(r[0]) if not isinstance(r, dict) else str(r["id"]) for r in (await cur.fetchall() or [])}
+                    invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
+                    if invalid_ids:
+                        raise HTTPException(400, "Only users with Exam Taker role can be allocated")
                 await cur.execute("DELETE FROM global_test_allocations WHERE test_id = %s", (test_id,))
                 for sid in student_ids:
-                    sid = (sid or "").strip()
-                    if not sid:
-                        continue
                     await cur.execute(
                         "INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
                         (str(uuid.uuid4()), test_id, sid),
@@ -672,6 +761,7 @@ async def list_global_tests(
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await _ensure_global_test_tables(cur)
                 await cur.execute(query, params)
                 rows = await cur.fetchall()
                 test_ids = [str(t.get("id")) for t in (rows or []) if t.get("id")]
@@ -710,6 +800,7 @@ async def get_global_test(test_id: str, request: Request):
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await _ensure_global_test_tables(cur)
                 await cur.execute("SELECT * FROM global_tests WHERE id = %s", (test_id,))
                 t = await cur.fetchone()
                 if not t:
@@ -811,6 +902,7 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                await _ensure_global_test_tables(cur)
                 await cur.execute(
                     """INSERT INTO global_tests
                        (id, title, type, difficulty, duration, total_questions,
@@ -850,6 +942,8 @@ async def create_global_test(body: GlobalTestCreate, request: Request):
             "proctoring": normalized_proctoring,
             "resultVisibility": result_visibility,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")
@@ -1843,5 +1937,6 @@ For CORRECT coding/SQL suggest optimizations. For INCORRECT diagnose the logic g
         raise HTTPException(500, "Internal server error")
 async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
     return await _auth_has_any_permission(user_id, permissions)
+
 
 

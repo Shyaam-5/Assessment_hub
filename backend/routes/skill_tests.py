@@ -1,4 +1,4 @@
-﻿"""Skill Test & Assessment routes â€” ported from Node.js skill_test_routes.js.
+"""Skill Test & Assessment routes â€” ported from Node.js skill_test_routes.js.
 
 Covers: test CRUD, student access, MCQ / Coding / SQL / Interview stages,
 proctoring, reports, and admin operations (28 endpoints total).
@@ -208,19 +208,31 @@ def _calc_sql_stats(attempt: dict) -> dict:
     passed = attempt.get("sql_status") == "completed" or score >= (attempt.get("sql_passing_score") or 0)
     return {"score": score, "solved": solved, "total": total, "passed": passed, "problemDetails": [{"title": p.get("title",""), "solved": bool((subs.get(str(p.get("id"))) or {}).get("passed"))} for p in problems]}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  ADMIN: CREATE / MANAGE
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/org-students")
 async def list_skill_org_students(request: Request):
-    """Return org users available for skill test allocation (requires coding.assign)."""
+    """Return exam takers available for skill test allocation (requires coding.assign)."""
     await _require_skill_permission(request, ["coding.assign"])
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, name, email, batch FROM users WHERE role = 'org_user' ORDER BY name"
+                """
+                SELECT DISTINCT u.id, u.name, u.email, u.batch
+                FROM users u
+                JOIN user_role_assignments ura ON ura.user_id = u.id
+                JOIN roles r ON r.id = ura.role_id
+                WHERE u.role = 'org_user'
+                  AND ura.is_primary = 1
+                  AND (
+                    LOWER(TRIM(r.slug)) = 'exam-taker'
+                    OR LOWER(TRIM(r.name)) = 'exam taker'
+                  )
+                ORDER BY u.name
+                """
             )
             rows = await cur.fetchall()
     return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
@@ -253,19 +265,40 @@ async def set_skill_test_allocations(test_id: int, request: Request):
     student_ids = data.get("studentIds", [])
     if not isinstance(student_ids, list):
         raise HTTPException(400, "studentIds must be a list")
+    student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(_ALLOC_TABLE_DDL)
+            if student_ids:
+                placeholders = ",".join(["%s"] * len(student_ids))
+                await cur.execute(
+                    f"""
+                    SELECT DISTINCT u.id
+                    FROM users u
+                    JOIN user_role_assignments ura ON ura.user_id = u.id
+                    JOIN roles r ON r.id = ura.role_id
+                    WHERE u.id IN ({placeholders})
+                      AND u.role = 'org_user'
+                      AND ura.is_primary = 1
+                      AND (
+                        LOWER(TRIM(r.slug)) = 'exam-taker'
+                        OR LOWER(TRIM(r.name)) = 'exam taker'
+                      )
+                    """,
+                    student_ids,
+                )
+                allowed_ids = {str(r["id"]) for r in (await cur.fetchall() or [])}
+                invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
+                if invalid_ids:
+                    raise HTTPException(400, "Only users with Exam Taker role can be allocated")
             await cur.execute("DELETE FROM skill_test_allocations WHERE test_id = %s", (test_id,))
             for sid in student_ids:
-                sid = (sid or "").strip()
-                if sid:
-                    await cur.execute(
-                        "INSERT IGNORE INTO skill_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
-                        (str(uuid.uuid4()), test_id, sid),
-                    )
+                await cur.execute(
+                    "INSERT IGNORE INTO skill_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
+                    (str(uuid.uuid4()), test_id, sid),
+                )
         await conn.commit()
 
     audit_logger.log_event(
@@ -380,9 +413,9 @@ async def get_test_attempts(test_id: int, request: Request):
             await cur.execute("SELECT * FROM skill_test_attempts WHERE test_id = %s ORDER BY started_at DESC", (test_id,))
             return await cur.fetchall()
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STUDENT: DISCOVER & START
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/student/available")
 async def student_available(studentId: str = Query(...), request: Request = None):
@@ -482,9 +515,9 @@ async def get_attempt(attempt_id: int, request: Request):
     if not a: raise HTTPException(404, "Attempt not found")
     return {**a, "test_skills": _safe_json(a.get("test_skills")), "mcq_questions": _safe_json(a.get("mcq_questions")), "coding_problems": _safe_json(a.get("coding_problems")), "sql_problems": _safe_json(a.get("sql_problems")), "interview_qa": _safe_json(a.get("interview_qa"))}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STAGE 1: MCQ
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/mcq/start/{attempt_id}")
 async def mcq_start(attempt_id: int, request: Request):
@@ -564,9 +597,9 @@ async def mcq_submit(request: Request, body: dict = Body(...)):
         await conn.commit()
     return {"success": True, "score": score, "passed": passed, "correct": correct_count, "total": len(questions), "nextStage": "coding" if passed else None}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STAGE 2: CODING
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/coding/start/{attempt_id}")
 async def coding_start(attempt_id: int, request: Request):
@@ -696,9 +729,9 @@ async def coding_finish(attempt_id: int, request: Request):
         await conn.commit()
     return {"success": True, "score": score, "passed": passed, "solved": submitted, "total": num, "nextStage": "sql" if passed else None}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STAGE 3: SQL
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/sql/start/{attempt_id}")
 async def sql_start(attempt_id: int, request: Request):
@@ -808,7 +841,7 @@ async def sql_evaluate_ep(request: Request, body: dict = Body(...)):
         raise HTTPException(404, "Problem not found")
     evaluation = await evaluate_sql_query(problem, sql_query)
     passed = evaluation.get("passed", False)
-    feedback = evaluation.get("feedback", "âœ… Correct!" if passed else "âŒ Incorrect query.")
+    feedback = evaluation.get("feedback", "âœ… Correct!" if passed else "âŒ Incorrect query.")
     subs = _safe_json(attempt.get("sql_submissions")) or {}
     subs[str(problem_id)] = {"query": sql_query, "submitted_at": datetime.now(timezone.utc).isoformat(), "passed": passed}
     pool = await get_pool()
@@ -852,9 +885,9 @@ async def sql_finish(attempt_id: int, request: Request):
         await conn.commit()
     return {"success": True, "score": score, "passed": passed, "solved": submitted, "total": num, "nextStage": "interview" if passed else None}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STAGE 4: AI INTERVIEW
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/interview/start/{attempt_id}")
 async def interview_start(attempt_id: int, request: Request):
@@ -934,9 +967,9 @@ async def interview_answer(request: Request, body: dict = Body(...)):
     next_q = await generate_interview_question(skills, qa_list, len(qa_list) + 1, total)
     return {"success": True, "evaluation": evaluation, "finished": False, "nextQuestion": next_q, "current": len(qa_list) + 1, "total": total}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  PROCTORING
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 # â”€â”€ Agent analysis trigger (per attempt, in-memory) â”€â”€
 _skill_agent_counter: dict[str, int] = {}
@@ -1058,9 +1091,9 @@ async def proctoring_log(request: Request, body: dict = Body(...)):
     )
     return {"success": True}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  REPORTS & STUDENT SUBMISSIONS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/report/{attempt_id}")
 async def get_report(attempt_id: int, request: Request):
@@ -1092,9 +1125,9 @@ async def student_submissions(request: Request, studentId: str = Query(...)):
             rows = await cur.fetchall()
     return [dict(r, report=_safe_json(r.get("report"))) for r in rows]
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  TERMINATE ATTEMPT (auto-terminate from proctoring violations)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/attempt/{attempt_id}/terminate")
 async def terminate_attempt(attempt_id: int, request: Request, body: dict = Body(...)):
@@ -1118,9 +1151,9 @@ async def terminate_attempt(attempt_id: int, request: Request, body: dict = Body
         await conn.commit()
     return {"success": True, "message": "Attempt terminated"}
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  ADMIN: SUBMISSIONS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/admin/all-submissions")
 async def admin_all_submissions(request: Request):
@@ -1155,4 +1188,3 @@ async def admin_delete_submission(attempt_id: int, request: Request):
     return {"success": True}
 async def _has_any_permission(user_id: str, permissions: list[str]) -> bool:
     return await _auth_has_any_permission(user_id, permissions)
-

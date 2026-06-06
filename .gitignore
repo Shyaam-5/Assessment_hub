@@ -22,3 +22,5 @@ backend/logs/
 .pytest_cache/
 backend/ui_shots/
 backend/backend/
+backend/venv/
+backend/nohup.out
