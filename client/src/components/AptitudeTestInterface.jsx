@@ -231,7 +231,6 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             if (behaviorSendInterval.current) clearInterval(behaviorSendInterval.current)
             flushBehaviorEvents()
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [flushBehaviorEvents])
 
     // Timer countdown

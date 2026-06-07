@@ -118,6 +118,16 @@ export default function TenantRBACManager({ user, superAdminOnly = false, orgAdm
     const [changingPlanOrg, setChangingPlanOrg] = useState(null)
     const [changingPlanValue, setChangingPlanValue] = useState('')
 
+    useEffect(() => {
+        setMessage('')
+    }, [section])
+
+    useEffect(() => {
+        if (!message) return
+        const timeout = setTimeout(() => setMessage(''), 4500)
+        return () => clearTimeout(timeout)
+    }, [message])
+
     const headers = useMemo(() => {
         const h = { 'x-user-id': user?.id || '' }
         const token = localStorage.getItem('authToken') || ''

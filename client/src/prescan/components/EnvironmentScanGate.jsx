@@ -49,7 +49,7 @@ export default function EnvironmentScanGate({ userId, examTitle, onApproved, onC
     if (sessionInitRef.current) return;
     sessionInitRef.current = true;
     createSession();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const sessionToken = session?.session_token ?? null;
   const socketTarget = (() => {

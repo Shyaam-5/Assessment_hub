@@ -62,7 +62,7 @@ export default function ScanDesktopPage() {
     } else {
       setLoadError('No session found. Please start a new scan from the dashboard.');
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const sessionToken = session?.session_token ?? null;
   const socketTarget = (() => {

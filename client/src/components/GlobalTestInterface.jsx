@@ -100,6 +100,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
 
     // Enhanced Proctoring State
     const proctoring = test.proctoring || {}
+    const shouldEnforceFullscreen = proctoring.enabled && proctoring.enforceFullscreen !== false
     const [videoEnabled, setVideoEnabled] = useState(false)
     const [audioEnabled, setAudioEnabled] = useState(false)
     const [mediaStream, setMediaStream] = useState(null)
@@ -256,6 +257,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
     // Handle fullscreen - runs once on mount, cleaned up on unmount
     // Uses submittedRef (synchronous) instead of state to avoid stale closures
     useEffect(() => {
+        if (!shouldEnforceFullscreen) return
         const enterFullscreen = async () => {
             try {
                 if (!document.fullscreenElement && !submittedRef.current) {
@@ -269,9 +271,12 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
 
         // Re-enter fullscreen if user exits during test (proctored tests)
         const handleFullscreenChange = () => {
-            if (!document.fullscreenElement && !submittedRef.current && proctoring.enabled) {
+            if (!document.fullscreenElement && !submittedRef.current) {
                 setWarningMessage('⚠️ Fullscreen mode required! Re-entering...')
                 setShowWarning(true)
+                recordViolation('fullscreen_exit', 'medium')
+                proctoringSocketAdapter.connect()
+                socketService.emitProctoringViolation(user.id, user.name || user.email, 'fullscreen_exit', 'medium', null)
                 setTimeout(() => {
                     if (!submittedRef.current) {
                         enterFullscreen()
@@ -303,8 +308,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                 document.exitFullscreen().catch(() => { })
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []) // Run once on mount — all checks use submittedRef (synchronous)
+    }, []) // Run once on mount; submittedRef keeps fullscreen state synchronous.
 
     useEffect(() => {
         if (result || !totalQuestions) return

@@ -8,6 +8,7 @@
  *   ai_proctored — everything in enhanced + camera/audio, TF.js detection, behavior tracking
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
+import socketService from '@/services/socketService'
 
 const MAX_VIOLATIONS = 10
 
@@ -363,19 +364,16 @@ export function useAgentTermination(enabled, userId, sessionId, onTerminate) {
 
     useEffect(() => {
         if (!enabled) return
-        // Lazy-load socketService to avoid module initialization conflicts
         let cleanup = () => {}
-        import('@/services/socketService').then(({ default: socketService }) => {
-            socketService.connect()
-            if (userId && sessionId) socketService.joinStudentSession(userId, sessionId)
-            socketService.onAgentTerminate((data) => {
-                console.error('[ProctorAgent] TEST TERMINATED BY AGENT:', data)
-                setAgentTerminated(true)
-                setTerminateReason(data?.reason || 'Test terminated by proctor.')
-                onTerminate?.(data)
-            })
-            cleanup = () => socketService.removeListener('agent_terminate')
+        socketService.connect()
+        if (userId && sessionId) socketService.joinStudentSession(userId, sessionId)
+        socketService.onAgentTerminate((data) => {
+            console.error('[ProctorAgent] TEST TERMINATED BY AGENT:', data)
+            setAgentTerminated(true)
+            setTerminateReason(data?.reason || 'Test terminated by proctor.')
+            onTerminate?.(data)
         })
+        cleanup = () => socketService.removeListener('agent_terminate')
         return () => cleanup()
     }, [enabled, userId, sessionId, onTerminate])
 

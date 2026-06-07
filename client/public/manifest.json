@@ -60,7 +60,7 @@
         },
         {
             "name": "Coding Problems",
-            "url": "/student/problems",
+            "url": "/student/assignments",
             "description": "Start solving coding problems"
         }
     ]

@@ -221,7 +221,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
             // Final flush on unmount
             flushBehaviorEvents()
         }
-    }, [proctoring.enabled]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [proctoring.enabled])
 
     // ── Auto-submit and terminate the test (shared by 10/10 and agent paths) ──
     const autoTerminateTest = useCallback(async (reason) => {

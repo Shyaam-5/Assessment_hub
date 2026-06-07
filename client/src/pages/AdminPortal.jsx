@@ -3652,6 +3652,7 @@ function GlobalTestsAdmin() {
         if (!newTest.title.trim()) { alert('Enter test title'); return }
         const totalQ = Object.values(questionsBySection).reduce((sum, arr) => sum + arr.length, 0)
         if (totalQ === 0) { alert('Add questions in sections'); return }
+        let createdTestId = null
         try {
             // Format dates correctly for backend
             let formattedStartTime = null;
@@ -3695,6 +3696,7 @@ function GlobalTestsAdmin() {
             } else {
                 const res = await axios.post(`${API_BASE}/global-tests`, payload)
                 testId = res.data.id
+                createdTestId = testId
                 setPostCreateAction({ type: 'Global test', title: payload.title, testId, message: 'Test created. Next step: allocate learners or keep it draft until ready.' })
             }
             for (const section of GLOBAL_SECTIONS) {
@@ -3716,7 +3718,13 @@ function GlobalTestsAdmin() {
             setProctoringSettings(defaultProctoringSettings)
             fetchTests()
         } catch (e) {
-            alert(e.response?.data?.error || 'Failed to save test')
+            const msg = e.response?.data?.detail || e.response?.data?.error || e.message || 'Failed to save test'
+            if (!editingId && createdTestId) {
+                fetchTests()
+                alert(`Global test created, but failed while saving questions: ${msg}`)
+            } else {
+                alert(msg)
+            }
         }
     }
 

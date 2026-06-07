@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import EnvironmentScanGate from '../prescan/components/EnvironmentScanGate'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, ClipboardList, Code, Send, Trophy, Clock, CheckCircle, XCircle, ChevronRight, Play, Upload, FileText, Trash2, Eye, AlertTriangle, Download, Lightbulb, HelpCircle, Sparkles, Target, Zap, BookOpen, Brain, Award, X, Video, Shield, Search, BarChart3, Flame, Layers, Database, RefreshCw, TrendingUp, Radar, Users, ArrowUpRight, ArrowDownRight, Minus, PieChart, MessageSquare, Github, ExternalLink, Link2 } from 'lucide-react'
 import DashboardLayout from '@/components/DashboardLayout'
 import AptitudeTestInterface from '@/components/AptitudeTestInterface'
@@ -161,6 +161,7 @@ function AccessNotice({ title, message }) {
 }
 
 function UpcomingExamReminders({ user }) {
+    const navigate = useNavigate()
     const [items, setItems] = useState([])
     const [loading, setLoading] = useState(true)
 
@@ -256,7 +257,7 @@ function UpcomingExamReminders({ user }) {
                         <button
                             key={item.id}
                             type="button"
-                            onClick={() => { window.location.href = item.path }}
+                            onClick={() => navigate(item.path)}
                             className="exam-reminder-btn"
                         >
                             <div>
@@ -275,6 +276,7 @@ function UpcomingExamReminders({ user }) {
 }
 
 function Dashboard({ user }) {
+    const navigate = useNavigate()
     const [stats, setStats] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
@@ -483,7 +485,7 @@ function Dashboard({ user }) {
                             <Clock size={18} color="#3b82f6" /> Recent Submissions
                         </h3>
                         <button
-                            onClick={() => window.location.href = '/student/submissions'}
+                            onClick={() => navigate('/student/submissions')}
                             className="view-all-btn"
                         >
                             View All →
