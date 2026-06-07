@@ -7,8 +7,15 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
     const env = loadEnv(mode, __dirname, '')
+
+    if (command === 'build' && process.env.RENDER === 'true') {
+        const apiUrl = (env.VITE_API_URL || '').trim()
+        if (!apiUrl || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/i.test(apiUrl)) {
+            throw new Error('Set VITE_API_URL to your deployed backend URL in Render before building the frontend.')
+        }
+    }
 
     /** Hostnames allowed by the Vite dev server (required when using HTTPS tunnels like ngrok). */
     const hostSet = new Set()
@@ -64,6 +71,23 @@ export default defineConfig(({ mode }) => {
                       },
                   }
                 : {}),
-        }
+        },
+        build: {
+            chunkSizeWarningLimit: 1400,
+            rollupOptions: {
+                output: {
+                    manualChunks(id) {
+                        if (!id.includes('node_modules')) return undefined
+                        if (id.includes('@tensorflow') || id.includes('coco-ssd') || id.includes('blazeface')) return 'tensorflow'
+                        if (id.includes('monaco-editor') || id.includes('@monaco-editor')) return 'monaco'
+                        if (id.includes('recharts') || id.includes('d3-')) return 'charts'
+                        if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('dompurify')) return 'reports'
+                        if (id.includes('socket.io-client') || id.includes('engine.io-client')) return 'realtime'
+                        if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) return 'react-vendor'
+                        return undefined
+                    },
+                },
+            },
+        },
     }
 })

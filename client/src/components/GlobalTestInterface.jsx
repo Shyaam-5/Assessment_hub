@@ -308,7 +308,6 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                 document.exitFullscreen().catch(() => { })
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []) // Run once on mount; submittedRef keeps fullscreen state synchronous.
 
     useEffect(() => {

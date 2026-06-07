@@ -1,8 +1,8 @@
 // Service Worker for AI Assessment Hub PWA
 // Features: Caching, Offline Support, Background Sync
 
-const CACHE_NAME = 'assessment-hub-v2'
-const API_CACHE = 'assessment-hub-api-v2'
+const CACHE_NAME = 'assessment-hub-v3'
+const API_CACHE = 'assessment-hub-api-v3'
 const OFFLINE_URL = '/offline.html'
 
 // Static assets to pre-cache
@@ -11,13 +11,6 @@ const STATIC_ASSETS = [
     '/index.html',
     '/offline.html',
     '/manifest.json'
-]
-
-// API routes to cache with network-first strategy
-const API_ROUTES = [
-    '/api/users',
-    '/api/problems',
-    '/api/tasks'
 ]
 
 // Install: pre-cache static assets
@@ -65,7 +58,7 @@ self.addEventListener('fetch', (event) => {
         return
     }
 
-    // Never cache Vite dev-server internals or prescan mobile page — must always be fresh
+    // Never cache Vite dev-server internals or prescan mobile page; it must always be fresh.
     if (url.pathname.includes('/.vite/') || url.pathname.startsWith('/scan/mobile')) {
         return
     }
@@ -106,11 +99,13 @@ async function networkFirstStrategy(request) {
         if (cached) {
             return cached
         }
-        // Return offline JSON for API requests
-        return new Response(
-            JSON.stringify({ error: 'Offline', offline: true, message: 'You are offline. Data will sync when connected.' }),
-            { headers: { 'Content-Type': 'application/json' }, status: 503 }
-        )
+        if (new URL(request.url).pathname.startsWith('/api/')) {
+            return new Response(
+                JSON.stringify({ error: 'Offline', offline: true, message: 'You are offline. Data will sync when connected.' }),
+                { headers: { 'Content-Type': 'application/json' }, status: 503 }
+            )
+        }
+        return new Response('', { status: 503 })
     }
 }
 
@@ -136,23 +131,41 @@ async function cacheFirstStrategy(request) {
 async function navigationStrategy(request) {
     try {
         const response = await fetch(request)
+        if (response.ok) {
+            return response
+        }
+        if (response.status === 404) {
+            return appShellResponse()
+        }
         return response
     } catch (err) {
-        // Try cached index.html for SPA routing
-        const cached = await caches.match('/index.html')
-        if (cached) {
-            return cached
-        }
-        // Last resort: offline page
-        const offlinePage = await caches.match(OFFLINE_URL)
-        if (offlinePage) {
-            return offlinePage
-        }
-        return new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
-            headers: { 'Content-Type': 'text/html' },
-            status: 503
-        })
+        return appShellResponse()
     }
+}
+
+async function appShellResponse() {
+    const cached = await caches.match('/index.html')
+    if (cached) {
+        return cached
+    }
+    try {
+        const response = await fetch('/index.html')
+        if (response.ok) {
+            const cache = await caches.open(CACHE_NAME)
+            cache.put('/index.html', response.clone())
+            return response
+        }
+    } catch (err) {
+        // Continue to offline fallback.
+    }
+    const offlinePage = await caches.match(OFFLINE_URL)
+    if (offlinePage) {
+        return offlinePage
+    }
+    return new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
+        headers: { 'Content-Type': 'text/html' },
+        status: 503
+    })
 }
 
 function isStaticAsset(pathname) {
