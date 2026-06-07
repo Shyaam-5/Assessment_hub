@@ -50,6 +50,7 @@ _REQUIRED_TENANT_DOMAIN_TABLES = [
     "tasks",
     "submissions",
     "problem_completions",
+    "problem_student_allocations",
     "task_completions",
     "mentor_student_allocations",
     # Aptitude
@@ -180,6 +181,17 @@ _CORE_DOMAIN_TABLES_SQL = [
         completed_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (problem_id, student_id)
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS problem_student_allocations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        problem_id VARCHAR(50) NOT NULL,
+        student_id VARCHAR(50) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_prob_alloc (problem_id, student_id),
+        INDEX idx_psa_problem (problem_id),
+        INDEX idx_psa_student (student_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
     CREATE TABLE IF NOT EXISTS aptitude_submissions (

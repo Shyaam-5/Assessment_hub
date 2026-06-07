@@ -1,5 +1,6 @@
 ﻿"""Problem CRUD routes with proctoring settings."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from database import get_pool
 from routes.auth import _has_any_permission
 from services.pagination import paginated_response
+from services.otp_delivery import send_notification_email
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
 
@@ -116,11 +118,24 @@ async def list_problems(
             )
             rows = await cur.fetchall()
 
+            problem_ids = [r["id"] for r in rows if r.get("id")]
+            alloc_counts: dict[str, int] = {}
+            if problem_ids:
+                placeholders = ",".join(["%s"] * len(problem_ids))
+                await cur.execute(
+                    f"SELECT problem_id, COUNT(*) AS cnt FROM problem_student_allocations "
+                    f"WHERE problem_id IN ({placeholders}) GROUP BY problem_id",
+                    problem_ids,
+                )
+                for row in (await cur.fetchall()) or []:
+                    alloc_counts[str(row["problem_id"])] = int(row["cnt"] or 0)
+
     problems = []
     for r in rows:
         cbs = r.pop("completed_by_students", None)
         p = _enrich_problem(r)
         p["completedBy"] = [s for s in cbs.split(",") if s] if cbs else []
+        p["allocatedCount"] = alloc_counts.get(str(p["id"]), 0)
         problems.append(p)
 
     audit_logger.log_data_access(
@@ -164,11 +179,14 @@ async def student_problems(student_id: str, request: Request):
                 else:
                     raise HTTPException(403, "Forbidden scope")
 
-            mentor_id = stu["mentor_id"]
             await cur.execute(
-                """SELECT * FROM problems
-                   WHERE (mentor_id = %s OR mentor_id = 'admin-001') AND status = 'live'""",
-                (mentor_id,),
+                """
+                SELECT p.* FROM problems p
+                JOIN problem_student_allocations psa ON psa.problem_id = p.id
+                WHERE psa.student_id = %s AND p.status = 'live'
+                ORDER BY p.created_at DESC
+                """,
+                (student_id,),
             )
             problems = await cur.fetchall()
 
@@ -249,6 +267,7 @@ async def delete_problem(problem_id: str, request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM problem_student_allocations WHERE problem_id = %s", (problem_id,))
             await cur.execute("DELETE FROM problem_completions WHERE problem_id = %s", (problem_id,))
             await cur.execute("DELETE FROM submissions WHERE problem_id = %s", (problem_id,))
             await cur.execute("DELETE FROM problems WHERE id = %s", (problem_id,))
@@ -262,3 +281,132 @@ async def delete_problem(problem_id: str, request: Request):
     )
     return {"success": True}
 
+
+# ─── Allocation endpoints ──────────────────────────────────────────────────
+
+@router.get("/problems/{problem_id}/allocations")
+async def get_problem_allocations(problem_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.assign", "tests.view", "tests.create"]):
+        raise HTTPException(403, "Permission denied")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """SELECT a.student_id, u.name, u.email
+                   FROM problem_student_allocations a
+                   JOIN users u ON u.id = a.student_id
+                   WHERE a.problem_id = %s ORDER BY u.name""",
+                (problem_id,),
+            )
+            rows = await cur.fetchall()
+    return [{"studentId": r["student_id"], "name": r["name"], "email": r["email"]} for r in rows]
+
+
+@router.post("/problems/{problem_id}/allocations")
+async def set_problem_allocations(problem_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.assign"]):
+        raise HTTPException(403, "Permission denied")
+    body = await request.json()
+    student_ids: list = body.get("studentIds", [])
+    if not isinstance(student_ids, list):
+        raise HTTPException(400, "studentIds must be a list")
+    student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT title FROM problems WHERE id = %s", (problem_id,))
+            prob = await cur.fetchone()
+            if not prob:
+                raise HTTPException(404, "Problem not found")
+            problem_title = prob.get("title") or "Coding Problem"
+
+            if student_ids:
+                placeholders = ",".join(["%s"] * len(student_ids))
+                await cur.execute(
+                    f"""
+                    SELECT DISTINCT u.id
+                    FROM users u
+                    JOIN user_role_assignments ura ON ura.user_id = u.id
+                    JOIN roles r ON r.id = ura.role_id
+                    WHERE u.id IN ({placeholders})
+                      AND u.role = 'org_user'
+                      AND ura.is_primary = 1
+                      AND (
+                        LOWER(TRIM(r.slug)) = 'exam-taker'
+                        OR LOWER(TRIM(r.name)) = 'exam taker'
+                      )
+                    """,
+                    student_ids,
+                )
+                allowed_ids = {str(r["id"]) for r in (await cur.fetchall() or [])}
+                invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
+                if invalid_ids:
+                    raise HTTPException(400, "Only users with Exam Taker role can be allocated")
+
+            await cur.execute(
+                "DELETE FROM problem_student_allocations WHERE problem_id = %s", (problem_id,)
+            )
+            for sid in student_ids:
+                await cur.execute(
+                    "INSERT IGNORE INTO problem_student_allocations (id, problem_id, student_id) "
+                    "VALUES (%s, %s, %s)",
+                    (str(uuid.uuid4()), problem_id, sid),
+                )
+
+            emails: list[tuple[str, str]] = []
+            if student_ids:
+                placeholders = ",".join(["%s"] * len(student_ids))
+                await cur.execute(
+                    f"SELECT name, email FROM users WHERE id IN ({placeholders})", student_ids
+                )
+                emails = [
+                    (r.get("name") or "User", r.get("email") or "")
+                    for r in (await cur.fetchall() or [])
+                    if (r.get("email") or "").strip()
+                ]
+        await conn.commit()
+
+    for name, email in emails:
+        try:
+            await asyncio.to_thread(
+                send_notification_email,
+                email,
+                f"New Problem Assigned: {problem_title}",
+                (
+                    f"Hello {name},\n\n"
+                    f"A coding problem has been assigned to you: {problem_title}\n"
+                    "Please login to your portal and complete it.\n"
+                ),
+            )
+        except Exception:
+            pass
+
+    audit_logger.log_event(
+        event_type=AuditEventType.ADMIN_TEST_MODIFIED,
+        user_id=actor_id,
+        ip_address=_client_ip(request),
+        resource_id=problem_id,
+        resource_type="problem",
+        action="Problem allocations updated",
+        details={"studentCount": len(student_ids)},
+    )
+    return {"success": True, "allocatedCount": len(student_ids)}
+
+
+@router.get("/problems/{problem_id}/allocated-students")
+async def get_allocated_students(problem_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.assign", "tests.view", "tests.create"]):
+        raise HTTPException(403, "Permission denied")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT student_id FROM problem_student_allocations WHERE problem_id = %s",
+                (problem_id,),
+            )
+            rows = await cur.fetchall()
+    return {"problemId": problem_id, "studentIds": [r["student_id"] for r in rows], "count": len(rows)}

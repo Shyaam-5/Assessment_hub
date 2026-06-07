@@ -441,19 +441,28 @@ async def create_submission(body: SubmissionCreate, request: Request):
     submission_id = str(uuid.uuid4())
     submitted_at = datetime.now(timezone.utc)
 
-    # 1. Get problem context
+    # 1. Get problem context and verify allocation
     problem_context = ""
     if body.problemId:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 await cur.execute("SELECT * FROM problems WHERE id = %s", (body.problemId,))
                 prob = await cur.fetchone()
-        if prob:
-            problem_context = (
-                f"Problem: {prob['title']}\nDescription: {prob['description']}\n"
-                f"Difficulty: {prob['difficulty']}\nSample Input: {prob.get('sample_input','N/A')}\n"
-                f"Expected Output: {prob.get('expected_output','N/A')}"
-            )
+                if prob:
+                    problem_context = (
+                        f"Problem: {prob['title']}\nDescription: {prob['description']}\n"
+                        f"Difficulty: {prob['difficulty']}\nSample Input: {prob.get('sample_input','N/A')}\n"
+                        f"Expected Output: {prob.get('expected_output','N/A')}"
+                    )
+                # Students must be explicitly allocated to the problem
+                if not await _can_manage_all_submissions(actor_id) and actor_role not in ("admin", "organization_admin", "mentor"):
+                    await cur.execute(
+                        "SELECT 1 FROM problem_student_allocations "
+                        "WHERE problem_id = %s AND student_id = %s LIMIT 1",
+                        (body.problemId, body.studentId),
+                    )
+                    if not await cur.fetchone():
+                        raise HTTPException(403, "This problem is not assigned to you")
 
     # 2. Plagiarism check (skip SQL)
     plagiarism = {"detected": False, "copiedFrom": None, "copiedFromName": None, "similarity": 0}
@@ -755,12 +764,20 @@ async def proctored_submission(body: ProctoredSubmission, request: Request):
     multipleFacesDetectionCount = body.multipleFacesDetectionCount or 0
     faceLookawayCount = body.faceLookawayCount or 0
 
-    # Get problem details
+    # Get problem details and verify allocation
     problem = None
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT * FROM problems WHERE id = %s", (problemId,))
             problem = await cur.fetchone()
+            if not await _can_manage_all_submissions(actor_id) and actor_role not in ("admin", "organization_admin", "mentor"):
+                await cur.execute(
+                    "SELECT 1 FROM problem_student_allocations "
+                    "WHERE problem_id = %s AND student_id = %s LIMIT 1",
+                    (problemId, studentId),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(403, "This problem is not assigned to you")
 
     # Evaluate
     eval_result: dict[str, Any] = {"score": 0, "status": "rejected", "feedback": "Evaluation pending...", "analysis": {}}
