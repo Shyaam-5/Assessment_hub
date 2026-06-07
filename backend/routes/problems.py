@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from database import get_pool
-from routes.auth import _has_any_permission
+from routes.auth import _has_any_permission, assert_assessment_limit_for_actor
 from services.pagination import paginated_response
 from services.otp_delivery import send_notification_email
 import pymysql.cursors
@@ -216,6 +216,7 @@ async def create_problem(body: ProblemCreate, request: Request):
     actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor_id, ["tests.create"]):
         raise HTTPException(status_code=403, detail="Permission denied")
+    await assert_assessment_limit_for_actor(actor_id)
     problem_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     pool = await get_pool()

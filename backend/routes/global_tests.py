@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 import pymysql.cursors
 from database import get_pool, get_primary_pool
-from routes.auth import _has_any_permission as _auth_has_any_permission
+from routes.auth import _has_any_permission as _auth_has_any_permission, assert_assessment_limit_for_actor
 from config import settings
 from services.ai_service import cerebras_chat
 from audit_logger import get_audit_logger, AuditEventType
@@ -874,7 +874,8 @@ async def get_global_test(test_id: str, request: Request):
 
 @router.post("/global-tests")
 async def create_global_test(body: GlobalTestCreate, request: Request):
-    await _require_test_permission(request, ["tests.create"])
+    actor = await _require_test_permission(request, ["tests.create"])
+    await assert_assessment_limit_for_actor(actor)
     pool = await get_pool()
     test_id = str(uuid.uuid4())
     if body.duration <= 0:

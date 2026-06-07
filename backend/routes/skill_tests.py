@@ -11,7 +11,7 @@ from typing import Any
 import pymysql.err
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
 from database import get_pool, get_primary_pool
-from routes.auth import _has_any_permission as _auth_has_any_permission
+from routes.auth import _has_any_permission as _auth_has_any_permission, assert_assessment_limit_for_actor
 from services.ai_service import (
     generate_mcq_questions, generate_coding_problems, generate_sql_problems,
     generate_interview_question, evaluate_interview_answer, evaluate_sql_query,
@@ -315,7 +315,8 @@ async def set_skill_test_allocations(test_id: int, request: Request):
 
 @router.post("/create")
 async def create_test(request: Request, body: dict = Body(...)):
-    await _require_skill_permission(request, ["coding.create", "coding.assign"])
+    actor = await _require_skill_permission(request, ["coding.create", "coding.assign"])
+    await assert_assessment_limit_for_actor(actor)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:

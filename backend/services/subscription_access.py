@@ -65,6 +65,18 @@ SUBSCRIPTION_PLANS: dict[str, dict[str, Any]] = {
 
 DEFAULT_SUBSCRIPTION_TYPE = "free_trial"
 
+PLAN_LIMITS: dict[str, dict[str, int | None]] = {
+    "free_trial": {"max_users": 25, "max_tests": 3},
+    "basic":      {"max_users": 500, "max_tests": None},
+    "pro":        {"max_users": None, "max_tests": None},
+}
+
+
+def plan_limit(subscription_type: str, resource: str) -> int | None:
+    """Return the hard cap for *resource* under *subscription_type*, or None = unlimited."""
+    limits = PLAN_LIMITS.get(subscription_type) or PLAN_LIMITS[DEFAULT_SUBSCRIPTION_TYPE]
+    return limits.get(resource)
+
 
 def normalized_subscription_type(value: str | None) -> str:
     st = (value or "").strip().lower()

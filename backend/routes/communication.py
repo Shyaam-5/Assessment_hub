@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Request, Body, Depends
 from fastapi.responses import JSONResponse
 
 from database import get_pool, get_primary_pool
-from routes.auth import _has_any_permission as _auth_has_any_permission
+from routes.auth import _has_any_permission as _auth_has_any_permission, assert_assessment_limit_for_actor
 from services.comm_service import (
     SENTENCES_A,
     SENTENCES_B,
@@ -791,7 +791,8 @@ async def list_comm_org_students(request: Request):
 @router.post("/tests/create")
 async def create_comm_test(request: Request):
     """Create a new communication test (admin)."""
-    await _require_comm_permission(request, ["communication.assign"])
+    actor = await _require_comm_permission(request, ["communication.assign"])
+    await assert_assessment_limit_for_actor(actor)
     await _ensure_comm_tables()
     data = await request.json()
 

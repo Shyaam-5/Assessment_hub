@@ -25,6 +25,7 @@ from services.subscription_access import (
     DEFAULT_SUBSCRIPTION_TYPE,
     normalized_subscription_type,
     allowed_permissions_for_subscription,
+    plan_limit,
 )
 from audit_logger import get_audit_logger, AuditEventType
 
@@ -709,19 +710,26 @@ async def _assert_usage_limit_available(org_id: str, resource: str, increment: i
     payload = await _usage_payload_for_org(org_id)
     usage = payload["usage"]
     limits = payload["limits"]
-    checks = []
+    subscription_type = await _get_org_subscription_type(org_id)
+
+    # (usage_key, custom-limit key, plan-limit resource name)
+    checks: list[tuple[str, str, str]] = []
     if resource == "users":
-        checks = [("users", "maxUsers"), ("activeUsers", "maxActiveUsers")]
+        checks = [("users", "maxUsers", "max_users"), ("activeUsers", "maxActiveUsers", "max_users")]
     elif resource == "tests":
-        checks = [("tests", "maxTests")]
+        checks = [("tests", "maxTests", "max_tests")]
     elif resource == "submissions":
-        checks = [("submissions", "maxSubmissions")]
-    for usage_key, limit_key in checks:
+        checks = [("submissions", "maxSubmissions", "")]
+
+    for usage_key, limit_key, plan_key in checks:
+        # Custom limit set by super admin takes precedence; fall back to plan limit
         limit = limits.get(limit_key)
+        if limit is None and plan_key:
+            limit = plan_limit(subscription_type, plan_key)
         if limit is not None and int(usage.get(usage_key) or 0) + increment > int(limit):
             raise HTTPException(
                 status_code=402,
-                detail=f"Tenant usage limit reached for {usage_key}: {usage.get(usage_key, 0)}/{limit}",
+                detail=f"Plan limit reached for {usage_key}: {usage.get(usage_key, 0)}/{limit}. Please upgrade your subscription.",
             )
 
 

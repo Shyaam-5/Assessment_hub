@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 import pymysql.cursors
 from database import get_pool, get_primary_pool
-from routes.auth import _has_any_permission as _auth_has_any_permission
+from routes.auth import _has_any_permission as _auth_has_any_permission, assert_assessment_limit_for_actor
 from audit_logger import get_audit_logger, AuditEventType
 from services.otp_delivery import send_notification_email
 
@@ -342,6 +342,7 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["aptitude.create"]):
         raise HTTPException(403, "Permission denied")
+    await assert_assessment_limit_for_actor(actor)
     pool = await get_pool()
     test_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)

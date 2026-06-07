@@ -16,12 +16,13 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from config import settings
-from database import get_primary_pool
+from database import get_primary_pool, get_pool
 from services.otp_delivery import send_login_otp_email
 from services.subscription_access import (
     DEFAULT_SUBSCRIPTION_TYPE,
     normalized_subscription_type,
     allowed_permissions_for_subscription,
+    plan_limit,
 )
 from audit_logger import get_audit_logger, AuditEventType
 from security import create_access_token
@@ -288,6 +289,46 @@ async def _actor_scope(user_id: str) -> dict:
                 primary = await cur.fetchone() or {}
                 org_id = primary.get("organization_id")
     return {"role": row.get("role") or "", "organization_id": org_id}
+
+
+async def assert_assessment_limit_for_actor(actor_id: str) -> None:
+    """Raise HTTP 402 if the actor's org has reached its plan's assessment creation limit."""
+    if not actor_id:
+        return
+    primary = await get_primary_pool()
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT role, organization_id FROM users WHERE id = %s", (actor_id,))
+            user_row = await cur.fetchone() or {}
+            if user_row.get("role") == "admin":
+                return  # platform admins are never throttled
+            org_id = user_row.get("organization_id")
+            if not org_id:
+                return  # no org context → no plan limit
+            await cur.execute("SELECT subscription_type FROM organizations WHERE id = %s", (org_id,))
+            org_row = await cur.fetchone() or {}
+            subscription_type = normalized_subscription_type(org_row.get("subscription_type"))
+
+    cap = plan_limit(subscription_type, "max_tests")
+    if cap is None:
+        return  # unlimited
+
+    tenant = await get_pool()
+    total = 0
+    async with tenant.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            for table in ("aptitude_tests", "comm_tests", "skill_tests", "global_tests", "problems"):
+                try:
+                    await cur.execute(f"SELECT COUNT(*) AS cnt FROM `{table}`")
+                    total += int((await cur.fetchone() or {}).get("cnt") or 0)
+                except Exception:
+                    pass
+
+    if total >= cap:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Assessment limit reached ({total}/{cap}) for your plan. Please upgrade your subscription.",
+        )
 
 
 # ---------- Routes ----------
