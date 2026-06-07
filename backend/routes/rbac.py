@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from database import get_primary_pool, resolve_tenant_db_url
 from routes.auth import _hash_password
 from config import settings
-from services.otp_delivery import send_notification_email
+from services.otp_delivery import send_notification_email, send_account_created_email, send_password_reset_email
 from services.subscription_access import (
     PERMISSION_CATALOG,
     VALID_PERMISSIONS,
@@ -928,16 +928,14 @@ async def create_organization(body: CreateOrganizationBody, request: Request):
 
     try:
         await asyncio.to_thread(
-            send_notification_email,
+            send_account_created_email,
             body.adminEmail,
-            f"Organization Admin Access - {body.name}",
-            (
-                f"Hello {body.adminName},\n\n"
-                f"You have been registered as Organization Admin for '{body.name}'.\n"
-                f"Login Email: {body.adminEmail}\n"
-                "Please use the password shared securely by super admin and change it immediately after login.\n"
-                "After logging in, go to Admin → Tenant Database to configure your organization database.\n"
-            ),
+            body.adminName,
+            body.adminEmail,
+            body.adminPassword,
+            "Organization Admin",
+            f"You are the admin for <strong>{body.name}</strong>. After logging in, go to "
+            "Admin &rarr; Tenant Database to configure your organization database.",
         )
     except Exception:
         pass
@@ -1795,15 +1793,11 @@ async def create_org_user(org_id: str, body: CreateOrgUserBody, request: Request
     )
     try:
         await asyncio.to_thread(
-            send_notification_email,
+            send_account_created_email,
             body.email,
-            "Your Account Has Been Created",
-            (
-                f"Hello {body.name},\n\n"
-                "Your account has been created.\n"
-                f"Login Email: {body.email}\n"
-                "Please use the password shared securely by your organization admin and change it after login.\n"
-            ),
+            body.name,
+            body.email,
+            body.password,
         )
     except Exception:
         pass
@@ -2076,15 +2070,10 @@ async def reset_org_user_password(org_id: str, user_id: str, body: ResetOrgUserP
     if body.sendEmail:
         try:
             await asyncio.to_thread(
-                send_notification_email,
+                send_password_reset_email,
                 target.get("email"),
-                "Your Account Password Was Reset",
-                (
-                    f"Hello {target.get('name') or 'there'},\n\n"
-                    "Your organization admin reset your password.\n"
-                    f"Temporary password: {body.newPassword}\n"
-                    "You will be asked to change it after login.\n"
-                ),
+                target.get("name") or "there",
+                body.newPassword,
             )
         except Exception:
             pass

@@ -9,7 +9,7 @@ from database import get_pool, get_primary_pool
 from routes.auth import _hash_password, _has_any_permission as _auth_has_any_permission
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
-from services.otp_delivery import send_notification_email
+from services.otp_delivery import send_notification_email, send_account_created_email
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 audit_logger = get_audit_logger()
@@ -206,15 +206,12 @@ async def create_user(body: CreateUserBody, request: Request):
     )
     try:
         await asyncio.to_thread(
-            send_notification_email,
+            send_account_created_email,
             body.email,
-            "Your Account Has Been Created",
-            (
-                f"Hello {body.name},\n\n"
-                "Your account has been created.\n"
-                f"Login Email: {body.email}\n"
-                "Please use the password shared securely by your administrator and change it after login.\n"
-            ),
+            body.name,
+            body.email,
+            body.password,
+            body.role,
         )
     except Exception:
         pass
