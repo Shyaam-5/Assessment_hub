@@ -304,8 +304,13 @@ async def delete_user(user_id: str, request: Request):
                 (user_id, user_id),
             )
             if existing["role"] == "student":
-                for tbl in ("submissions", "task_completions", "problem_completions",
-                            "aptitude_submissions", "student_completed_aptitude"):
+                for tbl in (
+                    "test_student_allocations", "comm_test_allocations",
+                    "skill_test_allocations", "global_test_allocations",
+                    "problem_student_allocations",
+                    "submissions", "task_completions", "problem_completions",
+                    "aptitude_submissions", "student_completed_aptitude",
+                ):
                     await cur.execute(f"DELETE FROM {tbl} WHERE student_id = %s", (user_id,))
 
             await cur.execute("DELETE FROM users WHERE id = %s", (user_id,))

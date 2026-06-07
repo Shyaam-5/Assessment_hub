@@ -503,29 +503,39 @@ async def add_corp_header(request, call_next):
         org_id = resolved_org_id
         user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
         try:
-            user_org_id = ""
-            if user_id:
-                primary = await get_primary_pool()
-                async with primary.acquire() as conn:
-                    async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                        await cur.execute("SELECT organization_id FROM users WHERE id = %s", (user_id,))
-                        u = await cur.fetchone()
-                        user_org_id = (u or {}).get("organization_id") or ""
-                if user_org_id:
-                    if org_id and org_id != user_org_id:
-                        return JSONResponse({"detail": "Organization context mismatch"}, status_code=403)
-                    org_id = user_org_id
-                    resolved_org_id = user_org_id
-
-            if org_id:
-                primary = await get_primary_pool()
-                async with primary.acquire() as conn:
-                    async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            o = None
+            primary = await get_primary_pool()
+            async with primary.acquire() as conn:
+                async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    if user_id:
+                        # Resolve user's org and fetch org details in one query
+                        await cur.execute(
+                            """
+                            SELECT u.organization_id,
+                                   o.is_active, o.subscription_type, o.created_at
+                            FROM users u
+                            LEFT JOIN organizations o ON o.id = u.organization_id
+                            WHERE u.id = %s
+                            """,
+                            (user_id,),
+                        )
+                        row = await cur.fetchone() or {}
+                        user_org_id = row.get("organization_id") or ""
+                        if user_org_id:
+                            if org_id and org_id != user_org_id:
+                                return JSONResponse({"detail": "Organization context mismatch"}, status_code=403)
+                            org_id = user_org_id
+                            resolved_org_id = user_org_id
+                            o = row  # org columns already fetched
+                    if org_id and o is None:
+                        # org_id came from header with no user — fetch org directly
                         await cur.execute(
                             "SELECT is_active, subscription_type, created_at FROM organizations WHERE id = %s",
                             (org_id,),
                         )
                         o = await cur.fetchone()
+
+            if org_id:
                 if not o or int(o.get("is_active") or 0) != 1:
                     return JSONResponse({"detail": "Organization is inactive. Contact the super admin."}, status_code=403)
                 if (o.get("subscription_type") or "free_trial") == "free_trial":

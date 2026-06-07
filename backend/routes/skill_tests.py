@@ -389,6 +389,7 @@ async def delete_test(test_id: int, request: Request):
             await cur.execute("SELECT sql_count FROM skill_tests WHERE id = %s", (test_id,))
             row = await cur.fetchone()
             had_sql = row and (row.get("sql_count") or 0) > 0
+            await cur.execute("DELETE FROM skill_test_allocations WHERE test_id = %s", (test_id,))
             await cur.execute("DELETE FROM skill_test_attempts WHERE test_id = %s", (test_id,))
             await cur.execute("DELETE FROM skill_tests WHERE id = %s", (test_id,))
         await conn.commit()

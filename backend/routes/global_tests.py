@@ -1053,6 +1053,7 @@ async def delete_global_test(test_id: str, request: Request):
                     await cur.execute(f"DELETE FROM section_results WHERE submission_id IN ({ph})", sub_ids)
                     await cur.execute(f"DELETE FROM personalized_reports WHERE submission_id IN ({ph})", sub_ids)
 
+                await cur.execute("DELETE FROM global_test_allocations WHERE test_id = %s", (test_id,))
                 await cur.execute("DELETE FROM global_test_submissions WHERE test_id = %s", (test_id,))
                 await cur.execute("DELETE FROM test_questions WHERE test_id = %s", (test_id,))
                 await cur.execute("DELETE FROM global_tests WHERE id = %s", (test_id,))

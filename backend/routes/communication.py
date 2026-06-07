@@ -1165,6 +1165,7 @@ async def delete_comm_test(test_id: int, request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM comm_test_allocations WHERE test_id = %s", (test_id,))
             await cur.execute("DELETE FROM comm_test_attempts WHERE test_id = %s", (test_id,))
             await cur.execute("DELETE FROM comm_tests WHERE id = %s", (test_id,))
         await conn.commit()

@@ -607,7 +607,7 @@ async def _get_usage_limits(org_id: str) -> dict[str, Any]:
 
 
 async def _collect_org_usage(org_id: str) -> dict[str, int]:
-    pool = await get_primary_pool()
+    primary = await get_primary_pool()
     usage = {
         "users": 0,
         "activeUsers": 0,
@@ -616,7 +616,9 @@ async def _collect_org_usage(org_id: str) -> dict[str, int]:
         "apiRequestsMonthly": 0,
         "storageMb": 0,
     }
-    async with pool.acquire() as conn:
+
+    # --- User counts (always in primary DB) ---
+    async with primary.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE organization_id = %s", (org_id,))
             usage["users"] = int((await cur.fetchone() or {}).get("cnt") or 0)
@@ -625,43 +627,6 @@ async def _collect_org_usage(org_id: str) -> dict[str, int]:
                 (org_id,),
             )
             usage["activeUsers"] = int((await cur.fetchone() or {}).get("cnt") or 0)
-
-            for table_name in ("global_tests", "aptitude_tests", "skill_tests", "comm_tests"):
-                try:
-                    await cur.execute(
-                        f"""
-                        SELECT COUNT(*) AS cnt
-                        FROM {table_name} t
-                        JOIN users u ON u.id = t.created_by
-                        WHERE u.organization_id = %s
-                        """,
-                        (org_id,),
-                    )
-                    usage["tests"] += int((await cur.fetchone() or {}).get("cnt") or 0)
-                except Exception:
-                    continue
-
-            for table_name, user_col in (
-                ("global_test_submissions", "student_id"),
-                ("aptitude_submissions", "student_id"),
-                ("skill_test_attempts", "student_id"),
-                ("comm_test_attempts", "student_id"),
-                ("submissions", "student_id"),
-            ):
-                try:
-                    await cur.execute(
-                        f"""
-                        SELECT COUNT(*) AS cnt
-                        FROM {table_name} t
-                        JOIN users u ON u.id = t.{user_col}
-                        WHERE u.organization_id = %s
-                        """,
-                        (org_id,),
-                    )
-                    usage["submissions"] += int((await cur.fetchone() or {}).get("cnt") or 0)
-                except Exception:
-                    continue
-
             try:
                 await cur.execute(
                     """
@@ -676,6 +641,43 @@ async def _collect_org_usage(org_id: str) -> dict[str, int]:
                 usage["apiRequestsMonthly"] = int((await cur.fetchone() or {}).get("cnt") or 0)
             except Exception:
                 usage["apiRequestsMonthly"] = 0
+
+    # --- Assessment + submission counts (in tenant DB, not primary) ---
+    async with primary.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                "SELECT db_url, db_secret_ref FROM organizations WHERE id = %s", (org_id,)
+            )
+            org_row = await cur.fetchone() or {}
+    tenant_db_url = resolve_tenant_db_url(
+        db_url=org_row.get("db_url"), db_secret_ref=org_row.get("db_secret_ref")
+    )
+    if tenant_db_url:
+        try:
+            tenant_conn = _connect_mysql_from_url(tenant_db_url)
+            try:
+                with tenant_conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    for table_name in ("global_tests", "aptitude_tests", "skill_tests", "comm_tests", "problems"):
+                        try:
+                            cur.execute(f"SELECT COUNT(*) AS cnt FROM `{table_name}`")
+                            usage["tests"] += int((cur.fetchone() or {}).get("cnt") or 0)
+                        except Exception:
+                            continue
+                    for table_name in ("global_test_submissions", "aptitude_submissions",
+                                       "skill_test_attempts", "comm_test_attempts", "submissions"):
+                        try:
+                            cur.execute(f"SELECT COUNT(*) AS cnt FROM `{table_name}`")
+                            usage["submissions"] += int((cur.fetchone() or {}).get("cnt") or 0)
+                        except Exception:
+                            continue
+            finally:
+                try:
+                    tenant_conn.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass  # tenant DB unreachable — leave counts at 0
+
     return usage
 
 

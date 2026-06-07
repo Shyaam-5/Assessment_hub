@@ -430,7 +430,10 @@ async def submit_aptitude_test(test_id: str, body: AptitudeSubmit, request: Requ
                 raise HTTPException(404, "Test not found")
             if (test.get("status") or "").lower() != "live":
                 raise HTTPException(409, "Test is not live")
-            if test.get("deadline") and datetime.now(timezone.utc) > test["deadline"].replace(tzinfo=timezone.utc):
+            _now = datetime.now(timezone.utc)
+            if test.get("start_time") and _now < test["start_time"].replace(tzinfo=timezone.utc):
+                raise HTTPException(409, "Test has not started yet")
+            if test.get("deadline") and _now > test["deadline"].replace(tzinfo=timezone.utc):
                 raise HTTPException(409, "Test deadline has passed")
             await cur.execute(
                 "SELECT 1 FROM test_student_allocations WHERE test_id = %s AND student_id = %s LIMIT 1",
@@ -626,6 +629,7 @@ async def delete_aptitude_test(test_id: str, request: Request):
                     sub_ids,
                 )
 
+            await cur.execute("DELETE FROM test_student_allocations WHERE test_id = %s", (test_id,))
             await cur.execute("DELETE FROM aptitude_submissions WHERE test_id = %s", (test_id,))
             await cur.execute("DELETE FROM student_completed_aptitude WHERE aptitude_test_id = %s", (test_id,))
             await cur.execute("DELETE FROM aptitude_questions WHERE test_id = %s", (test_id,))
