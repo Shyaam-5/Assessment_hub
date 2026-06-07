@@ -15,7 +15,7 @@ import pymysql.cursors
 from database import get_pool, get_primary_pool
 from routes.auth import _has_any_permission as _auth_has_any_permission, assert_assessment_limit_for_actor
 from audit_logger import get_audit_logger, AuditEventType
-from services.otp_delivery import send_notification_email
+from services.otp_delivery import send_exam_allocated_email
 
 router = APIRouter(prefix="/api", tags=["aptitude"])
 logger = LogConfig.get_logger(__name__)
@@ -819,12 +819,12 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
     emails: list[tuple[str, str]] = []
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT title FROM aptitude_tests WHERE id = %s", (test_id,))
+            await cur.execute("SELECT title, deadline FROM aptitude_tests WHERE id = %s", (test_id,))
             trow = await cur.fetchone()
             if not trow:
                 raise HTTPException(404, "Test not found")
-            if trow and trow.get("title"):
-                test_title = trow["title"]
+            test_title = trow.get("title") or test_title
+            test_deadline = trow["deadline"].strftime("%d %b %Y, %I:%M %p UTC") if trow.get("deadline") else None
             placeholders = ",".join(["%s"] * len(student_ids))
             await cur.execute(
                 f"""
@@ -862,14 +862,8 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
     for name, email in emails:
         try:
             await asyncio.to_thread(
-                send_notification_email,
-                email,
-                f"New Test Assigned: {test_title}",
-                (
-                    f"Hello {name},\n\n"
-                    f"A new aptitude test has been assigned to you: {test_title}\n"
-                    "Please login to your portal and complete it before deadline.\n"
-                ),
+                send_exam_allocated_email,
+                email, name, test_title, "Aptitude Test", test_deadline,
             )
         except Exception:
             pass

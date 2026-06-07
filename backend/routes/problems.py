@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from database import get_pool
 from routes.auth import _has_any_permission, assert_assessment_limit_for_actor
 from services.pagination import paginated_response
-from services.otp_delivery import send_notification_email
+from services.otp_delivery import send_exam_allocated_email
 import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
 
@@ -373,14 +373,8 @@ async def set_problem_allocations(problem_id: str, request: Request):
     for name, email in emails:
         try:
             await asyncio.to_thread(
-                send_notification_email,
-                email,
-                f"New Problem Assigned: {problem_title}",
-                (
-                    f"Hello {name},\n\n"
-                    f"A coding problem has been assigned to you: {problem_title}\n"
-                    "Please login to your portal and complete it.\n"
-                ),
+                send_exam_allocated_email,
+                email, name, problem_title, "Coding Problem",
             )
         except Exception:
             pass

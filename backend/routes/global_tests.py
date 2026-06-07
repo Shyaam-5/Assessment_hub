@@ -17,6 +17,7 @@ from routes.auth import _has_any_permission as _auth_has_any_permission, assert_
 from config import settings
 from services.ai_service import cerebras_chat
 from audit_logger import get_audit_logger, AuditEventType
+from services.otp_delivery import send_exam_allocated_email
 
 router = APIRouter(prefix="/api", tags=["global-tests"])
 audit_logger = get_audit_logger()
@@ -703,13 +704,39 @@ async def set_test_allocations(test_id: str, request: Request):
                     invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
                     if invalid_ids:
                         raise HTTPException(400, "Only users with Exam Taker role can be allocated")
+                await cur.execute("SELECT title FROM global_tests WHERE id = %s", (test_id,))
+                test_row = await cur.fetchone()
+                test_title = (test_row[0] if test_row else None) or "Global Assessment"
+
                 await cur.execute("DELETE FROM global_test_allocations WHERE test_id = %s", (test_id,))
                 for sid in student_ids:
                     await cur.execute(
                         "INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
                         (str(uuid.uuid4()), test_id, sid),
                     )
+
+                emails: list[tuple[str, str]] = []
+                if student_ids:
+                    placeholders2 = ",".join(["%s"] * len(student_ids))
+                    await cur.execute(
+                        f"SELECT name, email FROM users WHERE id IN ({placeholders2})", student_ids
+                    )
+                    emails = [
+                        (r[0] or "User", r[1] or "")
+                        for r in (await cur.fetchall() or [])
+                        if (r[1] or "").strip()
+                    ]
             await conn.commit()
+
+        for name, email in emails:
+            try:
+                await asyncio.to_thread(
+                    send_exam_allocated_email,
+                    email, name, test_title, "Global Assessment",
+                )
+            except Exception:
+                pass
+
         audit_logger.log_event(
             AuditEventType.ADMIN_TEST_MODIFIED,
             user_id=actor,

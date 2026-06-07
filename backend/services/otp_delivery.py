@@ -291,6 +291,81 @@ def send_password_reset_email(to_email: str, name: str, new_password: str) -> No
     _send(to_email, subject, plain, html)
 
 
+# ─── Exam allocation email ───────────────────────────────────────────────────
+
+def send_exam_allocated_email(
+    to_email: str,
+    name: str,
+    exam_title: str,
+    exam_type: str,
+    deadline: str | None = None,
+) -> None:
+    """Notify a student that an exam has been assigned to them."""
+    if not _smtp_ready():
+        logger.warning("[MAIL] SMTP not configured — cannot notify %s about exam allocation.", to_email)
+        return
+
+    subject = f"New {exam_type} Assigned: {exam_title}"
+    deadline_line = f"\n  Deadline    : {deadline}" if deadline else ""
+    plain = (
+        f"Hello {name},\n\n"
+        f"A new {exam_type.lower()} has been assigned to you.\n\n"
+        f"  Exam        : {exam_title}"
+        f"{deadline_line}\n\n"
+        "Please log in to your portal to view and complete it.\n"
+        "If you have any questions, contact your administrator.\n"
+    )
+
+    deadline_block = ""
+    if deadline:
+        deadline_block = f"""
+        <tr>
+          <td style="padding:7px 0;color:#6b7280;font-size:13px;width:130px;vertical-align:top;">Deadline</td>
+          <td style="padding:7px 0;color:#dc2626;font-size:13px;font-weight:600;">{deadline}</td>
+        </tr>"""
+
+    content = f"""
+      <p style="margin:0 0 16px;color:#374151;font-size:15px;">
+        Hello <strong>{name}</strong>,
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;line-height:1.6;">
+        A new <strong>{exam_type}</strong> has been assigned to you on
+        <strong>Assessment Hub</strong>. Please log in to your portal to complete it.
+      </p>
+
+      <!-- Exam details box -->
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="background:#f8f9ff;border:1px solid #e0e0ff;border-radius:8px;margin-bottom:20px;">
+        <tr><td style="padding:20px 24px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:7px 0;color:#6b7280;font-size:13px;width:130px;vertical-align:top;">Exam Type</td>
+              <td style="padding:7px 0;color:#111827;font-size:13px;">{exam_type}</td>
+            </tr>
+            <tr>
+              <td style="padding:7px 0;color:#6b7280;font-size:13px;vertical-align:top;">Title</td>
+              <td style="padding:7px 0;color:#4f46e5;font-size:14px;font-weight:700;">{exam_title}</td>
+            </tr>
+            {deadline_block}
+          </table>
+        </td></tr>
+      </table>
+
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="background:#f0fdf4;border-left:4px solid #22c55e;border-radius:4px;margin-bottom:20px;">
+        <tr><td style="padding:12px 16px;color:#166534;font-size:13px;">
+          &#128218; Log in to your <strong>Assessment Hub</strong> portal to view and start this exam.
+        </td></tr>
+      </table>
+
+      <p style="margin:0;color:#9ca3af;font-size:12px;">
+        If you were not expecting this assignment, please contact your administrator.
+      </p>
+    """
+    html = _wrap_html(f"New {exam_type} Assigned", content)
+    _send(to_email, subject, plain, html)
+
+
 # ─── Generic notification (kept for non-account emails) ─────────────────────
 
 def send_notification_email(to_email: str, subject: str, body: str) -> None:

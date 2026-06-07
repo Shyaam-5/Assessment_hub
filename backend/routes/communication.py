@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 
 from database import get_pool, get_primary_pool
 from routes.auth import _has_any_permission as _auth_has_any_permission, assert_assessment_limit_for_actor
+from services.otp_delivery import send_exam_allocated_email
 from services.comm_service import (
     SENTENCES_A,
     SENTENCES_B,
@@ -1154,6 +1155,27 @@ async def set_comm_test_allocations(test_id: int, request: Request):
         action="Communication test allocations updated",
         details={"studentCount": len(student_ids)},
     )
+
+    if student_ids:
+        try:
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT title FROM comm_tests WHERE id = %s", (test_id,))
+                    trow = await cur.fetchone()
+                    test_title = (trow.get("title") if trow else None) or "Communication Test"
+                    placeholders = ",".join(["%s"] * len(student_ids))
+                    await cur.execute(
+                        f"SELECT name, email FROM users WHERE id IN ({placeholders})", student_ids
+                    )
+                    recipients = [(r.get("name") or "User", r.get("email") or "") for r in (await cur.fetchall() or []) if (r.get("email") or "").strip()]
+            for name, email in recipients:
+                try:
+                    await asyncio.to_thread(send_exam_allocated_email, email, name, test_title, "Communication Test")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return {"allocated": len(student_ids)}
 
 
