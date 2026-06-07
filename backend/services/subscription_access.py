@@ -23,14 +23,13 @@ VALID_PERMISSIONS = {perm for perms in PERMISSION_CATALOG.values() for perm in p
 SUBSCRIPTION_PLANS: dict[str, dict[str, Any]] = {
     "free_trial": {
         "label": "Free Trial",
+        # Global tests are Pro-only, so tests.create/update/delete/assign are excluded.
+        # Students can still attempt tests allocated to them via tests.attempt/view_allocated.
         "allowed_permissions": {
             "users.create",
             "users.view",
             "roles.view",
-            "tests.create",
             "tests.view",
-            "tests.update",
-            "tests.assign",
             "tests.view_allocated",
             "tests.attempt",
             "coding.attempt",
@@ -44,15 +43,17 @@ SUBSCRIPTION_PLANS: dict[str, dict[str, Any]] = {
     },
     "basic": {
         "label": "Basic",
+        # Global tests are Pro-only — tests.create/update/delete/assign excluded.
+        # Proctor Agent is included → proctoring.manage added.
         "allowed_permissions": {
             "users.create", "users.view", "users.update", "users.delete",
             "roles.create", "roles.view", "roles.update", "roles.delete",
-            "tests.create", "tests.view", "tests.update", "tests.assign", "tests.view_allocated", "tests.attempt",
+            "tests.view", "tests.view_allocated", "tests.attempt",
             "coding.create", "coding.assign", "coding.evaluate", "coding.attempt",
             "communication.create", "communication.assign", "communication.evaluate", "communication.attempt",
             "aptitude.create", "aptitude.assign", "aptitude.evaluate", "aptitude.attempt",
             "analytics.view",
-            "proctoring.view",
+            "proctoring.view", "proctoring.manage",
             "submissions.view", "submissions.manage",
             "results.view_own",
         },

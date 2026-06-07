@@ -214,7 +214,7 @@ async def student_problems(student_id: str, request: Request):
 @router.post("/problems")
 async def create_problem(body: ProblemCreate, request: Request):
     actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
-    if not await _has_any_permission(actor_id, ["tests.create"]):
+    if not await _has_any_permission(actor_id, ["coding.create"]):
         raise HTTPException(status_code=403, detail="Permission denied")
     await assert_assessment_limit_for_actor(actor_id)
     problem_id = str(uuid.uuid4())
@@ -263,7 +263,7 @@ async def create_problem(body: ProblemCreate, request: Request):
 @router.delete("/problems/{problem_id}")
 async def delete_problem(problem_id: str, request: Request):
     actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
-    if not await _has_any_permission(actor_id, ["tests.delete", "tests.update", "tests.create"]):
+    if not await _has_any_permission(actor_id, ["coding.create", "coding.assign"]):
         raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -288,7 +288,7 @@ async def delete_problem(problem_id: str, request: Request):
 @router.get("/problems/{problem_id}/allocations")
 async def get_problem_allocations(problem_id: str, request: Request):
     actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
-    if not await _has_any_permission(actor_id, ["tests.assign", "tests.view", "tests.create"]):
+    if not await _has_any_permission(actor_id, ["coding.assign", "coding.create"]):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -400,7 +400,7 @@ async def set_problem_allocations(problem_id: str, request: Request):
 @router.get("/problems/{problem_id}/allocated-students")
 async def get_allocated_students(problem_id: str, request: Request):
     actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
-    if not await _has_any_permission(actor_id, ["tests.assign", "tests.view", "tests.create"]):
+    if not await _has_any_permission(actor_id, ["coding.assign", "coding.create"]):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:

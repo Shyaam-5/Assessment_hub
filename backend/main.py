@@ -40,6 +40,7 @@ Logical platform flow (admin -> content -> student -> monitoring):
 import os
 import logging
 import socketio
+from datetime import datetime, timezone, timedelta
 import pymysql.cursors
 import pymysql
 from contextlib import asynccontextmanager
@@ -520,10 +521,29 @@ async def add_corp_header(request, call_next):
                 primary = await get_primary_pool()
                 async with primary.acquire() as conn:
                     async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                        await cur.execute("SELECT is_active FROM organizations WHERE id = %s", (org_id,))
+                        await cur.execute(
+                            "SELECT is_active, subscription_type, created_at FROM organizations WHERE id = %s",
+                            (org_id,),
+                        )
                         o = await cur.fetchone()
                 if not o or int(o.get("is_active") or 0) != 1:
                     return JSONResponse({"detail": "Organization is inactive. Contact the super admin."}, status_code=403)
+                if (o.get("subscription_type") or "free_trial") == "free_trial":
+                    org_created = o.get("created_at")
+                    if org_created:
+                        if not isinstance(org_created, datetime):
+                            try:
+                                org_created = datetime.fromisoformat(str(org_created))
+                            except Exception:
+                                org_created = None
+                    if org_created:
+                        if org_created.tzinfo is None:
+                            org_created = org_created.replace(tzinfo=timezone.utc)
+                        if datetime.now(timezone.utc) > org_created + timedelta(days=7):
+                            return JSONResponse(
+                                {"detail": "Your 7-day free trial has expired. Please upgrade your subscription."},
+                                status_code=402,
+                            )
                 tenant_pool = await get_tenant_pool_by_org_id(org_id)
                 if tenant_pool is None:
                     return JSONResponse({"detail": "Tenant database is not configured for this organization"}, status_code=503)

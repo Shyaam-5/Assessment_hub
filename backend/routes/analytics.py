@@ -68,6 +68,15 @@ async def _require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+async def _require_export(request: Request) -> str:
+    user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user context")
+    if not await _has_any_permission(user_id, ["analytics.export"]):
+        raise HTTPException(status_code=403, detail="Analytics export requires a Pro subscription")
+    return user_id
+
+
 async def _get_actor_user(request: Request) -> dict:
     user_id = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not user_id:
@@ -1587,6 +1596,7 @@ def _bundle_to_csv(bundle: dict) -> str:
 @router.get("/export/json")
 async def export_analytics_json(request: Request, mentorId: str | None = Query(None)):
     """Download full analytics snapshot as JSON (platform or mentor-scoped)."""
+    await _require_export(request)
     bundle = await _export_bundle(request, mentorId)
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_ANALYTICS_EXPORTED,
@@ -1602,6 +1612,7 @@ async def export_analytics_json(request: Request, mentorId: str | None = Query(N
 @router.get("/export/csv")
 async def export_analytics_csv(request: Request, mentorId: str | None = Query(None)):
     """Download analytics snapshot as CSV sections (platform or mentor-scoped)."""
+    await _require_export(request)
     bundle = await _export_bundle(request, mentorId)
     payload = _bundle_to_csv(bundle)
     audit_logger.log_event(
