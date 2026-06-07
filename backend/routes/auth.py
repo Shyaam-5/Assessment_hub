@@ -486,7 +486,10 @@ async def login_with_google(body: GoogleLoginRequest, request: Request):
         if not org or int(org.get("is_active") or 0) != 1:
             raise HTTPException(status_code=403, detail="Organization is inactive. Contact the super admin.")
 
-    meta = await _start_otp_challenge(row["id"], row["email"], "google")
+    # Google already verified email ownership — no OTP needed.
+    user = await _attach_rbac_context(_clean_user(row))
+    must_change = str(row.get("must_change_password") or "0").strip().lower() in ("1", "true", "yes")
+
     audit_logger.log_authentication(
         event_type=AuditEventType.AUTH_GOOGLE_SIGNIN,
         user_id=row.get("id"),
@@ -494,7 +497,40 @@ async def login_with_google(body: GoogleLoginRequest, request: Request):
         success=True,
         auth_method="google",
     )
-    return {"requiresOtp": True, **meta}
+
+    if must_change:
+        setup_token = str(uuid.uuid4())
+        setup_mins = max(settings.OTP_EXPIRY_MINUTES, 15)
+        async with pool.acquire() as conn:
+            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute(
+                    "UPDATE auth_password_setup_tokens SET consumed = 1 WHERE user_id = %s AND consumed = 0",
+                    (row["id"],),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO auth_password_setup_tokens (token, user_id, expires_at, consumed)
+                    VALUES (%s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE), 0)
+                    """,
+                    (setup_token, row["id"], setup_mins),
+                )
+            await conn.commit()
+        return {
+            "success": True,
+            "mustChangePassword": True,
+            "setupToken": setup_token,
+            "user": user,
+            "accessToken": _issue_user_token(user),
+            "tokenType": "Bearer",
+        }
+
+    return {
+        "success": True,
+        "mustChangePassword": False,
+        "user": user,
+        "accessToken": _issue_user_token(user),
+        "tokenType": "Bearer",
+    }
 
 
 @router.post("/auth/verify-otp")
