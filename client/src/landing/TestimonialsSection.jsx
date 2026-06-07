@@ -6,9 +6,9 @@ const testimonials = [
         text: 'We replaced our entire manual assessment pipeline with AI Assessment Hub. The AI proctoring alone saved our team 200+ hours per semester. The behavior analysis reports are impressively accurate.',
     },
     {
-        initials: 'PM',
-        name: 'Priya Mehta',
-        title: 'Head of L&D — Fortune 500 IT Company',
+        initials: 'KB',
+        name: 'Karthik Balaraman',
+        title: 'Founder & CEO - Ocean Academy',
         text: 'We use the platform for our campus hiring process. The coding sandbox + AI interview combination gives us a 360-degree view of candidates that no other tool could provide. Exceptional accuracy.',
     },
     {
