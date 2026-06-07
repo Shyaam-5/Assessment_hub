@@ -414,15 +414,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         },
     )
 
-# CORS — use explicit origins when configured, fall back to "*" for local dev.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS or ([] if settings.APP_ENV in {"production", "prod"} else ["*"]),
-    allow_credentials=bool(settings.ALLOWED_ORIGINS),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 def _read_auth_token(request: Request) -> str:
     auth = (request.headers.get("authorization") or "").strip()
     if auth.lower().startswith("bearer "):
@@ -571,6 +562,15 @@ async def add_corp_header(request, call_next):
 
     response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     return response
+
+# CORS — keep this outermost so early middleware responses still include CORS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS or ([] if settings.APP_ENV in {"production", "prod"} else ["*"]),
+    allow_credentials=bool(settings.ALLOWED_ORIGINS),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ─── Register routes ────────────────────────────────────────────
 
