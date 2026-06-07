@@ -9,6 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // https://vite.dev/config/
 export default defineConfig(({ mode, command }) => {
     const env = loadEnv(mode, __dirname, '')
+    const googleClientId = (env.VITE_GOOGLE_CLIENT_ID || '').trim()
+    const strictCrossOriginIsolation =
+        env.VITE_STRICT_CROSS_ORIGIN_ISOLATION === 'true' ||
+        env.VITE_STRICT_CROSS_ORIGIN_ISOLATION === '1'
 
     if (command === 'build' && process.env.RENDER === 'true') {
         const apiUrl = (env.VITE_API_URL || '').trim()
@@ -32,6 +36,12 @@ export default defineConfig(({ mode, command }) => {
         if (h) hostSet.add(h)
     }
     const allowedHosts = hostSet.size > 0 ? [...hostSet] : true
+
+    if (strictCrossOriginIsolation && googleClientId) {
+        console.warn(
+            '[vite] Ignoring VITE_STRICT_CROSS_ORIGIN_ISOLATION because Google Sign-In requires popup/postMessage support.',
+        )
+    }
 
     return {
         plugins: [react(), tailwindcss()],
@@ -62,8 +72,7 @@ export default defineConfig(({ mode, command }) => {
             },
             // COOP + COEP enable crossOriginIsolated (SharedArrayBuffer / some TF.js).
             // They break Google Sign-In popups (blank gsi/transform). Opt-in only.
-            ...(env.VITE_STRICT_CROSS_ORIGIN_ISOLATION === 'true' ||
-            env.VITE_STRICT_CROSS_ORIGIN_ISOLATION === '1'
+            ...(strictCrossOriginIsolation && !googleClientId
                 ? {
                       headers: {
                           'Cross-Origin-Opener-Policy': 'same-origin',
