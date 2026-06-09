@@ -421,24 +421,28 @@
 .google-signin-wrap {
     display: flex;
     justify-content: center;
+    align-items: center;
     width: 100%;
+    min-height: 44px;
     border-radius: 0.75rem;
     overflow: hidden;
-    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.25));
-    background: var(--bg-card);
-    min-height: 48px;
+    box-sizing: border-box;
 }
 
+/* The library injects a wrapper div — stretch it so it fills the row */
 .google-signin-wrap > div {
     width: 100% !important;
     display: flex !important;
+    align-items: center !important;
     justify-content: center !important;
 }
 
-.google-signin-wrap iframe {
+/* The rendered iframe cannot be resized cross-origin;
+   scale the container to fill the available width instead */
+.google-signin-wrap > div > div {
     width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
 }
 
 .google-hint {

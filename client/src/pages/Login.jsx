@@ -185,6 +185,8 @@ function Login() {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
     const [showLoginPanel, setShowLoginPanel] = useState(false)
+    const [googleButtonWidth, setGoogleButtonWidth] = useState(320)
+    const googleSigninRef = useRef(null)
     const { login, loginWithGoogle, verifyOtp, completeFirstLogin } = useAuth()
     const selectedPlan = (searchParams.get('plan') || '').trim()
     const selectedSubscriptionId = (searchParams.get('subscriptionId') || '').trim()
@@ -207,6 +209,33 @@ function Login() {
         setShowLoginPanel(false)
         resetFlow()
     }
+
+    useEffect(() => {
+        if (!GOOGLE_CLIENT_CONFIGURED || !showLoginPanel) return undefined
+
+        const updateGoogleButtonWidth = () => {
+            const nextWidth = Math.floor(googleSigninRef.current?.getBoundingClientRect().width || 0)
+            if (!nextWidth) return
+            setGoogleButtonWidth(Math.max(240, Math.min(360, nextWidth)))
+        }
+
+        updateGoogleButtonWidth()
+
+        const observer = new ResizeObserver(() => {
+            updateGoogleButtonWidth()
+        })
+
+        if (googleSigninRef.current) {
+            observer.observe(googleSigninRef.current)
+        }
+
+        window.addEventListener('resize', updateGoogleButtonWidth)
+
+        return () => {
+            observer.disconnect()
+            window.removeEventListener('resize', updateGoogleButtonWidth)
+        }
+    }, [showLoginPanel])
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -389,8 +418,9 @@ function Login() {
                                                 <div className="login-divider" aria-hidden="true">
                                                     <span>or</span>
                                                 </div>
-                                                <div className="google-signin-wrap">
+                                                <div className="google-signin-wrap" ref={googleSigninRef}>
                                                     <GoogleLogin
+                                                        key={googleButtonWidth}
                                                         onSuccess={async (cred) => {
                                                             setError('')
                                                             setLoading(true)
@@ -415,7 +445,7 @@ function Login() {
                                                         use_fedcm_for_button={false}
                                                         theme="filled_blue"
                                                         size="large"
-                                                        width="360"
+                                                        width={String(googleButtonWidth)}
                                                         text="continue_with"
                                                         shape="rectangular"
                                                         logo_alignment="left"
