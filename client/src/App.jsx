@@ -8,6 +8,7 @@ import MentorPortal from './pages/MentorPortal'
 import AdminPortal from './pages/AdminPortal'
 import ScanMobilePage from './prescan/pages/ScanMobilePage'
 import ScanDesktopPage from './prescan/pages/ScanDesktopPage'
+import MobileBlock from './components/MobileBlock'
 
 // Error Boundary to catch React runtime errors
 class ErrorBoundary extends Component {
@@ -405,40 +406,52 @@ function App() {
                 <ErrorBoundary>
                 <Routes>
                     <Route path="/login" element={
-                        user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <Login />
+                        <MobileBlock>
+                            {user && !user.mustChangePassword ? <Navigate to={getHomePath(user)} replace /> : <Login />}
+                        </MobileBlock>
                     } />
                     <Route path="/landing" element={<Navigate to="/" replace />} />
 
                     <Route path="/student/*" element={
-                        <ProtectedRoute allowedRoles={['student', 'org_user', 'learner']} requireExamWorkspace>
-                            <StudentPortal />
-                        </ProtectedRoute>
+                        <MobileBlock>
+                            <ProtectedRoute allowedRoles={['student', 'org_user', 'learner']} requireExamWorkspace>
+                                <StudentPortal />
+                            </ProtectedRoute>
+                        </MobileBlock>
                     } />
 
                     <Route path="/mentor/*" element={
-                        <ProtectedRoute allowedRoles={['mentor']}>
-                            <MentorPortal />
-                        </ProtectedRoute>
+                        <MobileBlock>
+                            <ProtectedRoute allowedRoles={['mentor']}>
+                                <MentorPortal />
+                            </ProtectedRoute>
+                        </MobileBlock>
                     } />
 
                     <Route path="/admin/*" element={
-                        <ProtectedRoute allowedRoles={['admin', 'organization_admin']}>
-                            <AdminPortal />
-                        </ProtectedRoute>
+                        <MobileBlock>
+                            <ProtectedRoute allowedRoles={['admin', 'organization_admin']}>
+                                <AdminPortal />
+                            </ProtectedRoute>
+                        </MobileBlock>
                     } />
 
                     <Route path="/role/*" element={
-                        <ProtectedRoute allowedRoles={['org_user']} requireStaffWorkspace>
-                            <AdminPortal />
-                        </ProtectedRoute>
+                        <MobileBlock>
+                            <ProtectedRoute allowedRoles={['org_user']} requireStaffWorkspace>
+                                <AdminPortal />
+                            </ProtectedRoute>
+                        </MobileBlock>
                     } />
 
                     {/* Environment scan routes (public — token-based auth for mobile) */}
                     <Route path="/scan/mobile" element={<ScanMobilePage />} />
                     <Route path="/scan/desktop" element={
-                        <ProtectedRoute allowedRoles={['student', 'learner', 'org_user', 'mentor', 'admin', 'organization_admin']}>
-                            <ScanDesktopPage />
-                        </ProtectedRoute>
+                        <MobileBlock>
+                            <ProtectedRoute allowedRoles={['student', 'learner', 'org_user', 'mentor', 'admin', 'organization_admin']}>
+                                <ScanDesktopPage />
+                            </ProtectedRoute>
+                        </MobileBlock>
                     } />
 
                     <Route path="/" element={
