@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
     Brain, Plus, Trash2, ToggleLeft, ToggleRight, Users, CheckCircle, XCircle,
@@ -131,8 +131,16 @@ export default function SkillTestManager() {
     const [selectedStudents, setSelectedStudents] = useState(new Set());
     const [allocSearch, setAllocSearch] = useState('');
     const [allocSaving, setAllocSaving] = useState(false);
+    const createFormRef = useRef(null);
 
     useEffect(() => { loadTests(); }, []);
+    useEffect(() => {
+        if (showCreate) {
+            setTimeout(() => {
+                createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
+        }
+    }, [showCreate]);
 
     const loadTests = async () => {
         try {
@@ -329,7 +337,7 @@ export default function SkillTestManager() {
 
             {/* Create Form — Redesigned */}
             {showCreate && (
-                <div style={{
+                <div ref={createFormRef} style={{
                     background: 'linear-gradient(135deg, rgba(139,92,246,0.08), rgba(109,40,217,0.05))',
                     borderRadius: '16px', padding: '24px', marginBottom: '28px',
                     border: '1px solid rgba(139,92,246,0.2)', boxShadow: '0 4px 20px rgba(0,0,0,0.2)'

@@ -919,7 +919,7 @@ function RoleWorkspaceHome({ featureAccess, link, user }) {
     }
 
     return (
-        <div className="animate-fadeIn">
+        <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{
                 background: 'linear-gradient(135deg, rgba(30, 64, 175, 0.1) 0%, rgba(139, 92, 246, 0.08) 100%)',
                 borderRadius: '20px',
@@ -1088,7 +1088,8 @@ function Dashboard() {
                 marginBottom: '2rem',
                 border: '1px solid rgba(59, 130, 246, 0.2)',
                 position: 'relative',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                order: 0
             }}>
                 <div style={{
                     position: 'absolute',
@@ -2817,6 +2818,26 @@ function GlobalProblems({ mode = 'all' }) {
         setActiveTab(forcedTab)
     }, [forcedTab])
 
+    useEffect(() => {
+        setGeneratedProblemDraft(null)
+        setProblemAiPrompt({
+            topic: '',
+            difficulty: 'Medium',
+            language: activeTab === 'sql' ? 'SQL' : 'Python'
+        })
+        setProblem(prev => ({
+            ...prev,
+            type: activeTab === 'sql' ? 'SQL' : 'Coding',
+            language: activeTab === 'sql' ? 'SQL' : (prev.language === 'SQL' ? 'Python' : prev.language),
+            title: '',
+            description: '',
+            sampleInput: '',
+            expectedOutput: '',
+            sqlSchema: '',
+            expectedQueryResult: ''
+        }))
+    }, [activeTab])
+
     const applyGeneratedProblemDraft = (generated) => {
         const isSQL = generated.type === 'SQL' || generated.language === 'SQL'
         setProblem({
@@ -3083,7 +3104,7 @@ function GlobalProblems({ mode = 'all' }) {
     const createModalTitle = activeTab === 'sql' ? 'Create Global SQL Problem' : 'Create Global Coding Problem'
 
     return (
-        <div className="animate-fadeIn">
+        <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column' }}>
             {/* Hero Section */}
             <div className="admin-hero-card glass" style={{
                 background: 'var(--bg-card)',
@@ -3092,7 +3113,8 @@ function GlobalProblems({ mode = 'all' }) {
                 marginBottom: '2rem',
                 border: '1px solid var(--border-color)',
                 position: 'relative',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                order: 0
             }}>
                 <div style={{ position: 'absolute', top: '-50px', right: '-50px', width: '200px', height: '200px', background: 'radial-gradient(circle, var(--primary-alpha) 0%, transparent 70%)', borderRadius: '50%' }}></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 1 }}>
@@ -3138,14 +3160,25 @@ function GlobalProblems({ mode = 'all' }) {
                         </button>
                         <button
                             onClick={() => {
-                                if (forcedTab === 'sql') {
-                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL' }))
-                                    setProblemAiPrompt(prev => ({ ...prev, language: 'SQL' }))
+                                setGeneratedProblemDraft(null)
+                                setProblemAiPrompt({
+                                    topic: '',
+                                    difficulty: 'Medium',
+                                    language: activeTab === 'sql' ? 'SQL' : 'Python'
+                                })
+                                if (activeTab === 'sql') {
+                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: '', expectedQueryResult: '' }))
                                 } else {
                                     setProblem(prev => ({
                                         ...prev,
                                         type: 'Coding',
-                                        language: prev.language === 'SQL' ? 'Python' : prev.language
+                                        language: prev.language === 'SQL' ? 'Python' : prev.language,
+                                        title: '',
+                                        description: '',
+                                        sampleInput: '',
+                                        expectedOutput: '',
+                                        sqlSchema: '',
+                                        expectedQueryResult: ''
                                     }))
                                 }
                                 setShowModal(true)
@@ -3171,13 +3204,25 @@ function GlobalProblems({ mode = 'all' }) {
                                     setShowModal(false)
                                     return
                                 }
-                                if (forcedTab === 'sql') {
-                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL' }))
-                                } else if (forcedTab === 'coding') {
+                                setGeneratedProblemDraft(null)
+                                setProblemAiPrompt({
+                                    topic: '',
+                                    difficulty: 'Medium',
+                                    language: activeTab === 'sql' ? 'SQL' : 'Python'
+                                })
+                                if (activeTab === 'sql') {
+                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: '', expectedQueryResult: '' }))
+                                } else {
                                     setProblem((prev) => ({
                                         ...prev,
-                                        type: prev.type === 'SQL' ? 'Coding' : prev.type,
+                                        type: 'Coding',
                                         language: prev.language === 'SQL' ? 'Python' : prev.language,
+                                        title: '',
+                                        description: '',
+                                        sampleInput: '',
+                                        expectedOutput: '',
+                                        sqlSchema: '',
+                                        expectedQueryResult: '',
                                     }))
                                 }
                                 setShowModal(true)
@@ -3199,32 +3244,47 @@ function GlobalProblems({ mode = 'all' }) {
             </div>
 
             {/* Stats Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
-                <div className="stat-card glass">
-                    <div className="stat-icon" style={{ background: 'var(--primary-alpha)', color: 'var(--primary)' }}>
-                        <FileCode size={24} />
+            <div style={{ display: 'grid', gridTemplateColumns: forcedTab ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem', order: 2 }}>
+                {!forcedTab && (
+                    <div className="stat-card glass">
+                        <div className="stat-icon" style={{ background: 'var(--primary-alpha)', color: 'var(--primary)' }}>
+                            <FileCode size={24} />
+                        </div>
+                        <div className="stat-info">
+                            <span className="stat-label">Coding Problems</span>
+                            <span className="stat-value">{codingProblems.length}</span>
+                        </div>
                     </div>
-                    <div className="stat-info">
-                        <span className="stat-label">Coding Problems</span>
-                        <span className="stat-value">{codingProblems.length}</span>
+                )}
+                {!forcedTab && (
+                    <div className="stat-card glass">
+                        <div className="stat-icon" style={{ background: 'var(--success-alpha)', color: 'var(--success)' }}>
+                            <Database size={24} />
+                        </div>
+                        <div className="stat-info">
+                            <span className="stat-label">SQL Problems</span>
+                            <span className="stat-value">{sqlProblems.length}</span>
+                        </div>
                     </div>
-                </div>
-                <div className="stat-card glass">
-                    <div className="stat-icon" style={{ background: 'var(--success-alpha)', color: 'var(--success)' }}>
-                        <Database size={24} />
+                )}
+                {forcedTab && (
+                    <div className="stat-card glass">
+                        <div className="stat-icon" style={{ background: activeTab === 'sql' ? 'var(--success-alpha)' : 'var(--primary-alpha)', color: activeTab === 'sql' ? 'var(--success)' : 'var(--primary)' }}>
+                            {activeTab === 'sql' ? <Database size={24} /> : <FileCode size={24} />}
+                        </div>
+                        <div className="stat-info">
+                            <span className="stat-label">{activeTab === 'sql' ? 'SQL Problems' : 'Coding Problems'}</span>
+                            <span className="stat-value">{displayedProblems.length}</span>
+                        </div>
                     </div>
-                    <div className="stat-info">
-                        <span className="stat-label">SQL Problems</span>
-                        <span className="stat-value">{sqlProblems.length}</span>
-                    </div>
-                </div>
+                )}
                 <div className="stat-card glass">
                     <div className="stat-icon" style={{ background: 'var(--warning-alpha)', color: 'var(--warning)' }}>
                         <CheckCircle size={24} />
                     </div>
                     <div className="stat-info">
                         <span className="stat-label">Active Problems</span>
-                        <span className="stat-value">{problems.filter(p => p.status === 'live').length}</span>
+                        <span className="stat-value">{displayedProblems.filter(p => p.status === 'live').length}</span>
                     </div>
                 </div>
                 <div className="stat-card glass">
@@ -3233,14 +3293,25 @@ function GlobalProblems({ mode = 'all' }) {
                     </div>
                     <div className="stat-info">
                         <span className="stat-label">Total Solutions</span>
-                        <span className="stat-value">{problems.reduce((acc, p) => acc + (p.completedBy?.length || 0), 0)}</span>
+                        <span className="stat-value">{displayedProblems.reduce((acc, p) => acc + (p.completedBy?.length || 0), 0)}</span>
                     </div>
                 </div>
+                {forcedTab && (
+                    <div className="stat-card glass">
+                        <div className="stat-icon" style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}>
+                            <Users size={24} />
+                        </div>
+                        <div className="stat-info">
+                            <span className="stat-label">Allocated</span>
+                            <span className="stat-value">{displayedProblems.reduce((acc, p) => acc + (p.allocatedCount || 0), 0)}</span>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Tab Buttons */}
             {!forcedTab && (
-                <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
+                <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content', order: 3 }}>
                     <button onClick={() => setActiveTab('coding')} className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}>
                         <Code size={18} /> Coding Problems
                         <span className="tab-count">{codingProblems.length}</span>
@@ -3252,7 +3323,7 @@ function GlobalProblems({ mode = 'all' }) {
                 </div>
             )}
 
-            <div className="card glass" style={{ padding: '1.5rem', borderRadius: '1.5rem', marginBottom: '2rem' }}>
+            <div className="card glass" style={{ padding: '1.5rem', borderRadius: '1.5rem', marginBottom: '2rem', order: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
                     {activeTab === 'sql' ? <Database size={20} style={{ color: '#06b6d4' }} /> : <Code size={20} style={{ color: '#3b82f6' }} />}
                     <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>
@@ -3469,7 +3540,7 @@ function GlobalProblems({ mode = 'all' }) {
 
             {/* Create Modal */}
             {showModal && (
-                <div style={adminBuilderPanelStyle('rgba(16,185,129,0.2)', 'rgba(16,185,129,0.08)', 'rgba(6,182,212,0.05)')}>
+                <div style={{ ...adminBuilderPanelStyle('rgba(16,185,129,0.2)', 'rgba(16,185,129,0.08)', 'rgba(6,182,212,0.05)'), order: 1 }}>
                     <div style={adminBuilderHeaderStyle}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <div style={{
@@ -3879,18 +3950,7 @@ function GlobalTestsAdmin() {
         maxAttempts: 1,
         maxTabSwitches: 3,
         resultVisibility: 'immediate',
-        status: 'live',
-        sectionConfig: {
-            sections: [
-                { id: 'aptitude', enabled: true, order: 1, questionsCount: 20, timeMinutes: 30 },
-                { id: 'verbal', enabled: true, order: 2, questionsCount: 25, timeMinutes: 25 },
-                { id: 'logical', enabled: true, order: 3, questionsCount: 20, timeMinutes: 20 },
-                { id: 'coding', enabled: true, order: 4, questionsCount: 2, timeMinutes: 50 },
-                { id: 'sql', enabled: true, order: 5, questionsCount: 1, timeMinutes: 25 }
-            ],
-            totalDurationMinutes: 180,
-            sectionTimeMode: 'fixed'
-        }
+        status: 'live'
     })
     const [questionsBySection, setQuestionsBySection] = useState({
         aptitude: [], verbal: [], logical: [], coding: [], sql: []
@@ -3923,6 +3983,7 @@ function GlobalTestsAdmin() {
     const [enableProctoring, setEnableProctoring] = useState(true)
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
+    const globalTestBuilderRef = useRef(null)
 
     // Allocation state
     const [allocatingTest, setAllocatingTest] = useState(null)
@@ -4044,21 +4105,13 @@ function GlobalTestsAdmin() {
     }
 
     useEffect(() => { fetchTests(); fetchSubmissions() }, [])
-
-    const updateSectionConfig = (sectionId, field, value) => {
-        setNewTest(prev => ({
-            ...prev,
-            sectionConfig: {
-                ...prev.sectionConfig,
-                sections: prev.sectionConfig.sections.map(s =>
-                    s.id === sectionId ? { ...s, [field]: value } : s
-                )
-            }
-        }))
-    }
-    const toggleSection = (sectionId, enabled) => {
-        updateSectionConfig(sectionId, 'enabled', enabled)
-    }
+    useEffect(() => {
+        if (showModal) {
+            setTimeout(() => {
+                globalTestBuilderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }, 50)
+        }
+    }, [showModal])
 
     const addManualQuestion = () => {
         if (!manualQuestion.question.trim()) return
@@ -4289,8 +4342,7 @@ function GlobalTestsAdmin() {
             setNewTest({
                 title: '', type: 'comprehensive', difficulty: 'Medium', duration: 180, passingScore: 60,
                 description: '', startTime: '', deadline: '', maxAttempts: 1, maxTabSwitches: 3,
-                resultVisibility: 'immediate', status: 'live',
-                sectionConfig: newTest.sectionConfig
+                resultVisibility: 'immediate', status: 'live'
             })
             setProctoringSettings(defaultProctoringSettings)
             fetchTests()
@@ -4391,8 +4443,7 @@ function GlobalTestsAdmin() {
                 maxAttempts: t.maxAttempts ?? 1,
                 maxTabSwitches: t.maxTabSwitches ?? 3,
                 resultVisibility: t.resultVisibility || 'immediate',
-                status: t.status || 'draft',
-                sectionConfig: t.sectionConfig || newTest.sectionConfig
+                status: t.status || 'draft'
             })
             setQuestionsBySection(bySection)
             setEditingId(t.id)
@@ -4544,7 +4595,7 @@ function GlobalTestsAdmin() {
             </div>
 
             {postCreateAction && (
-                <div className="dashboard-panel" style={{ marginBottom: '1.5rem', border: '1px solid var(--success)' }}>
+                <div className="dashboard-panel" style={{ marginBottom: '1.5rem', border: '1px solid var(--success)', order: 2 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
                         <div>
                             <h3 style={{ margin: 0 }}>{postCreateAction.type} Created</h3>
@@ -4564,7 +4615,7 @@ function GlobalTestsAdmin() {
             )}
 
             {/* Stats grid – like Global Problems */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem', order: 3 }}>
                 <div className="stat-card glass">
                     <div className="stat-icon" style={{ background: 'var(--primary-alpha)', color: 'var(--primary)' }}><ClipboardList size={24} /></div>
                     <div className="stat-info">
@@ -4589,14 +4640,14 @@ function GlobalTestsAdmin() {
             </div>
 
             {tests.length === 0 && !loading ? (
-                <div style={{ textAlign: 'center', padding: '4rem', opacity: 0.7 }}>
+                <div style={{ textAlign: 'center', padding: '4rem', opacity: 0.7, order: 4 }}>
                     <ClipboardList size={64} style={{ marginBottom: '1rem', opacity: 0.3 }} />
                     <h3>No global tests yet</h3>
                     <p style={{ color: 'var(--text-muted)' }}>Create one to add Aptitude, Verbal, Logical, Coding, and SQL sections.</p>
                     <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>If you see 503, run: <code>node migrate_global_tests.js</code></p>
                 </div>
             ) : (
-                <div className="card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '1.5rem', padding: '1.5rem' }}>
+                <div className="card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '1.5rem', padding: '1.5rem', order: 4 }}>
                     <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1.25rem' }}>
                         <ClipboardList size={20} style={{ color: '#8b5cf6' }} /> All Global Tests
                     </h3>
@@ -4776,7 +4827,7 @@ function GlobalTestsAdmin() {
             )}
 
             {showModal && (
-                <div style={adminBuilderPanelStyle('rgba(139,92,246,0.2)', 'rgba(139,92,246,0.08)', 'rgba(6,182,212,0.05)')}>
+                <div ref={globalTestBuilderRef} style={{ ...adminBuilderPanelStyle('rgba(139,92,246,0.2)', 'rgba(139,92,246,0.08)', 'rgba(6,182,212,0.05)'), order: 1 }}>
                     <div style={adminBuilderShellStyle}>
                         {/* Modal Header - Fixed */}
                         <div style={{
@@ -4797,7 +4848,7 @@ function GlobalTestsAdmin() {
                                 <div>
                                     <h2 style={{ margin: 0, fontSize: '1.25rem' }}>{editingId ? 'Edit' : 'Create'} Global Test</h2>
                                     <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)' }}>
-                                        {modalStep === 1 ? 'Step 1: Basic Settings & Sections' : 'Step 2: Add Questions to Sections'}
+                                        {modalStep === 1 ? 'Step 1: Basic Settings' : 'Step 2: Add Questions'}
                                     </p>
                                 </div>
                             </div>
@@ -4865,24 +4916,8 @@ function GlobalTestsAdmin() {
                                         <label className="form-label">Description (optional)</label>
                                         <textarea placeholder="Instructions for students" value={newTest.description} onChange={e => setNewTest({ ...newTest, description: e.target.value })} rows={2} style={{ width: '100%', resize: 'vertical' }} />
                                     </div>
-                                    <div style={{ marginBottom: '1.5rem' }}>
-                                        <h4 style={{ margin: '0 0 0.75rem' }}>Sections — Coding min 2, SQL min 1 (max set by you)</h4>
-                                        {(newTest.sectionConfig?.sections || []).map(s => (
-                                            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 120 }}>
-                                                    <input type="checkbox" checked={!!s.enabled} onChange={e => toggleSection(s.id, e.target.checked)} />
-                                                    {GLOBAL_SECTIONS.find(g => g.id === s.id)?.icon} {GLOBAL_SECTIONS.find(g => g.id === s.id)?.label}
-                                                    {s.id === 'coding' && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>(min 2)</span>}
-                                                    {s.id === 'sql' && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>(min 1)</span>}
-                                                </label>
-                                                <input type="number" min={s.id === 'coding' ? 2 : s.id === 'sql' ? 1 : 0} placeholder="Count" value={s.questionsCount ?? ''} onChange={e => updateSectionConfig(s.id, 'questionsCount', parseInt(e.target.value) || 0)} style={{ width: 70 }} />
-                                                <input type="number" min="0" placeholder="Min" value={s.timeMinutes ?? ''} onChange={e => updateSectionConfig(s.id, 'timeMinutes', parseInt(e.target.value) || 0)} style={{ width: 70 }} />
-                                            </div>
-                                        ))}
-                                    </div>
                                     <div style={adminBuilderSummaryBarStyle}>
                                         <div style={adminBuilderSummaryItemsStyle}>
-                                            <span><ClipboardList size={13} style={{ verticalAlign: 'middle' }} /> {(newTest.sectionConfig?.sections || []).filter(s => s.enabled).length} sections</span>
                                             <span><Clock size={13} style={{ verticalAlign: 'middle' }} /> {newTest.duration} min</span>
                                             <span><Target size={13} style={{ verticalAlign: 'middle' }} /> {newTest.passingScore}% pass</span>
                                             <span style={{ color: proctoringSettings.enabled ? '#22c55e' : '#ef4444' }}>
@@ -5676,13 +5711,14 @@ function AptitudeTestsAdmin() {
     if (loading) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     return (
-        <div className="animate-fadeIn">
+        <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column' }}>
             {/* Header */}
             <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: '2rem'
+                marginBottom: '2rem',
+                order: 0
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                     <div style={{
@@ -5744,7 +5780,7 @@ function AptitudeTestsAdmin() {
             </div>
 
             {postCreateAction && (
-                <div className="dashboard-panel" style={{ marginBottom: '1.5rem', border: '1px solid var(--success)' }}>
+                <div className="dashboard-panel" style={{ marginBottom: '1.5rem', border: '1px solid var(--success)', order: 2 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
                         <div>
                             <h3 style={{ margin: 0 }}>{postCreateAction.type} Created</h3>
@@ -5765,7 +5801,8 @@ function AptitudeTestsAdmin() {
                 display: 'grid',
                 gridTemplateColumns: 'repeat(4, 1fr)',
                 gap: '1rem',
-                marginBottom: '2rem'
+                marginBottom: '2rem',
+                order: 3
             }}>
                 <div className="stat-card glass">
                     <div className="stat-icon" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6' }}>
@@ -5810,7 +5847,7 @@ function AptitudeTestsAdmin() {
             </div>
 
             {/* Tests Table */}
-            <div className="card glass">
+            <div className="card glass" style={{ order: 4 }}>
                 <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
                     <Target size={20} style={{ color: '#8b5cf6' }} /> All Aptitude Tests
                 </h3>
@@ -5976,7 +6013,7 @@ function AptitudeTestsAdmin() {
 
             {/* Create Test Modal */}
             {showModal && (
-                <div style={adminBuilderPanelStyle('rgba(139,92,246,0.2)', 'rgba(139,92,246,0.08)', 'rgba(99,102,241,0.05)')}>
+                <div style={{ ...adminBuilderPanelStyle('rgba(139,92,246,0.2)', 'rgba(139,92,246,0.08)', 'rgba(99,102,241,0.05)'), order: 1 }}>
                     <div style={adminBuilderHeaderStyle}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <div style={{
@@ -7213,4 +7250,5 @@ function ErrorMonitoringDashboard({ user }) {
 }
 
 export default AdminPortal
+
 
