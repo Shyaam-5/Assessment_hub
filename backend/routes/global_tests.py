@@ -618,24 +618,39 @@ async def list_org_students(request: Request):
     actor = (getattr(request.state, "auth_user_id", None) or "").strip()
     if not await _has_any_permission(actor, ["tests.assign"]):
         raise HTTPException(403, "Permission denied")
-    pool = await get_pool()
+    pool = await get_primary_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                await cur.execute("SELECT role, organization_id FROM users WHERE id = %s LIMIT 1", (actor,))
+                actor_row = await cur.fetchone() or {}
+                actor_role = str(actor_row.get("role") or "").strip().lower()
+                actor_org_id = actor_row.get("organization_id")
+                params: list[Any] = []
+                org_filter = ""
+                if actor_role != "admin" and actor_org_id:
+                    org_filter = " AND u.organization_id = %s"
+                    params.append(actor_org_id)
                 await cur.execute(
-                    """
+                    f"""
                     SELECT DISTINCT u.id, u.name, u.email, u.batch
                     FROM users u
-                    JOIN user_role_assignments ura ON ura.user_id = u.id
-                    JOIN roles r ON r.id = ura.role_id
-                    WHERE u.role = 'org_user'
-                      AND ura.is_primary = 1
-                      AND (
-                        LOWER(TRIM(r.slug)) = 'exam-taker'
-                        OR LOWER(TRIM(r.name)) = 'exam taker'
-                      )
+                    LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+                    LEFT JOIN roles r ON r.id = ura.role_id
+                    WHERE (
+                        u.role = 'student'
+                        OR (
+                            u.role = 'org_user'
+                            AND (
+                                LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
+                                OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
+                            )
+                        )
+                    )
+                    {org_filter}
                     ORDER BY u.name
-                    """
+                    """,
+                    tuple(params),
                 )
                 rows = await cur.fetchall()
         return [{"id": r["id"], "name": r["name"], "email": r["email"], "batch": r.get("batch")} for r in rows]
@@ -683,6 +698,7 @@ async def set_test_allocations(test_id: str, request: Request):
         raise HTTPException(400, "studentIds must be a list")
     student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
@@ -690,26 +706,32 @@ async def set_test_allocations(test_id: str, request: Request):
                 await cur.execute(_ALLOC_TABLE_DDL)
                 if student_ids:
                     placeholders = ",".join(["%s"] * len(student_ids))
-                    await cur.execute(
+                    async with primary_pool.acquire() as primary_conn:
+                        async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                            await primary_cur.execute(
                         f"""
                         SELECT DISTINCT u.id
                         FROM users u
-                        JOIN user_role_assignments ura ON ura.user_id = u.id
-                        JOIN roles r ON r.id = ura.role_id
+                        LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+                        LEFT JOIN roles r ON r.id = ura.role_id
                         WHERE u.id IN ({placeholders})
-                          AND u.role = 'org_user'
-                          AND ura.is_primary = 1
                           AND (
-                            LOWER(TRIM(r.slug)) = 'exam-taker'
-                            OR LOWER(TRIM(r.name)) = 'exam taker'
+                            u.role = 'student'
+                            OR (
+                              u.role = 'org_user'
+                              AND (
+                                LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
+                                OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
+                              )
+                            )
                           )
                         """,
                         student_ids,
                     )
-                    allowed_ids = {str(r[0]) if not isinstance(r, dict) else str(r["id"]) for r in (await cur.fetchall() or [])}
+                    allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
                     invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
                     if invalid_ids:
-                        raise HTTPException(400, "Only users with Exam Taker role can be allocated")
+                        raise HTTPException(400, "Only student or exam-taker users can be allocated")
                 await cur.execute("SELECT title FROM global_tests WHERE id = %s", (test_id,))
                 test_row = await cur.fetchone()
                 test_title = (test_row[0] if test_row else None) or "Global Assessment"

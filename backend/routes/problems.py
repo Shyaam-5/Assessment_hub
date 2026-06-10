@@ -243,7 +243,7 @@ async def create_problem(body: ProblemCreate, request: Request):
                     detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
                     enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation,
                     created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     problem_id, body.mentorId, body.title, body.description,
                     body.sampleInput, body.expectedOutput,
