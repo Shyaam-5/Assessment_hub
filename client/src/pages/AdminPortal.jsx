@@ -5402,6 +5402,7 @@ function AptitudeTestsAdmin() {
     const [isGenerating, setIsGenerating] = useState(false)
     const [generatedQuestions, setGeneratedQuestions] = useState([])
     const [aiPrompt, setAiPrompt] = useState({ topic: '', difficulty: 'Medium', count: 5 })
+    const [creatingTest, setCreatingTest] = useState(false)
     const [submissions, setSubmissions] = useState([])
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
@@ -5486,6 +5487,7 @@ function AptitudeTestsAdmin() {
 
     const handleCreateTest = async (e) => {
         if (e) e.preventDefault()
+        if (creatingTest) return
 
         if (newTest.questions.length === 0) {
             alert('Please add at least one question')
@@ -5502,6 +5504,7 @@ function AptitudeTestsAdmin() {
             return
         }
 
+        setCreatingTest(true)
         try {
             // Convert dates to ISO strings without timezone conversion
             // because datetime-local input is already in local time
@@ -5543,6 +5546,8 @@ function AptitudeTestsAdmin() {
         } catch (error) {
             console.error(error)
             alert(error.response?.data?.error || 'Error creating test')
+        } finally {
+            setCreatingTest(false)
         }
     }
 
@@ -6516,8 +6521,8 @@ function AptitudeTestsAdmin() {
                                 <button type="button" className="btn-reset" onClick={() => setShowModal(false)}>
                                     <X size={16} /> Cancel
                                 </button>
-                                <button type="submit" className="btn-create-new" disabled={newTest.questions.length === 0}>
-                                    <Save size={16} /> Create Test
+                                <button type="submit" className="btn-create-new" disabled={newTest.questions.length === 0 || creatingTest}>
+                                    <Save size={16} /> {creatingTest ? 'Creating...' : 'Create Test'}
                                 </button>
                             </div>
                         </form>

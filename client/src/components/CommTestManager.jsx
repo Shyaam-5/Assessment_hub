@@ -134,6 +134,7 @@ export default function CommTestManager() {
     };
 
     const createTest = async () => {
+        if (creating) return;
         if (!form.title.trim()) return setError('Title is required');
         setError(''); setCreating(true);
         try {

@@ -147,6 +147,7 @@ export default function SkillTestManager() {
     };
 
     const createTest = async () => {
+        if (creating) return;
         if (!form.title.trim()) return setError('Title is required');
         if (form.skills.length === 0) return setError('Select at least one skill');
         const totalQuestions = Number(form.mcq_count || 0) + Number(form.coding_count || 0) + Number(form.sql_count || 0) + Number(form.interview_count || 0);

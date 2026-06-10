@@ -388,6 +388,7 @@ function UploadProblems({ user }) {
     const [showAIChat, setShowAIChat] = useState(false)
     const [activeTab, setActiveTab] = useState('coding') // 'coding' or 'sql'
     const [uploading, setUploading] = useState(false)
+    const [submittingProblem, setSubmittingProblem] = useState(false)
     const csvInputRef = useRef(null)
     const [selectedProblemForTestCases, setSelectedProblemForTestCases] = useState(null)
     const [problem, setProblem] = useState({
@@ -464,6 +465,7 @@ function UploadProblems({ user }) {
     }, [user.id])
 
     const handleCSVUpload = async (e) => {
+        if (uploading) return
         const file = e.target.files[0]
         if (!file) return
         setUploading(true)
@@ -551,6 +553,8 @@ function UploadProblems({ user }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault()
+        if (submittingProblem) return
+        setSubmittingProblem(true)
         try {
             await axios.post(`${API_BASE}/problems`, { ...problem, mentorId: user.id })
             setShowModal(false)
@@ -564,6 +568,8 @@ function UploadProblems({ user }) {
             fetchData()
         } catch (error) {
             alert('Error creating problem')
+        } finally {
+            setSubmittingProblem(false)
         }
     }
 
@@ -958,7 +964,7 @@ function UploadProblems({ user }) {
 
                                 <div className="form-actions">
                                     <button type="button" className="btn-reset" onClick={() => setShowModal(false)}>Cancel</button>
-                                    <button type="submit" className="btn-create-new"><Plus size={16} /> Create Problem</button>
+                                    <button type="submit" className="btn-create-new" disabled={submittingProblem}><Plus size={16} /> {submittingProblem ? 'Creating...' : 'Create Problem'}</button>
                                 </div>
                             </form>
                         </div>
