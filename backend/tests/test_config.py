@@ -18,7 +18,7 @@ def _reload_config(monkeypatch, env: dict):
     for k in list(__import__("os").environ.keys()):
         if k.startswith("GROQ_API_KEY") or k in {
             "DATABASE_URL", "GROQ_MODEL", "GROQ_FALLBACK_MODELS", "PORT",
-            "SERVER_LAN_IP", "SECRET_KEY", "ALLOWED_ORIGINS",
+            "SERVER_LAN_IP", "SECRET_KEY", "ALLOWED_ORIGINS", "APP_ENV",
             "GROQ_VISION_MODEL", "FRONTEND_URL", "PRESCAN_SECRET_KEY", "GOOGLE_OAUTH_CLIENT_ID",
             "GOOGLE_OAUTH_CLOCK_SKEW_SECONDS",
             "OTP_EXPIRY_MINUTES", "OTP_MAX_FAILED_ATTEMPTS", "FIRST_LOGIN_PASSWORD_MIN_LEN",
@@ -85,6 +85,16 @@ def test_groq_keys_empty_when_no_env(monkeypatch):
     s = cfg.settings
     assert s.GROQ_API_KEYS == []
     assert s.GROQ_API_KEY == ""
+
+
+def test_secret_key_requires_explicit_value_in_production(monkeypatch):
+    with pytest.raises(RuntimeError, match="SECRET_KEY must be set"):
+        _reload_config(monkeypatch, {"APP_ENV": "production", "SECRET_KEY": "", "PRESCAN_SECRET_KEY": ""})
+
+
+def test_prescan_secret_inherits_primary_secret(monkeypatch):
+    cfg = _reload_config(monkeypatch, {"SECRET_KEY": "primary-secret", "PRESCAN_SECRET_KEY": ""})
+    assert cfg.settings.PRESCAN_SECRET_KEY == "primary-secret"
 
 
 def test_groq_fallback_strips_primary_model(monkeypatch):

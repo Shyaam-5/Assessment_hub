@@ -157,6 +157,111 @@ const normalizeImportedMcq = (row, { includeSection = false } = {}) => {
     return item
 }
 
+const adminCreateSectionCardStyle = {
+    background: '#1e293b',
+    borderRadius: '14px',
+    border: '1px solid #334155',
+    overflow: 'hidden',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+}
+
+function AdminCreateSectionCard({ icon, title, subtitle, color, children }) {
+    return (
+        <div style={adminCreateSectionCardStyle}>
+            <div style={{
+                padding: '14px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                borderBottom: '1px solid #334155',
+                background: `linear-gradient(135deg, ${color}18, ${color}08)`
+            }}>
+                <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: `${color}25`,
+                    color
+                }}>{icon}</div>
+                <div>
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#f1f5f9' }}>{title}</div>
+                    {subtitle && <div style={{ fontSize: '11px', color: '#94a3b8' }}>{subtitle}</div>}
+                </div>
+            </div>
+            <div style={{ padding: '16px 18px' }}>{children}</div>
+        </div>
+    )
+}
+
+function AdminNumberInput({ label, value, onChange, min, max, icon, color, suffix, width = '100%' }) {
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {icon} {label}
+            </label>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: '10px',
+                border: '1px solid #475569',
+                overflow: 'hidden',
+                background: '#0f172a',
+                width
+            }}>
+                <button type="button" onClick={() => onChange(Math.max(min, (Number(value) || 0) - 1))} style={{
+                    width: '36px',
+                    height: '40px',
+                    border: 'none',
+                    background: '#1e293b',
+                    cursor: 'pointer',
+                    fontSize: '18px',
+                    color: '#94a3b8',
+                    fontWeight: 600,
+                    borderRight: '1px solid #475569'
+                }}>−</button>
+                <input
+                    className="number-input-no-spinner"
+                    type="number"
+                    value={value}
+                    min={min}
+                    max={max}
+                    onChange={e => onChange(Math.min(max, Math.max(min, parseInt(e.target.value) || min)))}
+                    style={{
+                        flex: 1,
+                        textAlign: 'center',
+                        border: 'none',
+                        outline: 'none',
+                        fontSize: '16px',
+                        fontWeight: 700,
+                        color: color || '#f1f5f9',
+                        padding: '8px 4px',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        background: 'transparent',
+                        appearance: 'textfield',
+                        MozAppearance: 'textfield'
+                    }}
+                />
+                <button type="button" onClick={() => onChange(Math.min(max, (Number(value) || 0) + 1))} style={{
+                    width: '36px',
+                    height: '40px',
+                    border: 'none',
+                    background: '#1e293b',
+                    cursor: 'pointer',
+                    fontSize: '18px',
+                    color: '#94a3b8',
+                    fontWeight: 600,
+                    borderLeft: '1px solid #475569'
+                }}>+</button>
+            </div>
+            {suffix && <span style={{ fontSize: '10px', color: '#64748b', textAlign: 'center' }}>{suffix}</span>}
+        </div>
+    )
+}
+
 
 function AdminPortal() {
     const { user } = useAuth()
@@ -171,15 +276,13 @@ function AdminPortal() {
     const perms = Array.isArray(user?.permissions) ? user.permissions : []
     const can = (perm) => user?.role === 'admin' || perms.includes(perm)
     const canViewAllSubmissions = user?.role === 'admin' || user?.role === 'organization_admin'
-    const canCreateAssessments = !isOrgAdmin
-    const canCreateFeature = (perm) => canCreateAssessments && can(perm)
     const link = (path) => `${basePath}${path}`
     const featureAccess = {
-        globalProblems: canCreateFeature('coding.create'),
-        aptitudeTests: canCreateFeature('aptitude.create'),
-        globalTests: canCreateFeature('tests.create'),
-        skillTests: canCreateFeature('coding.create'),
-        communicationTests: canCreateFeature('communication.create'),
+        globalProblems: can('coding.create'),
+        aptitudeTests: can('aptitude.create'),
+        globalTests: can('tests.create'),
+        skillTests: can('coding.create'),
+        communicationTests: can('communication.create'),
         globalAssign: can('tests.assign'),
         aptitudeAssign: can('aptitude.assign'),
         skillAssign: can('coding.assign'),
@@ -218,6 +321,14 @@ function AdminPortal() {
             case 'global-problems':
                 setTitle(t('global_problems'))
                 setSubtitle(t('coding_challenges_all'))
+                break
+            case 'coding-problems':
+                setTitle('Coding Problems')
+                setSubtitle('Create and manage global coding challenges')
+                break
+            case 'sql-problems':
+                setTitle('SQL Problems')
+                setSubtitle('Create and manage global SQL challenges')
                 break
             case 'aptitude-tests':
                 setTitle(t('aptitude_tests'))
@@ -319,6 +430,8 @@ function AdminPortal() {
             icon: <FileCode size={20} />,
             defaultExpanded: false,
             children: [
+                featureAccess.globalProblems && { path: link('/coding-problems'), label: 'Coding Problems', icon: <Code size={20} /> },
+                featureAccess.globalProblems && { path: link('/sql-problems'), label: 'SQL Problems', icon: <Database size={20} /> },
                 featureAccess.aptitudeTests && { path: link('/aptitude-tests'), label: t('aptitude_tests'), icon: <Target size={20} /> },
                 featureAccess.globalTests && { path: link('/global-tests'), label: t('global_complete_tests'), icon: <ClipboardList size={20} /> },
                 featureAccess.skillTests && { path: link('/skill-tests'), label: 'Skill Tests', icon: <Brain size={20} /> },
@@ -473,7 +586,9 @@ function AdminPortal() {
                         ) : <Dashboard />
                     }
                 />
-                <Route path="/global-problems" element={gated(featureAccess.globalProblems, <GlobalProblems />, 'Global problems')} />
+                <Route path="/global-problems" element={<Navigate to={link('/coding-problems')} replace />} />
+                <Route path="/coding-problems" element={gated(featureAccess.globalProblems, <GlobalProblems mode="coding" />, 'Coding problems')} />
+                <Route path="/sql-problems" element={gated(featureAccess.globalProblems, <GlobalProblems mode="sql" />, 'SQL problems')} />
                 <Route path="/aptitude-tests" element={gated(featureAccess.aptitudeTests, <AptitudeTestsAdmin />, 'Aptitude test creation')} />
                 <Route path="/global-tests" element={gated(featureAccess.globalTests, <GlobalTestsAdmin />, 'Global test creation')} />
                 <Route path="/skill-tests" element={gated(featureAccess.skillTests, <SkillTestManager />, 'Skill test creation')} />
@@ -2446,14 +2561,15 @@ function AdminSubmissionReportModal({ submission, onClose }) {
 
 
 // ==================== GLOBAL PROBLEMS COMPONENT ====================
-function GlobalProblems() {
+function GlobalProblems({ mode = 'all' }) {
     const [problems, setProblems] = useState([])
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [showAIChat, setShowAIChat] = useState(false)
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
-    const [activeTab, setActiveTab] = useState('coding') // 'coding' or 'sql'
+    const forcedTab = mode === 'coding' || mode === 'sql' ? mode : null
+    const [activeTab, setActiveTab] = useState(forcedTab || 'coding') // 'coding' or 'sql'
     const [selectedProblemForTestCases, setSelectedProblemForTestCases] = useState(null)
     const [problem, setProblem] = useState({
         title: '',
@@ -2480,6 +2596,11 @@ function GlobalProblems() {
 
     // Check if SQL is selected
     const isSQLProblem = problem.type === 'SQL' || problem.language === 'SQL'
+
+    useEffect(() => {
+        if (!forcedTab) return
+        setActiveTab(forcedTab)
+    }, [forcedTab])
 
     // AI Chatbot handler - auto-fills the form
     const handleAIGenerate = (generated) => {
@@ -2640,6 +2761,13 @@ function GlobalProblems() {
     const codingProblems = problems.filter(p => p.language !== 'SQL' && p.type !== 'SQL')
     const sqlProblems = problems.filter(p => p.language === 'SQL' || p.type === 'SQL')
     const displayedProblems = activeTab === 'coding' ? codingProblems : sqlProblems
+    const pageHeading = forcedTab === 'sql' ? 'SQL Problems' : forcedTab === 'coding' ? 'Coding Problems' : 'Global Problems'
+    const pageSubheading = forcedTab === 'sql'
+        ? 'Create SQL challenges visible to all students platform-wide'
+        : forcedTab === 'coding'
+            ? 'Create coding challenges visible to all students platform-wide'
+            : 'Create coding and SQL challenges visible to all students platform-wide'
+    const createModalTitle = activeTab === 'sql' ? 'Create Global SQL Problem' : 'Create Global Coding Problem'
 
     return (
         <div className="animate-fadeIn">
@@ -2663,14 +2791,14 @@ function GlobalProblems() {
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 boxShadow: '0 8px 32px var(--primary-alpha)'
                             }}>
-                                <Code size={24} color="white" />
+                                {activeTab === 'sql' ? <Database size={24} color="white" /> : <Code size={24} color="white" />}
                             </div>
                             <div>
                                 <h2 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                                    Global Problems Management
+                                    {pageHeading}
                                 </h2>
                                 <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-                                    Create coding challenges visible to all students platform-wide
+                                    {pageSubheading}
                                 </p>
                             </div>
                         </div>
@@ -2713,7 +2841,18 @@ function GlobalProblems() {
                             <Sparkles size={20} /> AI Generate
                         </button>
                         <button
-                            onClick={() => setShowModal(true)}
+                            onClick={() => {
+                                if (forcedTab === 'sql') {
+                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL' }))
+                                } else if (forcedTab === 'coding') {
+                                    setProblem((prev) => ({
+                                        ...prev,
+                                        type: prev.type === 'SQL' ? 'Coding' : prev.type,
+                                        language: prev.language === 'SQL' ? 'Python' : prev.language,
+                                    }))
+                                }
+                                setShowModal(true)
+                            }}
                             className="btn-create-new premium-btn"
                             style={{
                                 padding: '0.75rem 1.25rem',
@@ -2724,7 +2863,7 @@ function GlobalProblems() {
                                 transition: 'all 0.3s ease'
                             }}
                         >
-                            <Plus size={20} /> Create Manually
+                            <Plus size={20} /> {activeTab === 'sql' ? 'Create SQL Problem' : 'Create Coding Problem'}
                         </button>
                     </div>
                 </div>
@@ -2762,22 +2901,26 @@ function GlobalProblems() {
             </div>
 
             {/* Tab Buttons */}
-            <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
-                <button onClick={() => setActiveTab('coding')} className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}>
-                    <Code size={18} /> Coding Problems
-                    <span className="tab-count">{codingProblems.length}</span>
-                </button>
-                <button onClick={() => setActiveTab('sql')} className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}>
-                    <FileText size={18} /> SQL Problems
-                    <span className="tab-count">{sqlProblems.length}</span>
-                </button>
-            </div>
+            {!forcedTab && (
+                <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
+                    <button onClick={() => setActiveTab('coding')} className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}>
+                        <Code size={18} /> Coding Problems
+                        <span className="tab-count">{codingProblems.length}</span>
+                    </button>
+                    <button onClick={() => setActiveTab('sql')} className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}>
+                        <Database size={18} /> SQL Problems
+                        <span className="tab-count">{sqlProblems.length}</span>
+                    </button>
+                </div>
+            )}
 
             {/* Problems Grid */}
             <div className="problem-list-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))' }}>
                 {displayedProblems.length === 0 ? (
                     <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '4rem', opacity: 0.5 }}>
-                        <Code size={64} style={{ marginBottom: '1rem', opacity: 0.3 }} />
+                        {activeTab === 'sql'
+                            ? <Database size={64} style={{ marginBottom: '1rem', opacity: 0.3 }} />
+                            : <Code size={64} style={{ marginBottom: '1rem', opacity: 0.3 }} />}
                         <h3>No {activeTab === 'sql' ? 'SQL' : 'Coding'} Problems Yet</h3>
                         <p>Create your first {activeTab === 'sql' ? 'SQL' : 'coding'} problem!</p>
                     </div>
@@ -2886,105 +3029,118 @@ function GlobalProblems() {
                                     background: 'linear-gradient(135deg, #10b981, #06b6d4)',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center'
                                 }}>
-                                    <Code size={20} color="white" />
+                                    {activeTab === 'sql' ? <Database size={20} color="white" /> : <Code size={20} color="white" />}
                                 </div>
-                                <h2>Create Global Coding Problem</h2>
+                                <h2>{createModalTitle}</h2>
                             </div>
                             <button onClick={() => setShowModal(false)} className="modal-close"><X size={20} /></button>
                         </div>
                         <div className="modal-body premium-form">
                             <form onSubmit={handleSubmit}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
-                                    <div className="form-group">
-                                        <label className="form-label">Problem Title</label>
-                                        <input
-                                            type="text"
-                                            placeholder="e.g., Two Sum Problem"
-                                            value={problem.title}
-                                            onChange={(e) => setProblem({ ...problem, title: e.target.value })}
-                                            required
-                                        />
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Problem Type</label>
-                                        <select
-                                            value={problem.type}
-                                            onChange={(e) => {
-                                                const newType = e.target.value
-                                                setProblem({
-                                                    ...problem,
-                                                    type: newType,
-                                                    language: newType === 'SQL' ? 'SQL' : problem.language === 'SQL' ? 'Python' : problem.language
-                                                })
-                                            }}
-                                        >
-                                            <option value="Coding">Coding</option>
-                                            <option value="SQL">SQL</option>
-                                            <option value="Algorithm">Algorithm</option>
-                                        </select>
-                                    </div>
-                                </div>
+                                <div style={{ display: 'grid', gap: '14px', marginBottom: '1.5rem' }}>
+                                    <AdminCreateSectionCard
+                                        icon={<Code size={16} />}
+                                        title="Problem Setup"
+                                        subtitle="Define the core coding or SQL challenge details"
+                                        color="#10b981"
+                                    >
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
+                                            <div className="form-group">
+                                                <label className="form-label">Problem Title</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g., Two Sum Problem"
+                                                    value={problem.title}
+                                                    onChange={(e) => setProblem({ ...problem, title: e.target.value })}
+                                                    required
+                                                />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Problem Type</label>
+                                                <select
+                                                    value={problem.type}
+                                                    onChange={(e) => {
+                                                        const newType = e.target.value
+                                                        setProblem({
+                                                            ...problem,
+                                                            type: newType,
+                                                            language: newType === 'SQL' ? 'SQL' : problem.language === 'SQL' ? 'Python' : problem.language
+                                                        })
+                                                    }}
+                                                >
+                                                    <option value="Coding">Coding</option>
+                                                    <option value="SQL">SQL</option>
+                                                    <option value="Algorithm">Algorithm</option>
+                                                </select>
+                                            </div>
+                                        </div>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
-                                    <div className="form-group">
-                                        <label className="form-label">Language</label>
-                                        <select
-                                            value={problem.language}
-                                            onChange={(e) => {
-                                                const newLang = e.target.value
-                                                setProblem({
-                                                    ...problem,
-                                                    language: newLang,
-                                                    type: newLang === 'SQL' ? 'SQL' : problem.type === 'SQL' ? 'Coding' : problem.type
-                                                })
-                                            }}
-                                        >
-                                            <option value="Python">Python</option>
-                                            <option value="JavaScript">JavaScript</option>
-                                            <option value="Java">Java</option>
-                                            <option value="C++">C++</option>
-                                            <option value="SQL">SQL</option>
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Difficulty</label>
-                                        <select
-                                            value={problem.difficulty}
-                                            onChange={(e) => setProblem({ ...problem, difficulty: e.target.value })}
-                                        >
-                                            <option value="Easy">Easy</option>
-                                            <option value="Medium">Medium</option>
-                                            <option value="Hard">Hard</option>
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Status</label>
-                                        <select
-                                            value={problem.status}
-                                            onChange={(e) => setProblem({ ...problem, status: e.target.value })}
-                                        >
-                                            <option value="live">Live</option>
-                                            <option value="draft">Draft</option>
-                                            <option value="closed">Closed</option>
-                                        </select>
-                                    </div>
-                                </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
+                                            <div className="form-group">
+                                                <label className="form-label">Language</label>
+                                                <select
+                                                    value={problem.language}
+                                                    onChange={(e) => {
+                                                        const newLang = e.target.value
+                                                        setProblem({
+                                                            ...problem,
+                                                            language: newLang,
+                                                            type: newLang === 'SQL' ? 'SQL' : problem.type === 'SQL' ? 'Coding' : problem.type
+                                                        })
+                                                    }}
+                                                >
+                                                    <option value="Python">Python</option>
+                                                    <option value="JavaScript">JavaScript</option>
+                                                    <option value="Java">Java</option>
+                                                    <option value="C++">C++</option>
+                                                    <option value="SQL">SQL</option>
+                                                </select>
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Difficulty</label>
+                                                <select
+                                                    value={problem.difficulty}
+                                                    onChange={(e) => setProblem({ ...problem, difficulty: e.target.value })}
+                                                >
+                                                    <option value="Easy">Easy</option>
+                                                    <option value="Medium">Medium</option>
+                                                    <option value="Hard">Hard</option>
+                                                </select>
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Status</label>
+                                                <select
+                                                    value={problem.status}
+                                                    onChange={(e) => setProblem({ ...problem, status: e.target.value })}
+                                                >
+                                                    <option value="live">Live</option>
+                                                    <option value="draft">Draft</option>
+                                                    <option value="closed">Closed</option>
+                                                </select>
+                                            </div>
+                                        </div>
 
-                                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                                    <label className="form-label">Problem Description</label>
-                                    <textarea
-                                        rows="5"
-                                        placeholder="Describe the problem in detail..."
-                                        value={problem.description}
-                                        onChange={(e) => setProblem({ ...problem, description: e.target.value })}
-                                        required
-                                    ></textarea>
-                                </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label">Problem Description</label>
+                                            <textarea
+                                                rows="5"
+                                                placeholder="Describe the problem in detail..."
+                                                value={problem.description}
+                                                onChange={(e) => setProblem({ ...problem, description: e.target.value })}
+                                                required
+                                            ></textarea>
+                                        </div>
+                                    </AdminCreateSectionCard>
 
                                 {/* SQL-specific fields */}
                                 {isSQLProblem ? (
-                                    <>
-                                        <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                                    <AdminCreateSectionCard
+                                        icon={<Database size={16} />}
+                                        title="SQL Configuration"
+                                        subtitle="Set up schema and expected results for SQL validation"
+                                        color="#06b6d4"
+                                    >
+                                        <div className="form-group" style={{ marginBottom: '1rem' }}>
                                             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <Code size={14} color="#06b6d4" /> Database Schema (CREATE TABLE statements)
                                             </label>
@@ -2999,7 +3155,7 @@ function GlobalProblems() {
                                                 Include CREATE TABLE and INSERT statements to set up the test database
                                             </small>
                                         </div>
-                                        <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
                                             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <CheckCircle size={14} color="#10b981" /> Expected Query Result
                                             </label>
@@ -3014,51 +3170,63 @@ function GlobalProblems() {
                                                 The expected output when the correct SQL query is executed
                                             </small>
                                         </div>
-                                    </>
+                                    </AdminCreateSectionCard>
                                 ) : (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
-                                        <div className="form-group">
-                                            <label className="form-label">Sample Input</label>
-                                            <input
-                                                type="text"
-                                                placeholder="e.g., [2, 7, 11, 15], target = 9"
-                                                value={problem.sampleInput}
-                                                onChange={(e) => setProblem({ ...problem, sampleInput: e.target.value })}
-                                            />
+                                    <AdminCreateSectionCard
+                                        icon={<ClipboardList size={16} />}
+                                        title="Examples"
+                                        subtitle="Provide sample input and expected output for coding problems"
+                                        color="#3b82f6"
+                                    >
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label className="form-label">Sample Input</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g., [2, 7, 11, 15], target = 9"
+                                                    value={problem.sampleInput}
+                                                    onChange={(e) => setProblem({ ...problem, sampleInput: e.target.value })}
+                                                />
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label className="form-label">Expected Output</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g., [0, 1]"
+                                                    value={problem.expectedOutput}
+                                                    onChange={(e) => setProblem({ ...problem, expectedOutput: e.target.value })}
+                                                />
+                                            </div>
                                         </div>
-                                        <div className="form-group">
-                                            <label className="form-label">Expected Output</label>
-                                            <input
-                                                type="text"
-                                                placeholder="e.g., [0, 1]"
-                                                value={problem.expectedOutput}
-                                                onChange={(e) => setProblem({ ...problem, expectedOutput: e.target.value })}
-                                            />
-                                        </div>
-                                    </div>
+                                    </AdminCreateSectionCard>
                                 )}
 
-                                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                                    <label className="form-label">Deadline (Optional)</label>
-                                    <input
-                                        type="date"
-                                        value={problem.deadline}
-                                        onChange={(e) => setProblem({ ...problem, deadline: e.target.value })}
-                                    />
-                                </div>
+                                <AdminCreateSectionCard
+                                    icon={<Calendar size={16} />}
+                                    title="Availability"
+                                    subtitle="Optional scheduling for this problem"
+                                    color="#f59e0b"
+                                >
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Deadline (Optional)</label>
+                                        <input
+                                            type="date"
+                                            value={problem.deadline}
+                                            onChange={(e) => setProblem({ ...problem, deadline: e.target.value })}
+                                        />
+                                    </div>
+                                </AdminCreateSectionCard>
 
                                 {/* Proctoring Settings Section */}
-                                <div style={{
-                                    marginBottom: '1.5rem',
-                                    padding: '1.25rem',
-                                    background: 'rgba(239, 68, 68, 0.05)',
-                                    borderRadius: '1rem',
-                                    border: '1px solid rgba(239, 68, 68, 0.15)'
-                                }}>
+                                <AdminCreateSectionCard
+                                    icon={<Eye size={16} />}
+                                    title="Proctoring Settings"
+                                    subtitle="Control monitoring, clipboard restrictions, and violations"
+                                    color="#ef4444"
+                                >
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                                        <Eye size={20} color="#ef4444" />
                                         <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#ef4444' }}>
-                                            Proctoring Settings
+                                            Exam Integrity Controls
                                         </h4>
                                     </div>
 
@@ -3213,17 +3381,10 @@ function GlobalProblems() {
 
                                     {problem.enableProctoring && problem.trackTabSwitches && (
                                         <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                            <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Max Tab Switches:</label>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                max="10"
-                                                value={problem.maxTabSwitches}
-                                                onChange={(e) => setProblem({ ...problem, maxTabSwitches: parseInt(e.target.value) || 3 })}
-                                                style={{ width: '80px', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}
-                                            />
+                                            <AdminNumberInput label="Max Tab Switches" value={problem.maxTabSwitches} onChange={v => setProblem({ ...problem, maxTabSwitches: v })} min={1} max={10} icon={<AlertTriangle size={12} />} color="#ef4444" suffix="violations allowed" width="220px" />
                                         </div>
                                     )}
+                                </AdminCreateSectionCard>
                                 </div>
 
                                 <div className="form-actions">
@@ -4201,6 +4362,12 @@ function GlobalTestsAdmin() {
 
                             {modalStep === 1 && (
                                 <>
+                                    <AdminCreateSectionCard
+                                        icon={<Globe size={16} />}
+                                        title="Global Test Setup"
+                                        subtitle="Configure the master exam settings before adding sections"
+                                        color="#8b5cf6"
+                                    >
                                     <div className="form-group" style={{ marginBottom: '1rem' }}>
                                         <label className="form-label">Test Title</label>
                                         <input type="text" placeholder="e.g. Global Complete Assessment - Feb 2026" value={newTest.title} onChange={e => setNewTest({ ...newTest, title: e.target.value })} style={{ width: '100%' }} />
@@ -4208,11 +4375,11 @@ function GlobalTestsAdmin() {
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                                         <div className="form-group">
                                             <label className="form-label">Duration (min) — default 180 for Coding+SQL</label>
-                                            <input type="number" min="30" max="300" value={newTest.duration} onChange={e => setNewTest({ ...newTest, duration: parseInt(e.target.value) || 180 })} />
+                                            <AdminNumberInput label="Duration" value={newTest.duration} onChange={v => setNewTest({ ...newTest, duration: v })} min={30} max={300} icon={<Clock size={12} />} color="#8b5cf6" suffix="minutes" />
                                         </div>
                                         <div className="form-group">
                                             <label className="form-label">Passing Score (%)</label>
-                                            <input type="number" min="0" max="100" value={newTest.passingScore} onChange={e => setNewTest({ ...newTest, passingScore: parseInt(e.target.value) || 60 })} />
+                                            <AdminNumberInput label="Pass %" value={newTest.passingScore} onChange={v => setNewTest({ ...newTest, passingScore: v })} min={0} max={100} icon={<Target size={12} />} color="#10b981" suffix="required score" />
                                         </div>
                                         <div className="form-group">
                                             <label className="form-label">Status</label>
@@ -4224,7 +4391,7 @@ function GlobalTestsAdmin() {
                                     </div>
                                     <div className="form-group" style={{ marginBottom: '1rem' }}>
                                         <label className="form-label">Max Attempts</label>
-                                        <input type="number" min="1" max="10" value={newTest.maxAttempts} onChange={e => setNewTest({ ...newTest, maxAttempts: parseInt(e.target.value) || 1 })} />
+                                        <AdminNumberInput label="Attempts" value={newTest.maxAttempts} onChange={v => setNewTest({ ...newTest, maxAttempts: v })} min={1} max={10} icon={<RefreshCw size={12} />} color="#3b82f6" suffix="per student" />
                                     </div>
                                     <div className="form-group" style={{ marginBottom: '1rem' }}>
                                         <label className="form-label">Result Visibility</label>
@@ -4237,6 +4404,7 @@ function GlobalTestsAdmin() {
                                             Production-safe default: use “after deadline” or “manual” for high-stakes exams.
                                         </small>
                                     </div>
+                                    </AdminCreateSectionCard>
                                     {/* Enhanced Proctoring Settings */}
                                     <div style={{ marginBottom: '1.5rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(239,68,68,0.05), rgba(251,191,36,0.05))', borderRadius: '16px', border: '1px solid rgba(239,68,68,0.2)' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -5441,125 +5609,87 @@ function AptitudeTestsAdmin() {
                         </div>
 
                         <form onSubmit={handleCreateTest} className="modal-body">
-                            {/* Test Details */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                                <div className="form-group">
-                                    <label className="form-label"><FileText size={14} style={{ marginRight: '0.5rem' }} /> Test Title</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Enter test title..."
-                                        value={newTest.title}
-                                        onChange={e => setNewTest({ ...newTest, title: e.target.value })}
-                                        required
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label"><Clock size={14} style={{ marginRight: '0.5rem' }} /> Duration (mins)</label>
-                                    <input
-                                        type="number"
-                                        min="5"
-                                        max="180"
-                                        value={newTest.duration}
-                                        onChange={e => setNewTest({ ...newTest, duration: parseInt(e.target.value) })}
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label"><RefreshCw size={14} style={{ marginRight: '0.5rem' }} /> Attempts</label>
-                                    <select
-                                        value={newTest.maxAttempts}
-                                        onChange={e => setNewTest({ ...newTest, maxAttempts: parseInt(e.target.value) })}
-                                    >
-                                        <option value={1}>1 Attempt</option>
-                                        <option value={2}>2 Attempts</option>
-                                        <option value={3}>3 Attempts</option>
-                                        <option value={5}>5 Attempts</option>
-                                        <option value={-1}>Unlimited</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                                <div className="form-group">
-                                    <label className="form-label"><AlertTriangle size={14} style={{ marginRight: '0.5rem' }} /> Max Tab Switches (Violations)</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        max="20"
-                                        value={newTest.maxTabSwitches}
-                                        onChange={e => setNewTest({ ...newTest, maxTabSwitches: parseInt(e.target.value) })}
-                                    />
-                                    <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Test auto-submits if exceeded</small>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label"><Calendar size={14} style={{ marginRight: '0.5rem' }} /> Start Time</label>
-                                    <input
-                                        type="datetime-local"
-                                        value={newTest.startTime}
-                                        onChange={e => setNewTest({ ...newTest, startTime: e.target.value })}
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label"><Calendar size={14} style={{ marginRight: '0.5rem' }} /> End Time (Deadline)</label>
-                                    <input
-                                        type="datetime-local"
-                                        value={newTest.deadline}
-                                        onChange={e => setNewTest({ ...newTest, deadline: e.target.value })}
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Difficulty</label>
-                                    <select
-                                        value={newTest.difficulty}
-                                        onChange={e => setNewTest({ ...newTest, difficulty: e.target.value })}
-                                    >
-                                        <option value="Easy">Easy</option>
-                                        <option value="Medium">Medium</option>
-                                        <option value="Hard">Hard</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                                <div className="form-group">
-                                    <label className="form-label">Passing Score (%)</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        value={newTest.passingScore}
-                                        onChange={e => setNewTest({ ...newTest, passingScore: parseInt(e.target.value) })}
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label"><Eye size={14} style={{ marginRight: '0.5rem' }} /> Result Visibility</label>
-                                    <select
-                                        value={newTest.resultVisibility || 'immediate'}
-                                        onChange={e => setNewTest({ ...newTest, resultVisibility: e.target.value })}
-                                    >
-                                        <option value="immediate">Immediate</option>
-                                        <option value="after_deadline">After deadline</option>
-                                        <option value="manual">Manual release</option>
-                                    </select>
-                                    <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Controls what students can see after submitting.</small>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label"><Settings size={14} style={{ marginRight: '0.5rem' }} /> Test Status</label>
-                                    <select
-                                        value={newTest.status}
-                                        onChange={e => setNewTest({ ...newTest, status: e.target.value })}
-                                    >
-                                        <option value="live">Live - Visible to students</option>
-                                        <option value="ended">Ended - Hidden from students</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                                <label className="form-label"><FileText size={14} style={{ marginRight: '0.5rem' }} /> Description (Optional)</label>
-                                <textarea
-                                    placeholder="Brief description of the test..."
-                                    value={newTest.description}
-                                    onChange={e => setNewTest({ ...newTest, description: e.target.value })}
-                                    rows={3}
-                                    style={{ width: '100%', resize: 'vertical' }}
-                                />
+                            <div style={{ display: 'grid', gap: '14px', marginBottom: '1.5rem' }}>
+                                <AdminCreateSectionCard
+                                    icon={<FileText size={16} />}
+                                    title="Test Setup"
+                                    subtitle="Name the test and define the core exam settings"
+                                    color="#8b5cf6"
+                                >
+                                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                                        <label className="form-label"><FileText size={14} style={{ marginRight: '0.5rem' }} /> Test Title</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Enter test title..."
+                                            value={newTest.title}
+                                            onChange={e => setNewTest({ ...newTest, title: e.target.value })}
+                                            required
+                                        />
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px' }}>
+                                        <AdminNumberInput label="Duration" value={newTest.duration} onChange={v => setNewTest({ ...newTest, duration: v })} min={5} max={180} icon={<Clock size={12} />} color="#8b5cf6" suffix="minutes" />
+                                        <AdminNumberInput label="Attempts" value={newTest.maxAttempts === -1 ? 5 : newTest.maxAttempts} onChange={v => setNewTest({ ...newTest, maxAttempts: v })} min={1} max={5} icon={<RefreshCw size={12} />} color="#3b82f6" suffix="per student" />
+                                        <AdminNumberInput label="Pass %" value={newTest.passingScore} onChange={v => setNewTest({ ...newTest, passingScore: v })} min={0} max={100} icon={<Target size={12} />} color="#10b981" suffix="minimum score" />
+                                        <AdminNumberInput label="Max Violations" value={newTest.maxTabSwitches} onChange={v => setNewTest({ ...newTest, maxTabSwitches: v })} min={0} max={20} icon={<AlertTriangle size={12} />} color="#f59e0b" suffix="tab switches" />
+                                    </div>
+                                </AdminCreateSectionCard>
+
+                                <AdminCreateSectionCard
+                                    icon={<Settings size={16} />}
+                                    title="Scheduling"
+                                    subtitle="Control availability, difficulty, and result release"
+                                    color="#06b6d4"
+                                >
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px', marginBottom: '1rem' }}>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label"><Calendar size={14} style={{ marginRight: '0.5rem' }} /> Start Time</label>
+                                            <input type="datetime-local" value={newTest.startTime} onChange={e => setNewTest({ ...newTest, startTime: e.target.value })} />
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label"><Calendar size={14} style={{ marginRight: '0.5rem' }} /> End Time</label>
+                                            <input type="datetime-local" value={newTest.deadline} onChange={e => setNewTest({ ...newTest, deadline: e.target.value })} />
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label">Difficulty</label>
+                                            <select value={newTest.difficulty} onChange={e => setNewTest({ ...newTest, difficulty: e.target.value })}>
+                                                <option value="Easy">Easy</option>
+                                                <option value="Medium">Medium</option>
+                                                <option value="Hard">Hard</option>
+                                            </select>
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label"><Settings size={14} style={{ marginRight: '0.5rem' }} /> Status</label>
+                                            <select value={newTest.status} onChange={e => setNewTest({ ...newTest, status: e.target.value })}>
+                                                <option value="live">Live - Visible to students</option>
+                                                <option value="ended">Ended - Hidden from students</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px' }}>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label"><Eye size={14} style={{ marginRight: '0.5rem' }} /> Result Visibility</label>
+                                            <select
+                                                value={newTest.resultVisibility || 'immediate'}
+                                                onChange={e => setNewTest({ ...newTest, resultVisibility: e.target.value })}
+                                            >
+                                                <option value="immediate">Immediate</option>
+                                                <option value="after_deadline">After deadline</option>
+                                                <option value="manual">Manual release</option>
+                                            </select>
+                                            <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Controls what students can see after submitting.</small>
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label className="form-label"><FileText size={14} style={{ marginRight: '0.5rem' }} /> Description (Optional)</label>
+                                            <textarea
+                                                placeholder="Brief description of the test..."
+                                                value={newTest.description}
+                                                onChange={e => setNewTest({ ...newTest, description: e.target.value })}
+                                                rows={3}
+                                                style={{ width: '100%', resize: 'vertical' }}
+                                            />
+                                        </div>
+                                    </div>
+                                </AdminCreateSectionCard>
                             </div>
 
                             {/* AI Question Generation */}

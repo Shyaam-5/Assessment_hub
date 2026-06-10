@@ -9,6 +9,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import socketService from '@/services/socketService'
+import { getAuthToken } from '../services/authStorage'
 
 const MAX_VIOLATIONS = 10
 
@@ -310,7 +311,7 @@ export function useBehaviorTracking(enabled, userId, testId) {
         const batch = [...eventsBuffer.current]
         eventsBuffer.current = []
         try {
-            const token = localStorage.getItem('authToken') || ''
+            const token = getAuthToken()
             await fetch(`${API_BASE}/behavior/log-events`, {
                 method: 'POST',
                 headers: {

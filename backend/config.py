@@ -18,6 +18,8 @@ class Settings:
     """Application settings parsed from environment."""
 
     def __init__(self):
+        self.APP_ENV: str = os.getenv("APP_ENV", "development").strip().lower()
+
         # --- Database ---
         self.DATABASE_URL: str = self._normalize_db_url(os.getenv("DATABASE_URL", "").strip())
         db = urlparse(self.DATABASE_URL)
@@ -45,10 +47,12 @@ class Settings:
         # --- Server ---
         self.PORT: int = int(os.getenv("PORT", "8000"))
         self.SERVER_LAN_IP: str = os.getenv("SERVER_LAN_IP", "localhost")
-        self.SECRET_KEY: str = os.getenv("SECRET_KEY", "").strip()
-        if not self.SECRET_KEY:
-            self.SECRET_KEY = os.urandom(32).hex()
-            logger.warning("SECRET_KEY is not set; using ephemeral runtime key.")
+        self.SECRET_KEY: str = self._resolve_secret(
+            "SECRET_KEY",
+            fallback_factory=lambda: os.urandom(32).hex(),
+            allow_runtime_fallback=self.APP_ENV not in {"production", "prod"},
+            warning_message="SECRET_KEY is not set; using ephemeral runtime key.",
+        )
         self.JWT_ACCESS_TOKEN_EXPIRES_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_MINUTES", "720"))
         self.STARTUP_DB_PREFLIGHT: bool = os.getenv("STARTUP_DB_PREFLIGHT", "true").strip().lower() in (
             "1",
@@ -65,9 +69,18 @@ class Settings:
             "true",
             "yes",
         )
+        self.STARTUP_OPTIONAL_SERVICES_ENABLED: bool = os.getenv("STARTUP_OPTIONAL_SERVICES_ENABLED", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.STARTUP_OPTIONAL_SCHEMA_SYNC_ENABLED: bool = os.getenv("STARTUP_OPTIONAL_SCHEMA_SYNC_ENABLED", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         # --- CORS ---
-        self.APP_ENV: str = os.getenv("APP_ENV", "development").strip().lower()
         _origins = os.getenv("ALLOWED_ORIGINS", "")
         self.ALLOWED_ORIGINS: list[str] = [o.strip() for o in _origins.split(",") if o.strip()] if _origins.strip() else []
         _socket_origins = os.getenv("SOCKET_ALLOWED_ORIGINS", "")
@@ -120,7 +133,13 @@ class Settings:
         self.SUPER_ADMIN_2_PASSWORD: str = os.getenv("SUPER_ADMIN_2_PASSWORD", "").strip()
 
         # --- Environment Scan (prescan) settings ---
-        self.PRESCAN_SECRET_KEY: str = os.getenv("PRESCAN_SECRET_KEY", os.getenv("SECRET_KEY", "change-me-prescan-secret-key"))
+        self.PRESCAN_SECRET_KEY: str = self._resolve_secret(
+            "PRESCAN_SECRET_KEY",
+            inherited_value=self.SECRET_KEY,
+            fallback_factory=lambda: os.urandom(32).hex(),
+            allow_runtime_fallback=self.APP_ENV not in {"production", "prod"},
+            warning_message="PRESCAN_SECRET_KEY is not set; using a generated runtime key.",
+        )
         self.FRAME_INTERVAL_MS: int = int(os.getenv("FRAME_INTERVAL_MS", "1500"))
         self.MIN_FRAMES_PER_ANGLE: int = int(os.getenv("MIN_FRAMES_PER_ANGLE", "5"))
         self.MAX_SCAN_DURATION_S: int = int(os.getenv("MAX_SCAN_DURATION_S", "180"))
@@ -157,6 +176,26 @@ class Settings:
         if v.upper().startswith("DATABASE_URL="):
             v = v.split("=", 1)[1].strip()
         return v
+
+    def _resolve_secret(
+        self,
+        env_name: str,
+        *,
+        inherited_value: str = "",
+        fallback_factory=None,
+        allow_runtime_fallback: bool,
+        warning_message: str,
+    ) -> str:
+        direct = os.getenv(env_name, "").strip()
+        if direct:
+            return direct
+        if inherited_value:
+            return inherited_value
+        if allow_runtime_fallback and fallback_factory is not None:
+            value = fallback_factory()
+            logger.warning(warning_message)
+            return value
+        raise RuntimeError(f"{env_name} must be set when APP_ENV={self.APP_ENV or 'production'}")
 
 
 settings = Settings()

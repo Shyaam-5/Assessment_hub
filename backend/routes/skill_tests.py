@@ -339,16 +339,22 @@ async def set_skill_test_allocations(test_id: int, request: Request):
 async def create_test(request: Request, body: dict = Body(...)):
     actor = await _require_skill_permission(request, ["coding.create", "coding.assign"])
     await assert_assessment_limit_for_actor(actor)
+    mcq_count = max(0, int(body.get("mcq_count", 10) or 0))
+    coding_count = max(0, int(body.get("coding_count", 3) or 0))
+    sql_count = max(0, int(body.get("sql_count", 3) or 0))
+    interview_count = max(0, int(body.get("interview_count", 5) or 0))
+    total_questions = mcq_count + coding_count + sql_count + interview_count
+    if total_questions <= 0:
+        raise HTTPException(status_code=400, detail="Add at least one question or problem before creating a skill test")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO skill_tests (title,description,skills,mcq_count,coding_count,sql_count,interview_count,attempt_limit,mcq_duration_minutes,coding_duration_minutes,sql_duration_minutes,interview_duration_minutes,mcq_passing_score,coding_passing_score,sql_passing_score,interview_passing_score) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (body.get("title"), body.get("description"), _json_str(body.get("skills",[])), body.get("mcq_count",10), body.get("coding_count",3), body.get("sql_count",3), body.get("interview_count",5), body.get("attempt_limit",3), body.get("mcq_duration_minutes",30), body.get("coding_duration_minutes",60), body.get("sql_duration_minutes",30), body.get("interview_duration_minutes",30), body.get("mcq_passing_score",60), body.get("coding_passing_score",60), body.get("sql_passing_score",60), body.get("interview_passing_score",5))
+                (body.get("title"), body.get("description"), _json_str(body.get("skills",[])), mcq_count, coding_count, sql_count, interview_count, body.get("attempt_limit",3), body.get("mcq_duration_minutes",30), body.get("coding_duration_minutes",60), body.get("sql_duration_minutes",30), body.get("interview_duration_minutes",30), body.get("mcq_passing_score",60), body.get("coding_passing_score",60), body.get("sql_passing_score",60), body.get("interview_passing_score",5))
             )
             test_id = cur.lastrowid
         await conn.commit()
-    sql_count = body.get("sql_count", 0)
     if sql_count and int(sql_count) > 0:
         try: await _create_sandbox(test_id)
         except Exception as e: print(f"Sandbox creation warning: {e}")

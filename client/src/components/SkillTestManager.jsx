@@ -60,13 +60,15 @@ const NumberInput = ({ label, value, onChange, min, max, icon, color, suffix }) 
                 cursor: 'pointer', fontSize: '18px', color: '#94a3b8', fontWeight: 600,
                 borderRight: '1px solid #475569'
             }}>−</button>
-            <input type="number" value={value} min={min} max={max}
+            <input className="number-input-no-spinner" type="number" value={value} min={min} max={max}
                 onChange={e => onChange(Math.min(max, Math.max(min, parseInt(e.target.value) || min)))}
                 style={{
                     flex: 1, textAlign: 'center', border: 'none', outline: 'none',
                     fontSize: '16px', fontWeight: 700, color: color || '#f1f5f9',
                     padding: '8px 4px', width: '100%', boxSizing: 'border-box',
-                    background: 'transparent'
+                    background: 'transparent',
+                    appearance: 'textfield',
+                    MozAppearance: 'textfield'
                 }}
             />
             <button onClick={() => onChange(Math.min(max, value + 1))} style={{
@@ -126,6 +128,8 @@ export default function SkillTestManager() {
     const createTest = async () => {
         if (!form.title.trim()) return setError('Title is required');
         if (form.skills.length === 0) return setError('Select at least one skill');
+        const totalQuestions = Number(form.mcq_count || 0) + Number(form.coding_count || 0) + Number(form.sql_count || 0) + Number(form.interview_count || 0);
+        if (totalQuestions <= 0) return setError('Add at least one question or problem across the skill test sections');
         setError('');
         setCreating(true);
         try {

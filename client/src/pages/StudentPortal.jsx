@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import EnvironmentScanGate from '../prescan/components/EnvironmentScanGate'
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { LayoutDashboard, ClipboardList, Code, Send, Trophy, Clock, CheckCircle, XCircle, ChevronRight, Play, Upload, FileText, Trash2, Eye, AlertTriangle, Download, Lightbulb, HelpCircle, Sparkles, Target, Zap, BookOpen, Brain, Award, X, Video, Shield, Search, BarChart3, Flame, Layers, Database, RefreshCw, TrendingUp, Radar, Users, ArrowUpRight, ArrowDownRight, Minus, PieChart, MessageSquare, Github, ExternalLink, Link2 } from 'lucide-react'
 import DashboardLayout from '@/components/DashboardLayout'
 import AptitudeTestInterface from '@/components/AptitudeTestInterface'
@@ -72,6 +72,14 @@ function StudentPortal() {
                 setTitle(t('coding_problems'))
                 setSubtitle(t('solve_coding_subtitle'))
                 break
+            case 'coding':
+                setTitle('Coding Problems')
+                setSubtitle('Solve assigned coding challenges')
+                break
+            case 'sql':
+                setTitle('SQL Problems')
+                setSubtitle('Solve assigned SQL challenges')
+                break
             case 'aptitude':
                 setTitle(t('aptitude_tests'))
                 setSubtitle(t('aptitude_subtitle'))
@@ -114,7 +122,8 @@ function StudentPortal() {
             icon: <ClipboardList size={20} />,
             defaultExpanded: true,
             children: [
-                featureAccess.codingPractice && { path: '/student/assignments', label: t('coding_problems'), icon: <Code size={20} /> },
+                featureAccess.codingPractice && { path: '/student/coding', label: 'Coding Problems', icon: <Code size={20} /> },
+                featureAccess.codingPractice && { path: '/student/sql', label: 'SQL Problems', icon: <FileText size={20} /> },
                 featureAccess.aptitude && { path: '/student/aptitude', label: t('aptitude_tests'), icon: <Brain size={20} /> },
                 featureAccess.globalTests && { path: '/student/global-tests', label: t('global_complete_tests'), icon: <Layers size={20} /> },
                 featureAccess.skillTests && { path: '/student/skill-tests', label: 'Skill Tests', icon: <Target size={20} /> },
@@ -137,7 +146,9 @@ function StudentPortal() {
         <DashboardLayout navItems={navItems} title={title} subtitle={subtitle}>
             <Routes>
                 <Route path="/" element={gated(featureAccess.dashboard, <Dashboard user={user} />, 'Dashboard')} />
-                <Route path="/assignments" element={gated(featureAccess.codingPractice, <Assignments user={user} />, 'Coding practice')} />
+                <Route path="/assignments" element={<Navigate to="/student/coding" replace />} />
+                <Route path="/coding" element={gated(featureAccess.codingPractice, <Assignments user={user} mode="coding" />, 'Coding practice')} />
+                <Route path="/sql" element={gated(featureAccess.codingPractice, <Assignments user={user} mode="sql" />, 'SQL practice')} />
                 <Route path="/aptitude" element={gated(featureAccess.aptitude, <AptitudeTests user={user} />, 'Aptitude tests')} />
                 <Route path="/global-tests" element={gated(featureAccess.globalTests, <GlobalTests user={user} />, 'Global tests')} />
                 <Route path="/skill-tests" element={gated(featureAccess.skillTests, <SkillTestPortal user={user} />, 'Skill tests')} />
@@ -561,12 +572,13 @@ function Dashboard({ user }) {
 
 
 // ==================== CODING PROBLEMS ====================
-function Assignments({ user }) {
+function Assignments({ user, mode = 'all' }) {
     const [problems, setProblems] = useState([])
     const [loading, setLoading] = useState(true)
     const [activeProblem, setActiveProblem] = useState(null)
     const [useProctoredEditor, setUseProctoredEditor] = useState(false)
-    const [activeTab, setActiveTab] = useState('coding') // 'coding' or 'sql'
+    const forcedTab = mode === 'coding' || mode === 'sql' ? mode : null
+    const [activeTab, setActiveTab] = useState(forcedTab || 'coding') // 'coding' or 'sql'
 
     useEffect(() => {
         axios.get(`${API_BASE}/students/${user.id}/problems`)
@@ -576,6 +588,10 @@ function Assignments({ user }) {
             })
             .catch(err => setLoading(false))
     }, [user.id])
+
+    useEffect(() => {
+        if (forcedTab) setActiveTab(forcedTab)
+    }, [forcedTab])
 
     const handleSolve = (problem) => {
         setActiveProblem(problem)
@@ -633,25 +649,26 @@ function Assignments({ user }) {
 
     return (
         <>
-            {/* Tab Buttons */}
-            <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
-                <button
-                    onClick={() => setActiveTab('coding')}
-                    className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}
-                >
-                    <Code size={18} />
-                    Coding Problems
-                    <span className="tab-count">{codingProblems.length}</span>
-                </button>
-                <button
-                    onClick={() => setActiveTab('sql')}
-                    className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}
-                >
-                    <FileText size={18} />
-                    SQL Problems
-                    <span className="tab-count">{sqlProblems.length}</span>
-                </button>
-            </div>
+            {!forcedTab && (
+                <div className="tabs-bar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
+                    <button
+                        onClick={() => setActiveTab('coding')}
+                        className={`tab-btn${activeTab === 'coding' ? ' active' : ''}`}
+                    >
+                        <Code size={18} />
+                        Coding Problems
+                        <span className="tab-count">{codingProblems.length}</span>
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('sql')}
+                        className={`tab-btn${activeTab === 'sql' ? ' active' : ''}`}
+                    >
+                        <FileText size={18} />
+                        SQL Problems
+                        <span className="tab-count">{sqlProblems.length}</span>
+                    </button>
+                </div>
+            )}
 
             {/* Coding Problems Tab */}
             {activeTab === 'coding' && (

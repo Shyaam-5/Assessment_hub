@@ -98,7 +98,13 @@ async def _effective_user(request: Request, requested_user_id: str | None = None
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
     requested = (requested_user_id or "").strip()
-    can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+    role = str(user.get("role") or "").strip().lower()
+    can_view_proctor = role in {"admin", "organization_admin", "mentor"}
+    if not can_view_proctor:
+        try:
+            can_view_proctor = await _has_any_permission(actor_id, ["proctoring.view"])
+        except RuntimeError:
+            can_view_proctor = False
     if requested and requested != actor_id and not can_view_proctor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User mismatch")
     return user

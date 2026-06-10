@@ -47,13 +47,15 @@ const NumberInput = ({ label, value, onChange, min, max, icon, color, suffix }) 
                 cursor: 'pointer', fontSize: '18px', color: '#94a3b8', fontWeight: 600,
                 borderRight: '1px solid #475569'
             }}>−</button>
-            <input type="number" value={value} min={min} max={max}
+            <input className="number-input-no-spinner" type="number" value={value} min={min} max={max}
                 onChange={e => onChange(Math.min(max, Math.max(min, parseInt(e.target.value) || min)))}
                 style={{
                     flex: 1, textAlign: 'center', border: 'none', outline: 'none',
                     fontSize: '16px', fontWeight: 700, color: color || '#f1f5f9',
                     padding: '8px 4px', width: '100%', boxSizing: 'border-box',
-                    background: 'transparent'
+                    background: 'transparent',
+                    appearance: 'textfield',
+                    MozAppearance: 'textfield'
                 }}
             />
             <button onClick={() => onChange(Math.min(max, value + 1))} style={{

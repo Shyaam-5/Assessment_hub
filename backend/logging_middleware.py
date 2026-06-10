@@ -276,6 +276,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.audit_logger = get_audit_logger()
         self.request_counts = {}  # IP -> (window_start_ts, request_count)
         self.max_requests_per_minute = 60
+        self.window_seconds = 60
+        self.max_tracked_ips = 10000
+        self._cleanup_interval_seconds = 300
+        self._last_cleanup_at = 0.0
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Apply rate limiting check."""
@@ -284,10 +288,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             client_ip = request.headers["x-forwarded-for"].split(",")[0].strip()
         else:
             client_ip = request.client.host if request.client else "unknown"
-        
+
         now = time.time()
+        self._cleanup_stale_counters(now)
         window_start, current_count = self.request_counts.get(client_ip, (now, 0))
-        if now - window_start >= 60:
+        if now - window_start >= self.window_seconds:
             window_start, current_count = now, 0
         current_count += 1
         self.request_counts[client_ip] = (window_start, current_count)
@@ -305,3 +310,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return Response("Rate limit exceeded", status_code=429)
         
         return await call_next(request)
+
+    def _cleanup_stale_counters(self, now: float) -> None:
+        if (
+            len(self.request_counts) < self.max_tracked_ips
+            and now - self._last_cleanup_at < self._cleanup_interval_seconds
+        ):
+            return
+        stale_before = now - (self.window_seconds * 2)
+        self.request_counts = {
+            ip: payload
+            for ip, payload in self.request_counts.items()
+            if payload[0] >= stale_before
+        }
+        if len(self.request_counts) > self.max_tracked_ips:
+            newest = sorted(
+                self.request_counts.items(),
+                key=lambda item: item[1][0],
+                reverse=True,
+            )[: self.max_tracked_ips]
+            self.request_counts = dict(newest)
+        self._last_cleanup_at = now

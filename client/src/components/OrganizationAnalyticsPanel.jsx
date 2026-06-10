@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
+import { getAuthToken } from '../services/authStorage'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 
@@ -9,7 +10,7 @@ export default function OrganizationAnalyticsPanel({ user }) {
     const [error, setError] = useState('')
     const headers = useMemo(() => {
         const h = { 'x-user-id': user?.id || '' }
-        const token = localStorage.getItem('authToken') || ''
+        const token = getAuthToken()
         if (token) h.Authorization = `Bearer ${token}`
         return h
     }, [user?.id])

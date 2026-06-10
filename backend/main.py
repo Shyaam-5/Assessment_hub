@@ -341,20 +341,33 @@ async def lifespan(app: FastAPI):
     setup_logging(os.getenv("LOG_LEVEL", "INFO"))
     logger.info("Startup DB target | DATABASE_URL=%s | DB_NAME=%s", settings.DATABASE_URL, settings.DB_NAME)
     await init_db()
-    await create_prescan_tables()
     await ensure_auth_login_schema()
     await ensure_rbac_schema()
     await ensure_core_domain_tables()
-    if settings.STARTUP_TENANT_SCHEMA_RECONCILE:
-        tenant_fix = await reconcile_active_tenant_schemas()
-        failed = [r for r in tenant_fix if not r.get("ok")]
-        fixed = [r for r in tenant_fix if r.get("ok") and int(r.get("created") or 0) > 0]
-        if fixed:
-            logger.info("Tenant schema reconcile created missing tables for orgs=%s", fixed)
-        if failed:
-            logger.warning("Tenant schema reconcile failed for orgs=%s", failed)
-    await ensure_proctoring_tables()
-    await ensure_default_super_admins()
+    if settings.STARTUP_OPTIONAL_SERVICES_ENABLED:
+        try:
+            await create_prescan_tables()
+        except Exception as exc:
+            logger.warning("Prescan schema initialization failed; continuing without prescan bootstrap: %s", exc)
+        try:
+            await ensure_proctoring_tables()
+        except Exception as exc:
+            logger.warning("Proctoring schema initialization failed; continuing without proctoring bootstrap: %s", exc)
+        try:
+            await ensure_default_super_admins()
+        except Exception as exc:
+            logger.warning("Default super-admin bootstrap failed; continuing: %s", exc)
+    if settings.STARTUP_TENANT_SCHEMA_RECONCILE and settings.STARTUP_OPTIONAL_SCHEMA_SYNC_ENABLED:
+        try:
+            tenant_fix = await reconcile_active_tenant_schemas()
+            failed = [r for r in tenant_fix if not r.get("ok")]
+            fixed = [r for r in tenant_fix if r.get("ok") and int(r.get("created") or 0) > 0]
+            if fixed:
+                logger.info("Tenant schema reconcile created missing tables for orgs=%s", fixed)
+            if failed:
+                logger.warning("Tenant schema reconcile failed for orgs=%s", failed)
+        except Exception as exc:
+            logger.warning("Tenant schema reconcile failed; continuing startup: %s", exc)
     if settings.STARTUP_DB_PREFLIGHT:
         preflight = await run_startup_db_preflight(check_tenants=settings.STARTUP_DB_PREFLIGHT_TENANTS)
         if preflight.get("primary_ok"):

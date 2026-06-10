@@ -9,6 +9,7 @@ import AdminPortal from './pages/AdminPortal'
 import ScanMobilePage from './prescan/pages/ScanMobilePage'
 import ScanDesktopPage from './prescan/pages/ScanDesktopPage'
 import MobileBlock from './components/MobileBlock'
+import { clearAuthToken, getAuthToken, setAuthToken } from './services/authStorage'
 
 // Error Boundary to catch React runtime errors
 class ErrorBoundary extends Component {
@@ -147,10 +148,9 @@ function App() {
     })
     const [loading, setLoading] = useState(true)
     const navigate = useNavigate()
-    const getToken = () => localStorage.getItem('authToken') || ''
     const authHeaders = (extra = {}) => {
         const h = { 'Content-Type': 'application/json', ...extra }
-        const token = getToken()
+        const token = getAuthToken()
         if (token) h.Authorization = `Bearer ${token}`
         if (user?.id) h['x-user-id'] = user.id
         if (user?.organizationId) h['x-org-id'] = user.organizationId
@@ -171,7 +171,7 @@ function App() {
             try {
                 const savedUser = localStorage.getItem('currentUser')
                 if (savedUser && savedUser !== 'undefined') {
-                    const token = getToken()
+                    const token = getAuthToken()
                     if (!token) {
                         localStorage.removeItem('currentUser')
                         setUser(null)
@@ -191,18 +191,18 @@ function App() {
                         const data = await response.json()
                         setUser(data.user)
                         localStorage.setItem('currentUser', JSON.stringify(data.user))
-                        if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
+                        if (data.accessToken) setAuthToken(data.accessToken)
                     } else {
                         console.warn('Session invalid or expired')
                         localStorage.removeItem('currentUser')
-                        localStorage.removeItem('authToken')
+                        clearAuthToken()
                         setUser(null)
                     }
                 }
             } catch (error) {
                 console.error('Session verification failed:', error)
                 localStorage.removeItem('currentUser')
-                localStorage.removeItem('authToken')
+                clearAuthToken()
                 setUser(null)
             } finally {
                 setLoading(false)
@@ -225,7 +225,7 @@ function App() {
         } else {
             delete axios.defaults.headers.common['x-user-id']
         }
-        const token = getToken()
+        const token = getAuthToken()
         if (token) axios.defaults.headers.common.Authorization = `Bearer ${token}`
         else delete axios.defaults.headers.common.Authorization
         if (orgId) {
@@ -266,7 +266,7 @@ function App() {
 
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
+            if (data.accessToken) setAuthToken(data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -304,7 +304,7 @@ function App() {
 
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
+            if (data.accessToken) setAuthToken(data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -337,7 +337,7 @@ function App() {
             }
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
+            if (data.accessToken) setAuthToken(data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -362,7 +362,7 @@ function App() {
             }
             setUser(data.user)
             localStorage.setItem('currentUser', JSON.stringify(data.user))
-            if (data.accessToken) localStorage.setItem('authToken', data.accessToken)
+            if (data.accessToken) setAuthToken(data.accessToken)
             navigate(getHomePath(data.user))
             return { success: true }
         } catch (error) {
@@ -373,7 +373,7 @@ function App() {
     const logout = () => {
         setUser(null)
         localStorage.removeItem('currentUser')
-        localStorage.removeItem('authToken')
+        clearAuthToken()
         navigate('/login')
     }
 

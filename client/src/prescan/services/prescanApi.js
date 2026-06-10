@@ -1,3 +1,5 @@
+import { getAuthToken } from '../../services/authStorage';
+
 /** Same base resolution as App.jsx / StudentPortal: tunnel/backend URL wins, else Dev server origin (Vite /api proxy). */
 function apiOrigin() {
   const fromEnv = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
@@ -34,7 +36,7 @@ function toErrorMessage(body, status) {
 }
 
 async function request(path, options = {}) {
-  const token = (typeof localStorage !== 'undefined' && localStorage.getItem('authToken')) || '';
+  const token = getAuthToken();
   const res = await fetch(`${apiOrigin()}${path}`, {
     headers: {
       'Content-Type': 'application/json',
