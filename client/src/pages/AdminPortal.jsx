@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
-import { LayoutDashboard, Users, Trophy, Award, List, Search, Send, Activity, CheckCircle, Check, TrendingUp, Clock, Globe, FileCode, Plus, X, Code, ChevronRight, Upload, AlertTriangle, Zap, Target, Sparkles, Bot, Wand2, Eye, FileText, BarChart2, RefreshCw, Calendar, HelpCircle, Trash2, Save, Brain, XCircle, Shield, Download, ClipboardList, Settings, Database, Mail, MessageSquare, Github, ExternalLink, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Users, Trophy, Award, List, Search, Send, Activity, CheckCircle, Check, TrendingUp, Clock, Globe, FileCode, Plus, X, Code, ChevronRight, Upload, AlertTriangle, Zap, Target, Sparkles, Bot, Wand2, Eye, FileText, BarChart2, RefreshCw, Calendar, HelpCircle, Trash2, Save, Brain, XCircle, Shield, Download, ClipboardList, Settings, Database, Mail, MessageSquare, Github, ExternalLink, BarChart3, Video, Mic, Maximize, Smartphone, Monitor, ScanFace } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts'
 import DashboardLayout from '../components/DashboardLayout'
 import { AIChatbot, AIFloatingButton } from '../components/AIChatbot'
@@ -163,6 +163,209 @@ const adminCreateSectionCardStyle = {
     border: '1px solid #334155',
     overflow: 'hidden',
     boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+}
+
+const adminBuilderPanelStyle = (borderColor, glowA, glowB) => ({
+    background: `linear-gradient(135deg, ${glowA}, ${glowB})`,
+    borderRadius: '16px',
+    padding: '24px',
+    marginBottom: '28px',
+    border: `1px solid ${borderColor}`,
+    boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+})
+
+const adminBuilderShellStyle = {
+    width: '100%',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: '16px',
+    background: '#1e293b',
+    backgroundImage: 'linear-gradient(145deg, rgba(30,41,59,1), rgba(15,23,42,1))',
+    border: '1px solid rgba(71,85,105,0.55)',
+    boxShadow: '0 25px 50px rgba(0,0,0,0.2)'
+}
+
+const adminBuilderHeaderStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '20px'
+}
+
+const adminBuilderCancelButtonStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '11px 20px',
+    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontWeight: 700,
+    fontSize: '14px'
+}
+
+const adminBuilderSummaryBarStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '14px 18px',
+    background: '#1e293b',
+    borderRadius: '12px',
+    border: '1px solid #334155',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+    marginBottom: '1rem',
+    flexWrap: 'wrap',
+    gap: '12px'
+}
+
+const adminBuilderSummaryItemsStyle = {
+    display: 'flex',
+    gap: '16px',
+    fontSize: '12px',
+    color: '#94a3b8',
+    flexWrap: 'wrap',
+    alignItems: 'center'
+}
+
+const SHARED_PROCTORING_DEFAULTS = Object.freeze({
+    enabled: true,
+    enableVideoAudio: true,
+    enableMicrophone: true,
+    enforceFullscreen: true,
+    trackTabSwitches: true,
+    maxTabSwitches: 3,
+    disableCopyPaste: true,
+    detectPhoneUsage: true,
+    detectCameraBlocking: true,
+    enableFaceDetection: true,
+    detectMultipleFaces: true,
+    autoSubmitOnViolation: false
+})
+
+const createSharedProctoringSettings = (overrides = {}) => ({
+    ...SHARED_PROCTORING_DEFAULTS,
+    ...overrides,
+})
+
+function AdminUnifiedProctoringSection({ value, onChange, color = '#ef4444' }) {
+    const updateField = (key, fieldValue) => onChange({ ...value, [key]: fieldValue })
+    const optionCards = [
+        { key: 'enableVideoAudio', label: 'Camera Monitoring', desc: 'Camera feed monitoring', icon: <Video size={16} />, accent: '#3b82f6' },
+        { key: 'enableMicrophone', label: 'Microphone / Audio', desc: 'Audio capture monitoring', icon: <Mic size={16} />, accent: '#8b5cf6' },
+        { key: 'enforceFullscreen', label: 'Fullscreen', desc: 'Require fullscreen mode', icon: <Maximize size={16} />, accent: '#06b6d4' },
+        { key: 'trackTabSwitches', label: 'Tab Switch Tracking', desc: 'Track tab/app switches', icon: <Monitor size={16} />, accent: '#10b981' },
+        { key: 'disableCopyPaste', label: 'Copy/Paste Blocking', desc: 'Block copy and paste', icon: <Shield size={16} />, accent: '#f59e0b' },
+        { key: 'detectPhoneUsage', label: 'Phone Detection', desc: 'Detect phone presence', icon: <Smartphone size={16} />, accent: '#ec4899' },
+        { key: 'detectCameraBlocking', label: 'Camera Block Detection', desc: 'Detect covered camera', icon: <Video size={16} />, accent: '#ef4444' },
+        { key: 'enableFaceDetection', label: 'Face Detection', desc: 'Check visible face presence', icon: <ScanFace size={16} />, accent: '#14b8a6' },
+        { key: 'detectMultipleFaces', label: 'Multiple People Detection', desc: 'Detect extra people', icon: <Users size={16} />, accent: '#f97316' },
+        { key: 'autoSubmitOnViolation', label: 'Auto Submit on Violation', desc: 'Submit after serious violations', icon: <AlertTriangle size={16} />, accent: '#eab308' },
+    ]
+
+    return (
+        <AdminCreateSectionCard
+            icon={<Shield size={16} />}
+            title="Proctoring Settings"
+            subtitle="Standardized integrity controls for this assessment"
+            color={color}
+        >
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '12px',
+                marginBottom: value.enabled ? '16px' : '0',
+                padding: '12px 14px',
+                background: '#0f172a',
+                borderRadius: '12px',
+                border: '1px solid #334155'
+            }}>
+                <div>
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#f1f5f9' }}>Enable Proctoring</div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8' }}>Turn on the shared monitoring rules for this module</div>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => updateField('enabled', !value.enabled)}
+                    style={{
+                        padding: '8px 14px',
+                        borderRadius: '999px',
+                        border: `1px solid ${value.enabled ? '#22c55e66' : '#475569'}`,
+                        background: value.enabled ? 'rgba(34,197,94,0.15)' : '#1e293b',
+                        color: value.enabled ? '#4ade80' : '#94a3b8',
+                        cursor: 'pointer',
+                        fontWeight: 700
+                    }}
+                >
+                    {value.enabled ? 'ON' : 'OFF'}
+                </button>
+            </div>
+
+            {value.enabled && (
+                <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                        {optionCards.map((option) => {
+                            const active = !!value[option.key]
+                            return (
+                                <button
+                                    key={option.key}
+                                    type="button"
+                                    onClick={() => updateField(option.key, !active)}
+                                    style={{
+                                        textAlign: 'left',
+                                        padding: '14px 16px',
+                                        borderRadius: '12px',
+                                        border: `1px solid ${active ? `${option.accent}66` : '#475569'}`,
+                                        background: active ? `${option.accent}15` : '#0f172a',
+                                        color: active ? option.accent : '#94a3b8',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '6px'
+                                    }}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '13px' }}>
+                                        {option.icon} {option.label}
+                                    </span>
+                                    <span style={{ fontSize: '11px', opacity: 0.9 }}>{option.desc}</span>
+                                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{active ? 'ON' : 'OFF'}</span>
+                                </button>
+                            )
+                        })}
+                    </div>
+
+                    {value.trackTabSwitches && (
+                        <div style={{ marginBottom: '16px' }}>
+                            <AdminNumberInput
+                                label="Max Tab Switches"
+                                value={value.maxTabSwitches}
+                                onChange={(fieldValue) => updateField('maxTabSwitches', fieldValue)}
+                                min={1}
+                                max={10}
+                                icon={<AlertTriangle size={12} />}
+                                color="#ef4444"
+                                suffix="violations allowed"
+                                width="220px"
+                            />
+                        </div>
+                    )}
+                </>
+            )}
+
+            <div style={adminBuilderSummaryBarStyle}>
+                <div style={adminBuilderSummaryItemsStyle}>
+                    <span><Shield size={13} style={{ verticalAlign: 'middle' }} /> {value.enabled ? 'Proctored' : 'No Proctor'}</span>
+                    <span><Video size={13} style={{ verticalAlign: 'middle' }} /> {value.enableVideoAudio ? 'Camera' : 'Camera Off'}</span>
+                    <span><Mic size={13} style={{ verticalAlign: 'middle' }} /> {value.enableMicrophone ? 'Mic' : 'Mic Off'}</span>
+                    <span><Monitor size={13} style={{ verticalAlign: 'middle' }} /> {value.trackTabSwitches ? `${value.maxTabSwitches} tab switches` : 'No tab tracking'}</span>
+                </div>
+            </div>
+        </AdminCreateSectionCard>
+    )
 }
 
 function AdminCreateSectionCard({ icon, title, subtitle, color, children }) {
@@ -2566,6 +2769,7 @@ function GlobalProblems({ mode = 'all' }) {
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [showAIChat, setShowAIChat] = useState(false)
+    const [submittingProblem, setSubmittingProblem] = useState(false)
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
     const forcedTab = mode === 'coding' || mode === 'sql' ? mode : null
@@ -2586,12 +2790,17 @@ function GlobalProblems({ mode = 'all' }) {
         expectedQueryResult: '',
         enableProctoring: false,
         enableVideoAudio: false,
+        enableMicrophone: false,
         disableCopyPaste: false,
         trackTabSwitches: false,
         maxTabSwitches: 3,
+        detectPhoneUsage: false,
+        detectCameraBlocking: false,
+        enforceFullscreen: false,
         enableFaceDetection: false,
         detectMultipleFaces: false,
-        trackFaceLookaway: false
+        trackFaceLookaway: false,
+        autoSubmitOnViolation: false
     })
 
     // Check if SQL is selected
@@ -2619,12 +2828,17 @@ function GlobalProblems({ mode = 'all' }) {
             status: generated.status || 'live',
             enableProctoring: problem.enableProctoring,
             enableVideoAudio: problem.enableVideoAudio,
+            enableMicrophone: problem.enableMicrophone,
             disableCopyPaste: problem.disableCopyPaste,
             trackTabSwitches: problem.trackTabSwitches,
             maxTabSwitches: problem.maxTabSwitches,
+            detectPhoneUsage: problem.detectPhoneUsage,
+            detectCameraBlocking: problem.detectCameraBlocking,
+            enforceFullscreen: problem.enforceFullscreen,
             enableFaceDetection: problem.enableFaceDetection,
             detectMultipleFaces: problem.detectMultipleFaces,
-            trackFaceLookaway: problem.trackFaceLookaway
+            trackFaceLookaway: problem.trackFaceLookaway,
+            autoSubmitOnViolation: problem.autoSubmitOnViolation
         })
         setShowAIChat(false)
         setShowModal(true)
@@ -2645,19 +2859,28 @@ function GlobalProblems({ mode = 'all' }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault()
+        if (submittingProblem) return
+        setSubmittingProblem(true)
         try {
-            await axios.post(`${API_BASE}/problems`, { ...problem, mentorId: ADMIN_ID })
+            await axios.post(`${API_BASE}/problems`, {
+                ...problem,
+                mentorId: ADMIN_ID,
+                deadline: problem.deadline || null,
+            })
             setShowModal(false)
             setProblem({
                 title: '', type: 'Coding', language: 'Python', difficulty: 'Medium',
                 description: '', sampleInput: '', expectedOutput: '', deadline: '', status: 'live',
                 sqlSchema: '', expectedQueryResult: '',
-                enableProctoring: false, enableVideoAudio: false, disableCopyPaste: false, trackTabSwitches: false, maxTabSwitches: 3,
-                enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false
+                enableProctoring: false, enableVideoAudio: false, enableMicrophone: false, disableCopyPaste: false, trackTabSwitches: false, maxTabSwitches: 3,
+                detectPhoneUsage: false, detectCameraBlocking: false, enforceFullscreen: false,
+                enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, autoSubmitOnViolation: false
             })
             fetchProblems()
         } catch (error) {
-            alert('Error creating global problem')
+            alert(error.response?.data?.detail || error.response?.data?.error || error.message || 'Error creating global problem')
+        } finally {
+            setSubmittingProblem(false)
         }
     }
 
@@ -2842,6 +3065,10 @@ function GlobalProblems({ mode = 'all' }) {
                         </button>
                         <button
                             onClick={() => {
+                                if (showModal) {
+                                    setShowModal(false)
+                                    return
+                                }
                                 if (forcedTab === 'sql') {
                                     setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL' }))
                                 } else if (forcedTab === 'coding') {
@@ -2856,14 +3083,14 @@ function GlobalProblems({ mode = 'all' }) {
                             className="btn-create-new premium-btn"
                             style={{
                                 padding: '0.75rem 1.25rem',
-                                background: 'var(--primary)',
+                                background: showModal ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'var(--primary)',
                                 borderRadius: '1rem',
                                 fontSize: '0.95rem',
                                 fontWeight: 600,
                                 transition: 'all 0.3s ease'
                             }}
                         >
-                            <Plus size={20} /> {activeTab === 'sql' ? 'Create SQL Problem' : 'Create Coding Problem'}
+                            {showModal ? <X size={20} /> : <Plus size={20} />} {showModal ? 'Cancel' : (activeTab === 'sql' ? 'Create SQL Problem' : 'Create Coding Problem')}
                         </button>
                     </div>
                 </div>
@@ -3020,22 +3247,26 @@ function GlobalProblems({ mode = 'all' }) {
 
             {/* Create Modal */}
             {showModal && (
-                <div className="modal-overlay" onClick={() => setShowModal(false)}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '750px' }}>
-                        <div className="modal-header">
-                            <div className="modal-title-with-icon">
-                                <div style={{
-                                    width: '40px', height: '40px', borderRadius: '10px',
-                                    background: 'linear-gradient(135deg, #10b981, #06b6d4)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                }}>
-                                    {activeTab === 'sql' ? <Database size={20} color="white" /> : <Code size={20} color="white" />}
-                                </div>
-                                <h2>{createModalTitle}</h2>
+                <div style={adminBuilderPanelStyle('rgba(16,185,129,0.2)', 'rgba(16,185,129,0.08)', 'rgba(6,182,212,0.05)')}>
+                    <div style={adminBuilderHeaderStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                                width: '42px', height: '42px', borderRadius: '12px',
+                                background: 'linear-gradient(135deg, #10b981, #06b6d4)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            }}>
+                                {activeTab === 'sql' ? <Database size={22} color="white" /> : <Code size={22} color="white" />}
                             </div>
-                            <button onClick={() => setShowModal(false)} className="modal-close"><X size={20} /></button>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#99f6e4' }}>{createModalTitle}</h3>
+                                <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>Use the inline form to avoid overlapping modal cards</p>
+                            </div>
                         </div>
-                        <div className="modal-body premium-form">
+                        <button onClick={() => setShowModal(false)} style={adminBuilderCancelButtonStyle}>
+                            <X size={18} /> Cancel
+                        </button>
+                    </div>
+                    <div className="premium-form" style={adminBuilderShellStyle}>
                             <form onSubmit={handleSubmit}>
                                 <div style={{ display: 'grid', gap: '14px', marginBottom: '1.5rem' }}>
                                     <AdminCreateSectionCard
@@ -3217,185 +3448,60 @@ function GlobalProblems({ mode = 'all' }) {
                                     </div>
                                 </AdminCreateSectionCard>
 
-                                {/* Proctoring Settings Section */}
-                                <AdminCreateSectionCard
-                                    icon={<Eye size={16} />}
-                                    title="Proctoring Settings"
-                                    subtitle="Control monitoring, clipboard restrictions, and violations"
+                                <AdminUnifiedProctoringSection
+                                    value={{
+                                        enabled: problem.enableProctoring,
+                                        enableVideoAudio: problem.enableVideoAudio,
+                                        enableMicrophone: problem.enableMicrophone,
+                                        enforceFullscreen: problem.enforceFullscreen,
+                                        trackTabSwitches: problem.trackTabSwitches,
+                                        maxTabSwitches: problem.maxTabSwitches,
+                                        disableCopyPaste: problem.disableCopyPaste,
+                                        detectPhoneUsage: problem.detectPhoneUsage,
+                                        detectCameraBlocking: problem.detectCameraBlocking,
+                                        enableFaceDetection: problem.enableFaceDetection,
+                                        detectMultipleFaces: problem.detectMultipleFaces,
+                                        autoSubmitOnViolation: problem.autoSubmitOnViolation
+                                    }}
+                                    onChange={(next) => setProblem({
+                                        ...problem,
+                                        enableProctoring: next.enabled,
+                                        enableVideoAudio: next.enableVideoAudio,
+                                        enableMicrophone: next.enableMicrophone,
+                                        enforceFullscreen: next.enforceFullscreen,
+                                        trackTabSwitches: next.trackTabSwitches,
+                                        maxTabSwitches: next.maxTabSwitches,
+                                        disableCopyPaste: next.disableCopyPaste,
+                                        detectPhoneUsage: next.detectPhoneUsage,
+                                        detectCameraBlocking: next.detectCameraBlocking,
+                                        enableFaceDetection: next.enableFaceDetection,
+                                        detectMultipleFaces: next.detectMultipleFaces,
+                                        autoSubmitOnViolation: next.autoSubmitOnViolation
+                                    })}
                                     color="#ef4444"
-                                >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                                        <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#ef4444' }}>
-                                            Exam Integrity Controls
-                                        </h4>
+                                />
+                                </div>
+
+                                <div style={adminBuilderSummaryBarStyle}>
+                                    <div style={adminBuilderSummaryItemsStyle}>
+                                        <span><Code size={13} style={{ verticalAlign: 'middle' }} /> {problem.type}</span>
+                                        <span><Database size={13} style={{ verticalAlign: 'middle' }} /> {problem.language}</span>
+                                        <span><Target size={13} style={{ verticalAlign: 'middle' }} /> {problem.difficulty}</span>
+                                        <span><Clock size={13} style={{ verticalAlign: 'middle' }} /> {problem.deadline ? 'Scheduled' : 'No deadline'}</span>
+                                        <span style={{ color: problem.enableProctoring ? '#22c55e' : '#ef4444' }}>
+                                            <Shield size={13} style={{ verticalAlign: 'middle' }} /> {problem.enableProctoring ? 'Proctored' : 'No Proctor'}
+                                        </span>
                                     </div>
-
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: 'pointer',
-                                            padding: '0.75rem',
-                                            background: problem.enableProctoring ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.enableProctoring}
-                                                onChange={(e) => setProblem({ ...problem, enableProctoring: e.target.checked })}
-                                                style={{ width: '18px', height: '18px', accentColor: '#ef4444' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>Enable Proctoring</span>
-                                        </label>
-
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: problem.enableProctoring ? 'pointer' : 'not-allowed',
-                                            opacity: problem.enableProctoring ? 1 : 0.5,
-                                            padding: '0.75rem',
-                                            background: problem.enableVideoAudio ? 'rgba(139, 92, 246, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.enableVideoAudio}
-                                                onChange={(e) => setProblem({ ...problem, enableVideoAudio: e.target.checked })}
-                                                disabled={!problem.enableProctoring}
-                                                style={{ width: '18px', height: '18px', accentColor: '#8b5cf6' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>📹 Video/Audio Monitoring</span>
-                                        </label>
-
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: problem.enableProctoring ? 'pointer' : 'not-allowed',
-                                            opacity: problem.enableProctoring ? 1 : 0.5,
-                                            padding: '0.75rem',
-                                            background: problem.disableCopyPaste ? 'rgba(245, 158, 11, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.disableCopyPaste}
-                                                onChange={(e) => setProblem({ ...problem, disableCopyPaste: e.target.checked })}
-                                                disabled={!problem.enableProctoring}
-                                                style={{ width: '18px', height: '18px', accentColor: '#f59e0b' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>📋 Disable Copy/Paste</span>
-                                        </label>
-
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: problem.enableProctoring ? 'pointer' : 'not-allowed',
-                                            opacity: problem.enableProctoring ? 1 : 0.5,
-                                            padding: '0.75rem',
-                                            background: problem.trackTabSwitches ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.trackTabSwitches}
-                                                onChange={(e) => setProblem({ ...problem, trackTabSwitches: e.target.checked })}
-                                                disabled={!problem.enableProctoring}
-                                                style={{ width: '18px', height: '18px', accentColor: '#10b981' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>🔒 Track Tab Switches</span>
-                                        </label>
-
-                                        <hr style={{ margin: '0.5rem 0', borderColor: 'var(--border-color)', opacity: 0.3 }} />
-
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: problem.enableProctoring ? 'pointer' : 'not-allowed',
-                                            opacity: problem.enableProctoring ? 1 : 0.5,
-                                            padding: '0.75rem',
-                                            background: problem.enableFaceDetection ? 'rgba(236, 72, 153, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.enableFaceDetection}
-                                                onChange={(e) => setProblem({ ...problem, enableFaceDetection: e.target.checked })}
-                                                disabled={!problem.enableProctoring}
-                                                style={{ width: '18px', height: '18px', accentColor: '#ec4899' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>👁️ Enable Face Detection</span>
-                                        </label>
-
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: problem.enableProctoring ? 'pointer' : 'not-allowed',
-                                            opacity: problem.enableProctoring ? 1 : 0.5,
-                                            padding: '0.75rem',
-                                            background: problem.detectMultipleFaces ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.detectMultipleFaces}
-                                                onChange={(e) => setProblem({ ...problem, detectMultipleFaces: e.target.checked })}
-                                                disabled={!problem.enableProctoring}
-                                                style={{ width: '18px', height: '18px', accentColor: '#ef4444' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>👥 Detect Multiple Faces (Cheating)</span>
-                                        </label>
-
-                                        <label style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.75rem',
-                                            cursor: problem.enableProctoring ? 'pointer' : 'not-allowed',
-                                            opacity: problem.enableProctoring ? 1 : 0.5,
-                                            padding: '0.75rem',
-                                            background: problem.trackFaceLookaway ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-                                            borderRadius: '0.75rem',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={problem.trackFaceLookaway}
-                                                onChange={(e) => setProblem({ ...problem, trackFaceLookaway: e.target.checked })}
-                                                disabled={!problem.enableProctoring}
-                                                style={{ width: '18px', height: '18px', accentColor: '#3b82f6' }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>👀 Track Face Lookaway</span>
-                                        </label>
-                                    </div>
-
-                                    {problem.enableProctoring && problem.trackTabSwitches && (
-                                        <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                            <AdminNumberInput label="Max Tab Switches" value={problem.maxTabSwitches} onChange={v => setProblem({ ...problem, maxTabSwitches: v })} min={1} max={10} icon={<AlertTriangle size={12} />} color="#ef4444" suffix="violations allowed" width="220px" />
-                                        </div>
-                                    )}
-                                </AdminCreateSectionCard>
                                 </div>
 
                                 <div className="form-actions">
                                     <button type="button" className="btn-reset" onClick={() => setShowModal(false)}>Cancel</button>
-                                    <button type="submit" className="btn-create-new" style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}>
-                                        <Plus size={18} /> Create Global Problem
+                                    <button type="submit" className="btn-create-new" disabled={submittingProblem} style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}>
+                                        <Plus size={18} /> {submittingProblem ? 'Creating...' : 'Create Global Problem'}
                                     </button>
                                 </div>
                             </form>
                         </div>
-                    </div>
                 </div>
             )}
 
@@ -3478,30 +3584,11 @@ function GlobalTestsAdmin() {
     const [aiPrompt, setAiPrompt] = useState({ topic: '', difficulty: 'Medium', count: 5 })
     const [generatedQuestions, setGeneratedQuestions] = useState([])
     const [isGenerating, setIsGenerating] = useState(false)
+    const [savingTest, setSavingTest] = useState(false)
     // Enhanced Proctoring Settings
-    const [proctoringSettings, setProctoringSettings] = useState({
-        enabled: true,
-        trackTabSwitches: true,
-        maxTabSwitches: 3,
-        enableVideoAudio: true,
-        disableCopyPaste: true,
-        detectCameraBlocking: true,
-        detectPhoneUsage: true,
-        enforceFullscreen: true,
-        autoSubmitOnViolation: false
-    })
+    const [proctoringSettings, setProctoringSettings] = useState(createSharedProctoringSettings())
 
-    const defaultProctoringSettings = {
-        enabled: true,
-        trackTabSwitches: true,
-        maxTabSwitches: 3,
-        enableVideoAudio: true,
-        disableCopyPaste: true,
-        detectCameraBlocking: true,
-        detectPhoneUsage: true,
-        enforceFullscreen: true,
-        autoSubmitOnViolation: false
-    }
+    const defaultProctoringSettings = createSharedProctoringSettings()
     // AI Generation for Coding/SQL
     const [codingAiPrompt, setCodingAiPrompt] = useState({ topic: '', difficulty: 'Medium', language: 'Python' })
     const [sqlAiPrompt, setSqlAiPrompt] = useState({ topic: '', difficulty: 'Medium' })
@@ -3813,6 +3900,8 @@ function GlobalTestsAdmin() {
         if (!newTest.title.trim()) { alert('Enter test title'); return }
         const totalQ = Object.values(questionsBySection).reduce((sum, arr) => sum + arr.length, 0)
         if (totalQ === 0) { alert('Add questions in sections'); return }
+        if (savingTest) return
+        setSavingTest(true)
         let createdTestId = null
         try {
             // Format dates correctly for backend
@@ -3839,10 +3928,13 @@ function GlobalTestsAdmin() {
                     trackTabSwitches: proctoringSettings.trackTabSwitches,
                     maxTabSwitches: proctoringSettings.maxTabSwitches,
                     enableVideoAudio: proctoringSettings.enableVideoAudio,
+                    enableMicrophone: proctoringSettings.enableMicrophone,
                     disableCopyPaste: proctoringSettings.disableCopyPaste,
                     detectCameraBlocking: proctoringSettings.detectCameraBlocking,
                     detectPhoneUsage: proctoringSettings.detectPhoneUsage,
                     enforceFullscreen: proctoringSettings.enforceFullscreen,
+                    enableFaceDetection: proctoringSettings.enableFaceDetection,
+                    detectMultipleFaces: proctoringSettings.detectMultipleFaces,
                     autoSubmitOnViolation: proctoringSettings.autoSubmitOnViolation
                 } : { enabled: false },
                 maxTabSwitches: proctoringSettings.enabled && proctoringSettings.trackTabSwitches ? proctoringSettings.maxTabSwitches : 0
@@ -3886,6 +3978,8 @@ function GlobalTestsAdmin() {
             } else {
                 alert(msg)
             }
+        } finally {
+            setSavingTest(false)
         }
     }
 
@@ -3947,17 +4041,20 @@ function GlobalTestsAdmin() {
             })
             setEnableProctoring((t.maxTabSwitches ?? 0) > 0)
             const savedProctoring = t.proctoring || {}
-            setProctoringSettings({
+            setProctoringSettings(createSharedProctoringSettings({
                 enabled: savedProctoring.enabled ?? false,
                 trackTabSwitches: savedProctoring.trackTabSwitches ?? false,
                 maxTabSwitches: savedProctoring.maxTabSwitches ?? (t.maxTabSwitches ?? 3),
                 enableVideoAudio: savedProctoring.enableVideoAudio ?? false,
+                enableMicrophone: savedProctoring.enableMicrophone ?? false,
                 disableCopyPaste: savedProctoring.disableCopyPaste ?? false,
                 detectCameraBlocking: savedProctoring.detectCameraBlocking ?? false,
                 detectPhoneUsage: savedProctoring.detectPhoneUsage ?? false,
                 enforceFullscreen: savedProctoring.enforceFullscreen ?? false,
+                enableFaceDetection: savedProctoring.enableFaceDetection ?? false,
+                detectMultipleFaces: savedProctoring.detectMultipleFaces ?? false,
                 autoSubmitOnViolation: savedProctoring.autoSubmitOnViolation ?? false
-            })
+            }))
             setNewTest({
                 title: t.title,
                 type: t.type || 'comprehensive',
@@ -4104,11 +4201,19 @@ function GlobalTestsAdmin() {
                         </button>
                         <button
                             type="button"
-                            onClick={() => { setShowModal(true); setModalStep(1); setEditingId(null); setQuestionsBySection({ aptitude: [], verbal: [], logical: [], coding: [], sql: [] }); setGeneratedQuestions([]); setAiPrompt({ topic: '', difficulty: 'Medium', count: 5 }); setProctoringSettings(defaultProctoringSettings); }}
+                            onClick={() => {
+                                if (showModal) {
+                                    setShowModal(false)
+                                    setModalStep(1)
+                                    setEditingId(null)
+                                    return
+                                }
+                                setShowModal(true); setModalStep(1); setEditingId(null); setQuestionsBySection({ aptitude: [], verbal: [], logical: [], coding: [], sql: [] }); setGeneratedQuestions([]); setAiPrompt({ topic: '', difficulty: 'Medium', count: 5 }); setProctoringSettings(defaultProctoringSettings);
+                            }}
                             className="btn-create-new premium-btn"
-                            style={{ padding: '0.75rem 1.25rem', background: 'var(--primary)', borderRadius: '1rem', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                            style={{ padding: '0.75rem 1.25rem', background: showModal ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'var(--primary)', borderRadius: '1rem', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                         >
-                            <Plus size={20} /> Create Global Test
+                            {showModal ? <X size={20} /> : <Plus size={20} />} {showModal ? 'Cancel' : 'Create Global Test'}
                         </button>
                     </div>
                 </div>
@@ -4167,83 +4272,129 @@ function GlobalTestsAdmin() {
                     <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>If you see 503, run: <code>node migrate_global_tests.js</code></p>
                 </div>
             ) : (
-                <div className="problem-list-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))' }}>
-                    {tests.map(t => (
-                        <div key={t.id} id={`global-test-${t.id}`} className="problem-card card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2))', color: '#10b981', fontWeight: 700 }}>GLOBAL TEST</span>
-                                    <span style={{ fontSize: '0.65rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', border: '1px solid rgba(99,102,241,0.35)', fontWeight: 700 }}>
-                                        {t.allocatedCount || 0} allocated
-                                    </span>
-                                </div>
-                                <span style={{
-                                    fontSize: '0.65rem',
-                                    padding: '3px 8px',
-                                    borderRadius: '4px',
-                                    textTransform: 'uppercase',
-                                    fontWeight: 700,
-                                    background: t.status === 'live' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                                    color: t.status === 'live' ? '#10b981' : '#ef4444',
-                                    border: t.status === 'live' ? '1px solid rgba(16, 185, 129, 0.2)' : '1px solid rgba(239, 68, 68, 0.2)'
-                                }}>
-                                    {t.status === 'live' ? 'LIVE' : 'ENDED'}
-                                </span>
-                            </div>
-                            <h3 style={{ margin: '0.75rem 0', fontSize: '1.2rem' }}>{t.title}</h3>
-                            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginBottom: '1rem' }}>
-                                {t.description || 'Aptitude, Verbal, Logical, Coding, SQL'}
-                            </p>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-                                {t.duration} min · {t.totalQuestions ?? 0} questions · Pass {t.passingScore}%
-                            </div>
-                            <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.type}</span>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => openEdit(t)}
-                                        style={{ background: '#1e3a8a', border: '1px solid #1d4ed8', color: '#93c5fd', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                                    >
-                                        <Eye size={14} /> View
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => openAllocate(t)}
-                                        style={{ background: '#1e3a5f', border: '1px solid #6366f1', color: '#a5b4fc', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                                    >
-                                        <Users size={14} /> Allocate
-                                    </button>
-
-                                    {t.status === 'live' ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleUpdateStatus(t.id, 'draft')}
-                                            style={{ background: '#451a03', border: '1px solid #b45309', color: '#fbbf24', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                                        >
-                                            <XCircle size={14} /> End
-                                        </button>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleUpdateStatus(t.id, 'live')}
-                                            style={{ background: '#064e3b', border: '1px solid #059669', color: '#6ee7b7', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                                        >
-                                            <CheckCircle size={14} /> Activate
-                                        </button>
-                                    )}
-
-                                    <button
-                                        type="button"
-                                        onClick={() => handleDelete(t.id)}
-                                        style={{ background: '#450a0a', border: '1px solid #991b1b', color: '#f87171', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                                    >
-                                        <Trash2 size={14} /> Delete
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
+                <div className="card glass" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '1.5rem', padding: '1.5rem' }}>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1.25rem' }}>
+                        <ClipboardList size={20} style={{ color: '#8b5cf6' }} /> All Global Tests
+                    </h3>
+                    <div className="table-container" style={{ border: 'none', overflowX: 'auto' }}>
+                        <table className="modern-table" style={{ minWidth: '1120px' }}>
+                            <thead>
+                                <tr>
+                                    <th>Test Title</th>
+                                    <th>Difficulty</th>
+                                    <th>Questions</th>
+                                    <th>Duration</th>
+                                    <th>Pass %</th>
+                                    <th>Status</th>
+                                    <th>Results</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {tests.map(t => (
+                                    <tr key={t.id} id={`global-test-${t.id}`}>
+                                        <td>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <div style={{
+                                                    width: '42px',
+                                                    height: '42px',
+                                                    borderRadius: '12px',
+                                                    background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    flexShrink: 0
+                                                }}>
+                                                    <ClipboardList size={18} color="white" />
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                    <span style={{ fontWeight: 700 }}>{t.title}</span>
+                                                    <span style={{ fontSize: '0.72rem', padding: '3px 9px', borderRadius: '999px', background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', border: '1px solid rgba(99,102,241,0.35)', fontWeight: 700 }}>
+                                                        {t.allocatedCount || 0} allocated
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span className={`difficulty-badge ${(t.difficulty || 'medium').toLowerCase()}`}>
+                                                {t.difficulty || 'Medium'}
+                                            </span>
+                                        </td>
+                                        <td>{t.totalQuestions ?? 0}</td>
+                                        <td>{t.duration} min</td>
+                                        <td>{t.passingScore}%</td>
+                                        <td>
+                                            <span style={{
+                                                padding: '0.3rem 0.85rem',
+                                                borderRadius: '999px',
+                                                background: t.status === 'live' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(107, 114, 128, 0.18)',
+                                                color: t.status === 'live' ? '#10b981' : '#94a3b8',
+                                                border: t.status === 'live' ? '1px solid rgba(16, 185, 129, 0.24)' : '1px solid rgba(148, 163, 184, 0.2)',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 700,
+                                                textTransform: 'lowercase'
+                                            }}>
+                                                {t.status}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <select
+                                                value={t.resultVisibility || 'immediate'}
+                                                onChange={(e) => handleResultVisibility(t, e.target.value)}
+                                                style={{ minWidth: 160, padding: '0.45rem 0.75rem', borderRadius: '10px', border: '1px solid rgba(148,163,184,0.25)', background: 'rgba(15,23,42,0.9)', color: 'var(--text-main)' }}
+                                            >
+                                                <option value="immediate">Immediate</option>
+                                                <option value="after_deadline">After deadline</option>
+                                                <option value="manual">Manual</option>
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: '0.55rem', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openEdit(t)}
+                                                    style={{ background: 'rgba(37,99,235,0.14)', border: '1px solid rgba(59,130,246,0.4)', color: '#93c5fd', padding: '0.5rem 0.95rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 }}
+                                                >
+                                                    View
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openAllocate(t)}
+                                                    style={{ background: 'rgba(79,70,229,0.12)', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc', padding: '0.5rem 0.95rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 }}
+                                                >
+                                                    Allocate
+                                                </button>
+                                                {t.status === 'live' ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleUpdateStatus(t.id, 'draft')}
+                                                        style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.42)', color: '#fbbf24', padding: '0.5rem 0.95rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 }}
+                                                    >
+                                                        End
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleUpdateStatus(t.id, 'live')}
+                                                        style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.42)', color: '#6ee7b7', padding: '0.5rem 0.95rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 }}
+                                                    >
+                                                        Activate
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDelete(t.id)}
+                                                    style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', padding: '0.5rem 0.95rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 }}
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
 
@@ -4301,33 +4452,8 @@ function GlobalTestsAdmin() {
             )}
 
             {showModal && (
-                <div className="modal-overlay" style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '1rem',
-                    zIndex: 1500,
-                    backdropFilter: 'blur(5px)',
-                    backgroundColor: 'rgba(0, 0, 0, 0.5)'
-                }}>
-                    <div className="modal-content" style={{
-                        width: '100%',
-                        maxWidth: modalStep === 1 ? 'min(800px, calc(100vw - 2rem))' : 'min(900px, calc(100vw - 2rem))',
-                        maxHeight: '80vh', // Reduced to 80vh to ensure it stays well within screen
-                        overflow: 'hidden',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        borderRadius: '16px',
-                        background: '#1e293b', // Solid background fallback
-                        backgroundImage: 'linear-gradient(145deg, rgba(30,41,59,1), rgba(15,23,42,1))', // opaque gradient
-                        border: '1px solid rgba(139,92,246,0.2)',
-                        boxShadow: '0 25px 50px rgba(0,0,0,0.5)'
-                    }}>
+                <div style={adminBuilderPanelStyle('rgba(139,92,246,0.2)', 'rgba(139,92,246,0.08)', 'rgba(6,182,212,0.05)')}>
+                    <div style={adminBuilderShellStyle}>
                         {/* Modal Header - Fixed */}
                         <div style={{
                             display: 'flex',
@@ -4352,8 +4478,8 @@ function GlobalTestsAdmin() {
                                 </div>
                             </div>
                             <button type="button" onClick={() => { setShowModal(false); setModalStep(1); setEditingId(null); }}
-                                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', transition: 'all 0.2s' }}>
-                                <X size={20} />
+                                style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: '10px', padding: '0.75rem 1rem', cursor: 'pointer', color: 'white', transition: 'all 0.2s', fontWeight: 700 }}>
+                                <X size={18} /> Cancel
                             </button>
                         </div>
 
@@ -4406,100 +4532,11 @@ function GlobalTestsAdmin() {
                                     </div>
                                     </AdminCreateSectionCard>
                                     {/* Enhanced Proctoring Settings */}
-                                    <div style={{ marginBottom: '1.5rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(239,68,68,0.05), rgba(251,191,36,0.05))', borderRadius: '16px', border: '1px solid rgba(239,68,68,0.2)' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                                            <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', borderRadius: '8px' }}>
-                                                <Shield size={20} color="#ef4444" />
-                                            </div>
-                                            <div>
-                                                <h4 style={{ margin: 0, fontSize: '1rem', color: '#ef4444' }}>Proctoring Settings</h4>
-                                                <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Configure security measures for exam integrity</p>
-                                            </div>
-                                            <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                <input type="checkbox" checked={proctoringSettings.enabled} onChange={e => setProctoringSettings({ ...proctoringSettings, enabled: e.target.checked })} />
-                                                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Enable Proctoring</span>
-                                            </label>
-                                        </div>
-
-                                        {proctoringSettings.enabled && (
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
-                                                {/* Tab Switches */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.trackTabSwitches} onChange={e => setProctoringSettings({ ...proctoringSettings, trackTabSwitches: e.target.checked })} />
-                                                        <Eye size={16} color="#f59e0b" />
-                                                        Track Tab Switches
-                                                    </label>
-                                                    {proctoringSettings.trackTabSwitches && (
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: '1.5rem' }}>
-                                                            <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Max:</span>
-                                                            <input type="number" min="1" max="10" value={proctoringSettings.maxTabSwitches} onChange={e => setProctoringSettings({ ...proctoringSettings, maxTabSwitches: parseInt(e.target.value) || 3 })} style={{ width: 50, padding: '0.25rem 0.5rem', fontSize: '0.85rem' }} />
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                {/* Video/Audio Recording */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.enableVideoAudio} onChange={e => setProctoringSettings({ ...proctoringSettings, enableVideoAudio: e.target.checked })} />
-                                                        <span style={{ fontSize: '1rem' }}>📹</span>
-                                                        Video/Audio Recording
-                                                    </label>
-                                                    <p style={{ margin: '0.25rem 0 0 1.5rem', fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Record student during test</p>
-                                                </div>
-
-                                                {/* Camera Blocking Detection */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.detectCameraBlocking} onChange={e => setProctoringSettings({ ...proctoringSettings, detectCameraBlocking: e.target.checked })} />
-                                                        <span style={{ fontSize: '1rem' }}>🚫</span>
-                                                        Detect Camera Blocking
-                                                    </label>
-                                                    <p style={{ margin: '0.25rem 0 0 1.5rem', fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Flag covered/blocked camera</p>
-                                                </div>
-
-                                                {/* Phone Detection */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.detectPhoneUsage} onChange={e => setProctoringSettings({ ...proctoringSettings, detectPhoneUsage: e.target.checked })} />
-                                                        <span style={{ fontSize: '1rem' }}>📱</span>
-                                                        AI Phone Detection
-                                                    </label>
-                                                    <p style={{ margin: '0.25rem 0 0 1.5rem', fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Detect mobile phones in view</p>
-                                                </div>
-
-                                                {/* Copy/Paste Blocking */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.disableCopyPaste} onChange={e => setProctoringSettings({ ...proctoringSettings, disableCopyPaste: e.target.checked })} />
-                                                        <span style={{ fontSize: '1rem' }}>📋</span>
-                                                        Disable Copy/Paste
-                                                    </label>
-                                                    <p style={{ margin: '0.25rem 0 0 1.5rem', fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Block clipboard actions</p>
-                                                </div>
-
-                                                {/* Fullscreen Enforcement */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.enforceFullscreen} onChange={e => setProctoringSettings({ ...proctoringSettings, enforceFullscreen: e.target.checked })} />
-                                                        <span style={{ fontSize: '1rem' }}>🖥️</span>
-                                                        Enforce Fullscreen
-                                                    </label>
-                                                    <p style={{ margin: '0.25rem 0 0 1.5rem', fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Required during test</p>
-                                                </div>
-
-                                                {/* Auto Submit on Violation */}
-                                                <div style={{ padding: '0.75rem', background: 'rgba(239,68,68,0.1)', borderRadius: '10px', border: '1px solid rgba(239,68,68,0.2)' }}>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                                        <input type="checkbox" checked={proctoringSettings.autoSubmitOnViolation} onChange={e => setProctoringSettings({ ...proctoringSettings, autoSubmitOnViolation: e.target.checked })} />
-                                                        <AlertTriangle size={16} color="#ef4444" />
-                                                        Auto-Submit on Max Violations
-                                                    </label>
-                                                    <p style={{ margin: '0.25rem 0 0 1.5rem', fontSize: '0.7rem', color: 'rgba(239,68,68,0.7)' }}>Submit test when violations exceed limit</p>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
+                                    <AdminUnifiedProctoringSection
+                                        value={proctoringSettings}
+                                        onChange={setProctoringSettings}
+                                        color="#ef4444"
+                                    />
                                     <div className="form-group" style={{ marginBottom: '1rem' }}>
                                         <label className="form-label">Description (optional)</label>
                                         <textarea placeholder="Instructions for students" value={newTest.description} onChange={e => setNewTest({ ...newTest, description: e.target.value })} rows={2} style={{ width: '100%', resize: 'vertical' }} />
@@ -4518,6 +4555,16 @@ function GlobalTestsAdmin() {
                                                 <input type="number" min="0" placeholder="Min" value={s.timeMinutes ?? ''} onChange={e => updateSectionConfig(s.id, 'timeMinutes', parseInt(e.target.value) || 0)} style={{ width: 70 }} />
                                             </div>
                                         ))}
+                                    </div>
+                                    <div style={adminBuilderSummaryBarStyle}>
+                                        <div style={adminBuilderSummaryItemsStyle}>
+                                            <span><ClipboardList size={13} style={{ verticalAlign: 'middle' }} /> {(newTest.sectionConfig?.sections || []).filter(s => s.enabled).length} sections</span>
+                                            <span><Clock size={13} style={{ verticalAlign: 'middle' }} /> {newTest.duration} min</span>
+                                            <span><Target size={13} style={{ verticalAlign: 'middle' }} /> {newTest.passingScore}% pass</span>
+                                            <span style={{ color: proctoringSettings.enabled ? '#22c55e' : '#ef4444' }}>
+                                                <Shield size={13} style={{ verticalAlign: 'middle' }} /> {proctoringSettings.enabled ? 'Proctored' : 'No Proctor'}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                                         <button type="button" className="btn-reset" onClick={() => setShowModal(false)}>Cancel</button>
@@ -4998,9 +5045,17 @@ function GlobalTestsAdmin() {
                                             </ul>
                                         </div>
                                     )}
+                                    <div style={adminBuilderSummaryBarStyle}>
+                                        <div style={adminBuilderSummaryItemsStyle}>
+                                            <span><ClipboardList size={13} style={{ verticalAlign: 'middle' }} /> {Object.values(questionsBySection).reduce((sum, arr) => sum + (arr?.length || 0), 0)} items</span>
+                                            <span><Code size={13} style={{ verticalAlign: 'middle' }} /> {(questionsBySection.coding || []).length} coding</span>
+                                            <span><Database size={13} style={{ verticalAlign: 'middle' }} /> {(questionsBySection.sql || []).length} sql</span>
+                                            <span><Target size={13} style={{ verticalAlign: 'middle' }} /> {sectionTab}</span>
+                                        </div>
+                                    </div>
                                     <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'space-between' }}>
                                         <button type="button" className="btn-reset" onClick={() => setModalStep(1)}>Back</button>
-                                        <button type="button" className="btn-create-new" onClick={handleCreateOrUpdate}>{editingId ? 'Update' : 'Create'} Test</button>
+                                        <button type="button" className="btn-create-new" onClick={handleCreateOrUpdate} disabled={savingTest}>{savingTest ? 'Saving...' : `${editingId ? 'Update' : 'Create'} Test`}</button>
                                     </div>
                                 </>
                             )}
@@ -5046,6 +5101,7 @@ function AptitudeTestsAdmin() {
         status: 'live',
         questions: []
     })
+    const [aptitudeProctoringSettings, setAptitudeProctoringSettings] = useState(createSharedProctoringSettings())
     const [manualQuestion, setManualQuestion] = useState({
         question: '',
         options: ['', '', '', ''],
@@ -5125,7 +5181,13 @@ function AptitudeTestsAdmin() {
         try {
             // Convert dates to ISO strings without timezone conversion
             // because datetime-local input is already in local time
-            const testPayload = { ...newTest, createdBy: ADMIN_ID }
+            const testPayload = {
+                ...newTest,
+                createdBy: ADMIN_ID,
+                proctoringEnabled: aptitudeProctoringSettings.enabled,
+                proctoringConfig: aptitudeProctoringSettings,
+                maxTabSwitches: aptitudeProctoringSettings.enabled && aptitudeProctoringSettings.trackTabSwitches ? aptitudeProctoringSettings.maxTabSwitches : 0,
+            }
             if (testPayload.startTime) {
                 const date = new Date(testPayload.startTime)
                 if (!isNaN(date.getTime())) testPayload.startTime = date.toISOString()
@@ -5152,6 +5214,7 @@ function AptitudeTestsAdmin() {
                 status: 'live',
                 questions: []
             })
+            setAptitudeProctoringSettings(createSharedProctoringSettings())
             fetchTests()
         } catch (error) {
             console.error(error)
@@ -5176,7 +5239,9 @@ function AptitudeTestsAdmin() {
                 title: stripImportExtension(file.name) + ' - File Import',
                 difficulty: 'Medium', duration: Math.max(30, questions.length * 2),
                 passingScore: 60, maxTabSwitches: 3, maxAttempts: 1,
-                resultVisibility: 'manual', status: 'draft', createdBy: ADMIN_ID, questions
+                resultVisibility: 'manual', status: 'draft', createdBy: ADMIN_ID,
+                proctoringEnabled: true, proctoringConfig: createSharedProctoringSettings(),
+                questions
             }
             const res = await axios.post(`${API_BASE}/aptitude`, payload)
             setPostCreateAction({ type: 'Aptitude test', title: payload.title, testId: res.data?.id, message: `Created with ${questions.length} imported questions. Allocate students next.` })
@@ -5331,11 +5396,11 @@ function AptitudeTestsAdmin() {
                         <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV / Excel Upload'}
                     </button>
                     <button
-                        onClick={() => setShowModal(true)}
+                        onClick={() => setShowModal(prev => !prev)}
                         className="btn-create-new premium-btn"
                         style={{
                             padding: '0.75rem 1.25rem',
-                            background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                            background: showModal ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #8b5cf6, #6366f1)',
                             borderRadius: '1rem',
                             fontSize: '0.95rem',
                             fontWeight: 600,
@@ -5344,7 +5409,7 @@ function AptitudeTestsAdmin() {
                             gap: '0.5rem'
                         }}
                     >
-                        <Plus size={20} /> Create New Test
+                        {showModal ? <X size={20} /> : <Plus size={20} />} {showModal ? 'Cancel' : 'Create New Test'}
                     </button>
                 </div>
             </div>
@@ -5582,33 +5647,31 @@ function AptitudeTestsAdmin() {
 
             {/* Create Test Modal */}
             {showModal && (
-                <div className="modal-overlay" onClick={() => setShowModal(false)}>
-                    <div
-                        className="modal-content"
-                        onClick={e => e.stopPropagation()}
-                        style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}
-                    >
-                        <div className="modal-header">
-                            <div className="modal-title-with-icon">
-                                <div style={{
-                                    width: '40px',
-                                    height: '40px',
-                                    borderRadius: '10px',
-                                    background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center'
-                                }}>
-                                    <Target size={20} color="white" />
-                                </div>
-                                <h2>Create Aptitude Test</h2>
+                <div style={adminBuilderPanelStyle('rgba(139,92,246,0.2)', 'rgba(139,92,246,0.08)', 'rgba(99,102,241,0.05)')}>
+                    <div style={adminBuilderHeaderStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                                width: '42px',
+                                height: '42px',
+                                borderRadius: '12px',
+                                background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <Target size={22} color="white" />
                             </div>
-                            <button onClick={() => setShowModal(false)} className="modal-close">
-                                <X size={20} />
-                            </button>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#c4b5fd' }}>Create Aptitude Test</h3>
+                                <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>Use the inline form to avoid modal overlap</p>
+                            </div>
                         </div>
+                        <button onClick={() => setShowModal(false)} style={adminBuilderCancelButtonStyle}>
+                            <X size={18} /> Cancel
+                        </button>
+                    </div>
 
-                        <form onSubmit={handleCreateTest} className="modal-body">
+                    <form onSubmit={handleCreateTest} className="modal-body" style={{ padding: 0 }}>
                             <div style={{ display: 'grid', gap: '14px', marginBottom: '1.5rem' }}>
                                 <AdminCreateSectionCard
                                     icon={<FileText size={16} />}
@@ -5626,11 +5689,10 @@ function AptitudeTestsAdmin() {
                                             required
                                         />
                                     </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
                                         <AdminNumberInput label="Duration" value={newTest.duration} onChange={v => setNewTest({ ...newTest, duration: v })} min={5} max={180} icon={<Clock size={12} />} color="#8b5cf6" suffix="minutes" />
                                         <AdminNumberInput label="Attempts" value={newTest.maxAttempts === -1 ? 5 : newTest.maxAttempts} onChange={v => setNewTest({ ...newTest, maxAttempts: v })} min={1} max={5} icon={<RefreshCw size={12} />} color="#3b82f6" suffix="per student" />
                                         <AdminNumberInput label="Pass %" value={newTest.passingScore} onChange={v => setNewTest({ ...newTest, passingScore: v })} min={0} max={100} icon={<Target size={12} />} color="#10b981" suffix="minimum score" />
-                                        <AdminNumberInput label="Max Violations" value={newTest.maxTabSwitches} onChange={v => setNewTest({ ...newTest, maxTabSwitches: v })} min={0} max={20} icon={<AlertTriangle size={12} />} color="#f59e0b" suffix="tab switches" />
                                     </div>
                                 </AdminCreateSectionCard>
 
@@ -5690,6 +5752,12 @@ function AptitudeTestsAdmin() {
                                         </div>
                                     </div>
                                 </AdminCreateSectionCard>
+
+                                <AdminUnifiedProctoringSection
+                                    value={aptitudeProctoringSettings}
+                                    onChange={setAptitudeProctoringSettings}
+                                    color="#ef4444"
+                                />
                             </div>
 
                             {/* AI Question Generation */}
@@ -6104,6 +6172,18 @@ function AptitudeTestsAdmin() {
                                 </div>
                             </div>
 
+                            <div style={adminBuilderSummaryBarStyle}>
+                                <div style={adminBuilderSummaryItemsStyle}>
+                                    <span><Target size={13} style={{ verticalAlign: 'middle' }} /> {newTest.questions.length} questions</span>
+                                    <span><Clock size={13} style={{ verticalAlign: 'middle' }} /> {newTest.duration} min</span>
+                                    <span><RefreshCw size={13} style={{ verticalAlign: 'middle' }} /> {newTest.maxAttempts === -1 ? 'Unlimited' : `${newTest.maxAttempts} attempt${newTest.maxAttempts !== 1 ? 's' : ''}`}</span>
+                                    <span><AlertTriangle size={13} style={{ verticalAlign: 'middle' }} /> {aptitudeProctoringSettings.trackTabSwitches ? aptitudeProctoringSettings.maxTabSwitches : 0} tab switches</span>
+                                    <span style={{ color: aptitudeProctoringSettings.enabled ? '#22c55e' : '#ef4444' }}>
+                                        <Shield size={13} style={{ verticalAlign: 'middle' }} /> {aptitudeProctoringSettings.enabled ? 'Proctored' : 'No Proctor'}
+                                    </span>
+                                </div>
+                            </div>
+
                             <div className="form-actions" style={{
                                 borderTop: '1px solid var(--border-color)',
                                 paddingTop: '1.5rem',
@@ -6117,7 +6197,6 @@ function AptitudeTestsAdmin() {
                                 </button>
                             </div>
                         </form>
-                    </div>
                 </div>
             )}
 

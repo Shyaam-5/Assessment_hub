@@ -85,6 +85,17 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
     const faceDetectedRef = useRef(true)
 
     const proctoring = problem.proctoring || {}
+    const shouldUseVideo = proctoring.enabled && (
+        proctoring.videoAudio ||
+        proctoring.detectCameraBlocking ||
+        proctoring.detectPhoneUsage ||
+        proctoring.enableFaceDetection ||
+        proctoring.detectMultipleFaces ||
+        proctoring.trackFaceLookaway
+    )
+    const shouldUseAudio = proctoring.enabled && !!proctoring.enableMicrophone
+    const shouldEnforceFullscreen = proctoring.enabled && proctoring.enforceFullscreen !== false
+    const shouldDetectMultiMonitors = proctoring.enabled && !!proctoring.multiMonitorDetection
     const maxTabSwitches = proctoring.maxTabSwitches || 3
 
     // Agent termination state
@@ -273,15 +284,15 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
             severity,
             details: `Violation ${count}/${MAX_VIOLATIONS}`
         }).catch(() => {})
-        if (count >= MAX_VIOLATIONS) {
+        if (count >= MAX_VIOLATIONS && proctoring.autoSubmitOnViolation) {
             autoTerminateTest(`Maximum proctoring violations reached (${count}/${MAX_VIOLATIONS}). Your test has been automatically terminated and submitted.`)
         }
-    }, [autoTerminateTest, user.id])
+    }, [autoTerminateTest, proctoring.autoSubmitOnViolation, user.id])
 
     // Request fullscreen on mount
     useEffect(() => {
         const requestFullscreen = () => {
-            if (containerRef.current && !document.fullscreenElement) {
+            if (shouldEnforceFullscreen && containerRef.current && !document.fullscreenElement) {
                 containerRef.current.requestFullscreen().then(() => {
                     setIsFullscreen(true)
                 }).catch(err => {
@@ -291,7 +302,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
         }
 
         // Request fullscreen after a short delay to ensure DOM is ready
-        setTimeout(requestFullscreen, 100)
+        if (shouldEnforceFullscreen) setTimeout(requestFullscreen, 100)
 
         // Load test cases
         if (problem.testCases) {
@@ -301,11 +312,11 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
 
         return () => {
             // Exit fullscreen when closing
-            if (document.fullscreenElement) {
+            if (shouldEnforceFullscreen && document.fullscreenElement) {
                 document.exitFullscreen().catch(() => { })
             }
         }
-    }, [])
+    }, [problem.testCases, shouldEnforceFullscreen])
 
     // ── Agent terminate listener — receives real-time kill signal from Proctor Agent ──
     useEffect(() => {
@@ -326,6 +337,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
 
     // Fullscreen exit detection — warn, record violation, BLOCK the editor
     useEffect(() => {
+        if (!shouldEnforceFullscreen) return
         const handleFullscreenChange = () => {
             const isNowFullscreen = !!document.fullscreenElement
             setIsFullscreen(isNowFullscreen)
@@ -353,11 +365,11 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
 
         document.addEventListener('fullscreenchange', handleFullscreenChange)
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-    }, [isDisqualified, user, problem])
+    }, [isDisqualified, problem, recordViolation, shouldEnforceFullscreen, user])
 
     // Initialize video/audio if enabled
     useEffect(() => {
-        if (proctoring.enabled && proctoring.videoAudio) {
+        if (proctoring.enabled && (shouldUseVideo || shouldUseAudio)) {
             initializeMedia()
         }
         return () => {
@@ -366,7 +378,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
                 mediaStream.getTracks().forEach(track => track.stop())
             }
         }
-    }, [])
+    }, [proctoring.enabled, shouldUseAudio, shouldUseVideo])
 
     const initializeMedia = async () => {
         try {
@@ -377,19 +389,19 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
                 ? { deviceId: { exact: webcam.deviceId }, width: 640, height: 480 }
                 : { width: 640, height: 480, facingMode: 'user' }
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: videoConstraints,
-                audio: true
+                video: shouldUseVideo ? videoConstraints : false,
+                audio: shouldUseAudio
             })
             setMediaStream(stream)
-            setVideoEnabled(true)
-            setAudioEnabled(true)
-            if (videoRef.current) {
+            setVideoEnabled(shouldUseVideo)
+            setAudioEnabled(shouldUseAudio)
+            if (videoRef.current && shouldUseVideo) {
                 videoRef.current.srcObject = stream
             }
             // Start camera obstruction detection
-            startCameraCheck()
+            if (proctoring.detectCameraBlocking) startCameraCheck()
             // Load AI model for phone detection
-            loadObjectDetectionModel()
+            if (proctoring.detectPhoneUsage) loadObjectDetectionModel()
             // Load AI model for face detection (NEW - BlazeFace) - only if face detection is enabled
             if (proctoring.enableFaceDetection || proctoring.detectMultipleFaces || proctoring.trackFaceLookaway) {
                 loadFaceDetectionModel()
@@ -916,7 +928,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
 
     // Run monitor detection on mount and periodically
     useEffect(() => {
-        if (!proctoring.enabled) return
+        if (!shouldDetectMultiMonitors) return
 
         // Immediate check on mount — catches pre-connected monitors
         detectMultipleMonitors()
@@ -946,7 +958,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
                 window.screen.removeEventListener('change', handleScreenChange)
             }
         }
-    }, [proctoring, detectMultipleMonitors])
+    }, [detectMultipleMonitors, shouldDetectMultiMonitors])
 
     // Tab switch detection and fullscreen re-request
     useEffect(() => {
@@ -1308,7 +1320,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
             )}
 
             {/* BLOCKING OVERLAY — Prevents all interaction when fullscreen is exited or multiple monitors detected */}
-            {(!isFullscreen || multipleMonitors) && !agentTerminated && (
+            {((shouldEnforceFullscreen && !isFullscreen) || (shouldDetectMultiMonitors && multipleMonitors)) && !agentTerminated && (
                 <div style={{
                     position: 'fixed',
                     top: 0, left: 0, right: 0, bottom: 0,
@@ -1348,7 +1360,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
                             {multipleMonitorCount > 0 && `🖥️ Monitor violations: ${multipleMonitorCount}`}
                         </p>
 
-                        {!multipleMonitors && (
+                        {!multipleMonitors && shouldEnforceFullscreen && (
                             <button
                                 onClick={() => {
                                     if (containerRef.current) {
@@ -1419,7 +1431,7 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
                 </div>
 
                 {/* Camera/Mic Status Indicators */}
-                {proctoring.videoAudio && (
+                {(shouldUseVideo || shouldUseAudio) && (
                     <div style={{ display: 'flex', gap: '0.5rem', marginRight: '1rem' }}>
                         <div style={{
                             padding: '0.4rem',
@@ -1555,16 +1567,22 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
                     <div style={{ marginTop: '2rem', background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '0.75rem', padding: '1.25rem' }}>
                         <h4 style={{ margin: '0 0 0.75rem', color: '#ef4444', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><AlertTriangle size={16} /> Proctoring Rules</h4>
                         <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#94a3b8', fontSize: '0.8rem', lineHeight: 1.8 }}>
-                            <li>Do not switch tabs or windows</li>
-                            <li>Do not exit fullscreen mode</li>
-                            <li>Do not use multiple monitors</li>
-                            <li>All violations are recorded</li>
-                            <li>3+ violations may result in disqualification</li>
+                            {proctoring.trackTabSwitches && <li>Do not switch tabs or windows{maxTabSwitches ? ` (max ${maxTabSwitches})` : ''}</li>}
+                            {shouldEnforceFullscreen && <li>Stay in fullscreen mode</li>}
+                            {shouldDetectMultiMonitors && <li>Do not use multiple monitors</li>}
+                            {proctoring.disableCopyPaste && <li>Copy, paste, and cut actions are blocked</li>}
+                            {shouldUseVideo && <li>Keep your face visible in camera during the test</li>}
+                            {shouldUseAudio && <li>Allow microphone access during the test</li>}
+                            {proctoring.detectCameraBlocking && <li>Do not cover or block the camera</li>}
+                            {proctoring.detectPhoneUsage && <li>Keep phones and unauthorized devices away</li>}
+                            {proctoring.detectMultipleFaces && <li>Only one person should be visible</li>}
+                            <li>All enabled violations are recorded</li>
+                            {proctoring.autoSubmitOnViolation && <li>Repeated violations can auto-submit the test</li>}
                         </ul>
                     </div>
 
                     {/* Video Preview (if enabled) */}
-                    {proctoring.videoAudio && (
+                    {shouldUseVideo && (
                         <div style={{
                             marginTop: '2rem',
                             padding: '0.75rem',

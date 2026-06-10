@@ -15,7 +15,19 @@ const MAX_VIOLATIONS = 10
    Tab-switch, window blur, webcam, camera-blocked, phone/device,
    multiple people, dual monitor, right-click, DevTools, fullscreen
    ═══════════════════════════════════════════════════════════════ */
-const DEFAULT_PROCTOR_CONFIG = { camera: true, fullscreen: true, tab_switch: true, copy_paste: true, phone_detect: true, multi_monitor_detect: true, multiple_people_detect: true }
+const DEFAULT_PROCTOR_CONFIG = {
+    camera: true,
+    fullscreen: true,
+    tab_switch: true,
+    max_tab_switches: 3,
+    copy_paste: true,
+    phone_detect: true,
+    multi_monitor_detect: true,
+    face_detection: true,
+    camera_block_detect: true,
+    multiple_people_detect: true,
+    auto_submit_on_violation: true,
+}
 
 function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTOR_CONFIG, onAutoTerminate = null) {
     const cfg = { ...DEFAULT_PROCTOR_CONFIG, ...config }
@@ -68,14 +80,14 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
         if (terminatedRef.current) return
         setTotalViolations(prev => {
             const next = prev + count
-            if (next >= MAX_VIOLATIONS && !terminatedRef.current) {
+            if (cfg.auto_submit_on_violation && next >= MAX_VIOLATIONS && !terminatedRef.current) {
                 terminatedRef.current = true
                 setAutoTerminated(true)
                 if (onAutoTerminateRef.current) onAutoTerminateRef.current()
             }
             return next
         })
-    }, [])
+    }, [cfg.auto_submit_on_violation])
 
     const logViolation = useCallback(async (eventType, severity = 'low', details = '') => {
         if (terminatedRef.current) return
@@ -107,7 +119,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
     }, [])
 
     // ─── Load COCO-SSD AI Model ───
-    const needsAI = cfg.phone_detect || cfg.multiple_people_detect
+    const needsAI = cfg.phone_detect || cfg.multiple_people_detect || cfg.face_detection
     useEffect(() => {
         if (!active || !needsAI) return
         let cancelled = false
@@ -145,6 +157,11 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
                 setTabSwitchCount(prev => {
                     const nc = prev + 1
                     logViolation('tab_switch', nc >= 2 ? 'high' : 'medium', `Tab switch #${nc}`)
+                    if (cfg.auto_submit_on_violation && nc > (cfg.max_tab_switches || 3) && !terminatedRef.current) {
+                        terminatedRef.current = true
+                        setAutoTerminated(true)
+                        if (onAutoTerminateRef.current) onAutoTerminateRef.current()
+                    }
                     showWarning('🚫 Tab Switch Detected!', `Warning ${nc}: Switching tabs is strictly prohibited. Your test will be auto-submitted after ${MAX_VIOLATIONS} total violations.`, 'high')
                     return nc
                 })
@@ -154,7 +171,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility)
         }
-    }, [active, logViolation, showWarning])
+    }, [active, logViolation, showWarning, cfg.tab_switch, cfg.max_tab_switches, cfg.auto_submit_on_violation])
 
     // ─── Copy-paste, right-click, DevTools, print-screen, drag-drop prevention ───
     useEffect(() => {
@@ -225,7 +242,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
 
     // ─── Camera blocked detection (stricter: 1s interval) ───
     useEffect(() => {
-        if (!active || !cameraReady || !mediaStream) return
+        if (!active || !cameraReady || !mediaStream || !cfg.camera_block_detect) return
         let darkFrameStreak = 0
         const checkCamera = () => {
             if (!videoRef.current || !canvasRef.current) return
@@ -280,7 +297,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
         }
         cameraCheckRef.current = setInterval(checkCamera, 1000)
         return () => { if (cameraCheckRef.current) clearInterval(cameraCheckRef.current) }
-    }, [active, cameraReady, mediaStream, logViolation, showWarning])
+    }, [active, cameraReady, mediaStream, logViolation, showWarning, cfg.camera_block_detect])
 
     // ─── AI Detection: phone/device + people (strict: 400ms, lower thresholds, shorter cooldowns) ───
     const noPersonStreakRef = useRef(0)
@@ -363,7 +380,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
                     }
 
                     // No-person detection — streak-based to prevent false positives
-                    if (cfg.multiple_people_detect) {
+                    if (cfg.face_detection) {
                         const anyPerson = persons.length > 0
                         if (!anyPerson) {
                             noPersonStreakRef.current++
@@ -382,11 +399,11 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
                     }
 
                     // BlazeFace - Face Missing & Multi Face
-                    if (cfg.multiple_people_detect && faceModelRef.current) {
+                    if ((cfg.face_detection || cfg.multiple_people_detect) && faceModelRef.current) {
                         const faces = await faceModelRef.current.estimateFaces(vid, false)
                         const now = Date.now()
 
-                        if (faces.length === 0) {
+                        if (cfg.face_detection && faces.length === 0) {
                             noFaceStreakRef.current++
                             if (noFaceStreakRef.current >= 6) { // ~2.4s
                                 if (now - faceCooldownRef.current > 6000) {
@@ -401,7 +418,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
                             noFaceStreakRef.current = 0
                         }
 
-                        if (faces.length > 1) {
+                        if (cfg.multiple_people_detect && faces.length > 1) {
                             faceMultiStreakRef.current++
                             if (faceMultiStreakRef.current >= 3) {
                                 if (now - faceCooldownRef.current > 6000) {
@@ -435,17 +452,17 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             noPersonStreakRef.current = 0
             multiplePeopleStreakRef.current = 0
         }
-    }, [active, needsAI, cameraReady, mediaStream, modelLoaded, logViolation, showWarning])
+    }, [active, needsAI, cameraReady, mediaStream, modelLoaded, logViolation, showWarning, cfg.face_detection, cfg.multiple_people_detect, cfg.phone_detect])
 
     // Start camera when active
     useEffect(() => {
-        if (active) initCamera()
+        if (active && cfg.camera) initCamera()
         return () => {
             if (mediaStream) mediaStream.getTracks().forEach(t => t.stop())
             if (cameraCheckRef.current) clearInterval(cameraCheckRef.current)
             if (aiMonitorRef.current) clearInterval(aiMonitorRef.current)
         }
-    }, [active])
+    }, [active, cfg.camera, initCamera, mediaStream])
 
     // ─── Multiple Monitor Detection (strict: 3s interval) ───
     const triggerMonitorViolation = useCallback((reason) => {
@@ -498,7 +515,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             window.removeEventListener('resize', handleResize)
             if (window.screen?.removeEventListener) window.screen.removeEventListener('change', handleScreenChange)
         }
-    }, [active, detectMultipleMonitors])
+    }, [active, detectMultipleMonitors, cfg.multi_monitor_detect])
 
     // ─── Fullscreen management (strict: 200ms re-entry) ───
     const enterFullscreen = useCallback(async () => {
@@ -510,7 +527,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             else if (el.msRequestFullscreen) await el.msRequestFullscreen()
             setIsFullscreen(true)
         } catch (err) { console.warn('Fullscreen failed:', err) }
-    }, [])
+    }, [cfg.fullscreen])
 
     useEffect(() => {
         if (!active || !cfg.fullscreen) return
@@ -536,7 +553,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
             if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
             if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
         }
-    }, [active, logViolation, enterFullscreen, showWarning])
+    }, [active, logViolation, enterFullscreen, showWarning, cfg.fullscreen])
 
     // ── Agent terminate listener — receives real-time kill signal from Proctor Agent ──
     const [agentTerminateReason, setAgentTerminateReason] = useState(null)
@@ -779,7 +796,7 @@ export default function CommunicationHub({ user }) {
 
     // Proctoring — active in test-runner or in practice exercise modules
     const isProctoredModule = view === 'test-runner' || (view === 'practice' && activeModule !== 'overview')
-    const proctoringConfig = activeTest?.proctoring_config || DEFAULT_PROCTOR_CONFIG
+    const proctoringConfig = { ...DEFAULT_PROCTOR_CONFIG, ...(activeTest?.proctoring_config || {}) }
 
     // Auto-terminate callback — fires when violations >= MAX_VIOLATIONS or agent terminates
     const handleAutoTerminate = useCallback(async () => {
@@ -1080,6 +1097,22 @@ export default function CommunicationHub({ user }) {
    Test Selection Screen — student picks a test or practice mode
    ═══════════════════════════════════════════════════════════════ */
 function TestSelectionScreen({ tests, onStartTest, onPractice }) {
+    const getActiveFlags = (test) => {
+        const pConfig = { ...DEFAULT_PROCTOR_CONFIG, ...(test?.proctoring_config || {}) }
+        return [
+            pConfig.camera && '📹 Camera',
+            pConfig.fullscreen && '🔒 Fullscreen',
+            pConfig.tab_switch && `👁️ Tabs (${pConfig.max_tab_switches || 3})`,
+            pConfig.copy_paste && '📋 Copy block',
+            pConfig.phone_detect && '📱 Phone detect',
+            pConfig.multi_monitor_detect && '🖥️ Multi-monitor',
+            pConfig.face_detection && '🙂 Face detect',
+            pConfig.camera_block_detect && '🚫 Camera block',
+            pConfig.multiple_people_detect && '👥 People detect',
+            pConfig.auto_submit_on_violation && '⚠️ Auto submit',
+        ].filter(Boolean)
+    }
+
     return (
         <div>
             {/* Header */}
@@ -1109,9 +1142,9 @@ function TestSelectionScreen({ tests, onStartTest, onPractice }) {
             }}>
                 <Shield size={18} color="#ef4444" />
                 <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Proctoring Enabled</div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Proctoring depends on the selected test</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        📹 Camera · 🔒 Fullscreen · 👁️ Tab tracking · 📋 Copy/paste · 📱 Phone detect · 🖥️ Multi-monitor · 👥 People detect
+                        Open a test card below to see the exact camera, fullscreen, tab, device, and auto-submit rules before starting.
                     </div>
                 </div>
             </div>
@@ -1119,7 +1152,7 @@ function TestSelectionScreen({ tests, onStartTest, onPractice }) {
             {/* Test Cards */}
             <div style={{ display: 'grid', gap: '1rem' }}>
                 {tests.map(test => {
-                    const pConfig = test.proctoring_config || {}
+                    const pConfig = { ...DEFAULT_PROCTOR_CONFIG, ...(test.proctoring_config || {}) }
                     const hasAttempts = test.attempts_used > 0
                     const completedAttempt = test.my_attempts?.find(a => a.status === 'completed')
                     const bestScore = completedAttempt?.overall_score
@@ -1163,13 +1196,30 @@ function TestSelectionScreen({ tests, onStartTest, onPractice }) {
                                 ))}
                             </div>
 
-                            {/* Meta info */}
-                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                <span>⏱ {test.duration_minutes} min</span>
-                                <span>🔄 {test.attempts_used}/{test.attempt_limit} attempts</span>
-                                {pConfig.camera && <span>📹 Camera</span>}
-                                {pConfig.fullscreen && <span>🔒 Fullscreen</span>}
-                                {pConfig.tab_switch && <span>👁️ Tab tracking</span>}
+                    {/* Meta info */}
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <span>⏱ {test.duration_minutes} min</span>
+                        <span>🔄 {test.attempts_used}/{test.attempt_limit} attempts</span>
+                        {getActiveFlags(test).slice(0, 3).map(flag => <span key={flag}>{flag}</span>)}
+                    </div>
+                            {getActiveFlags(test).length > 3 && (
+                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                                    {getActiveFlags(test).slice(3).map(flag => (
+                                <span key={flag} style={{
+                                    fontSize: '0.72rem',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '99px',
+                                    background: 'rgba(59,130,246,0.12)',
+                                    color: '#93c5fd',
+                                    fontWeight: 600
+                                }}>
+                                    {flag}
+                                </span>
+                                    ))}
+                                </div>
+                            )}
+                            <div style={{ marginBottom: '1rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                {getActiveFlags(test).length > 0 ? `Rules: ${getActiveFlags(test).join(' · ')}` : 'This test starts without extra proctoring restrictions.'}
                             </div>
 
                             {/* Start button */}

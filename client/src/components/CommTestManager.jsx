@@ -9,6 +9,20 @@ import {
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+const DEFAULT_COMM_PROCTORING_CONFIG = {
+    camera: true,
+    fullscreen: true,
+    tab_switch: true,
+    max_tab_switches: 3,
+    copy_paste: true,
+    phone_detect: true,
+    multi_monitor_detect: true,
+    face_detection: true,
+    camera_block_detect: true,
+    multiple_people_detect: true,
+    auto_submit_on_violation: true,
+};
+
 // Reusable section card
 const SectionCard = ({ icon, title, subtitle, color, children }) => (
     <div style={{
@@ -100,7 +114,7 @@ export default function CommTestManager() {
         module_a_count: 5, module_b_count: 5, module_c_count: 3, module_d_count: 5,
         duration_minutes: 60, attempt_limit: 3,
         proctoring_enabled: true,
-        proctoring_config: { camera: true, fullscreen: true, tab_switch: true, copy_paste: true, phone_detect: true, multi_monitor_detect: true, multiple_people_detect: true },
+        proctoring_config: { ...DEFAULT_COMM_PROCTORING_CONFIG },
         module_a_sentences: [], module_b_sentences: [], module_c_topics: [], module_d_questions: []
     };
     const [form, setForm] = useState({ ...defaultForm });
@@ -176,7 +190,7 @@ export default function CommTestManager() {
             duration_minutes: test.duration_minutes || 60,
             attempt_limit: test.attempt_limit || 3,
             proctoring_enabled: test.proctoring_enabled ?? true,
-            proctoring_config: test.proctoring_config || { camera: true, fullscreen: true, tab_switch: true, copy_paste: true, phone_detect: true, multi_monitor_detect: true, multiple_people_detect: true },
+            proctoring_config: { ...DEFAULT_COMM_PROCTORING_CONFIG, ...(test.proctoring_config || {}) },
             module_a_sentences: test.module_a_sentences || [],
             module_b_sentences: test.module_b_sentences || [],
             module_c_topics: test.module_c_topics || [],
@@ -288,7 +302,10 @@ export default function CommTestManager() {
         { key: 'copy_paste', label: 'Copy/Paste Block', icon: <Shield size={14} />, color: '#ef4444' },
         { key: 'phone_detect', label: 'Phone Detect', icon: <Smartphone size={14} />, color: '#ec4899' },
         { key: 'multi_monitor_detect', label: 'Multi-Monitor', icon: <Monitor size={14} />, color: '#06b6d4' },
+        { key: 'face_detection', label: 'Face Detect', icon: <Eye size={14} />, color: '#10b981' },
+        { key: 'camera_block_detect', label: 'Camera Block', icon: <Camera size={14} />, color: '#ef4444' },
         { key: 'multiple_people_detect', label: 'People Detect', icon: <Users size={14} />, color: '#f97316' },
+        { key: 'auto_submit_on_violation', label: 'Auto Submit', icon: <Shield size={14} />, color: '#dc2626' },
     ];
 
     const statusColors = { completed: '#22c55e', in_progress: '#f59e0b', pending: '#6b7280' };
@@ -480,28 +497,39 @@ export default function CommTestManager() {
                             </button>
                         </div>
                         {form.proctoring_enabled && (
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                                {proctoringToggles.map(pt => (
-                                    <button key={pt.key}
-                                        onClick={() => setForm(f => ({
+                            <>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                                    {proctoringToggles.map(pt => (
+                                        <button key={pt.key}
+                                            onClick={() => setForm(f => ({
+                                                ...f,
+                                                proctoring_config: { ...f.proctoring_config, [pt.key]: !f.proctoring_config[pt.key] }
+                                            }))}
+                                            style={{
+                                                padding: '10px', borderRadius: '10px',
+                                                border: `1px solid ${form.proctoring_config[pt.key] ? pt.color + '60' : '#475569'}`,
+                                                background: form.proctoring_config[pt.key] ? `${pt.color}15` : '#0f172a',
+                                                color: form.proctoring_config[pt.key] ? pt.color : '#64748b',
+                                                cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+                                                fontSize: '11px', fontWeight: 600, transition: 'all 0.15s'
+                                            }}
+                                        >
+                                            {pt.icon}
+                                            {pt.label}
+                                            <span style={{ fontSize: '9px', opacity: 0.7 }}>{form.proctoring_config[pt.key] ? 'ON' : 'OFF'}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                                {form.proctoring_config.tab_switch && (
+                                    <div style={{ marginTop: '12px' }}>
+                                        <NumberInput label="Max Tab Switches" value={form.proctoring_config.max_tab_switches || 3} onChange={v => setForm(f => ({
                                             ...f,
-                                            proctoring_config: { ...f.proctoring_config, [pt.key]: !f.proctoring_config[pt.key] }
+                                            proctoring_config: { ...f.proctoring_config, max_tab_switches: v }
                                         }))}
-                                        style={{
-                                            padding: '10px', borderRadius: '10px',
-                                            border: `1px solid ${form.proctoring_config[pt.key] ? pt.color + '60' : '#475569'}`,
-                                            background: form.proctoring_config[pt.key] ? `${pt.color}15` : '#0f172a',
-                                            color: form.proctoring_config[pt.key] ? pt.color : '#64748b',
-                                            cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
-                                            fontSize: '11px', fontWeight: 600, transition: 'all 0.15s'
-                                        }}
-                                    >
-                                        {pt.icon}
-                                        {pt.label}
-                                        <span style={{ fontSize: '9px', opacity: 0.7 }}>{form.proctoring_config[pt.key] ? 'ON' : 'OFF'}</span>
-                                    </button>
-                                ))}
-                            </div>
+                                            min={1} max={10} icon={<Eye size={12} />} color="#f59e0b" suffix="before escalation" />
+                                    </div>
+                                )}
+                            </>
                         )}
                     </SectionCard>
 

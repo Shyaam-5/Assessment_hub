@@ -99,14 +99,19 @@ _CORE_DOMAIN_TABLES_SQL = [
         live_coding VARCHAR(10) NULL,
         enable_proctoring VARCHAR(10) NULL,
         enable_video_audio VARCHAR(10) NULL,
+        enable_microphone VARCHAR(10) NULL,
         disable_copy_paste VARCHAR(10) NULL,
         track_tab_switches VARCHAR(10) NULL,
         max_tab_switches INT NULL,
         sql_schema TEXT NULL,
         expected_query_result TEXT NULL,
+        detect_phone_usage VARCHAR(10) NULL,
+        detect_camera_blocking VARCHAR(10) NULL,
+        enforce_fullscreen VARCHAR(10) NULL,
         enable_face_detection VARCHAR(10) NULL,
         detect_multiple_faces VARCHAR(10) NULL,
         track_face_lookaway VARCHAR(10) NULL,
+        auto_submit_on_violation VARCHAR(10) NULL,
         attempt_limit INT NULL,
         max_attempts INT NULL,
         deadline DATETIME NULL,
@@ -247,6 +252,8 @@ _CORE_DOMAIN_TABLES_SQL = [
         deadline DATETIME NULL,
         description TEXT NULL,
         result_visibility VARCHAR(32) NULL DEFAULT 'immediate',
+        proctoring_enabled TINYINT(1) NULL DEFAULT 1,
+        proctoring_config JSON NULL,
         INDEX idx_apt_tests_created_by (created_by),
         INDEX idx_apt_tests_created_at (created_at)
     )
@@ -1003,6 +1010,51 @@ async def ensure_core_domain_tables(pool: "PyMySQLPool | None" = None) -> None:
                 if not await cur.fetchone():
                     await cur.execute(
                         f"ALTER TABLE `{table_name}` ADD COLUMN result_visibility VARCHAR(32) NULL DEFAULT 'immediate'"
+                    )
+
+            _aptitude_test_migrations = [
+                ("proctoring_enabled", "TINYINT(1) NULL DEFAULT 1"),
+                ("proctoring_config", "JSON NULL"),
+            ]
+            for column_name, definition in _aptitude_test_migrations:
+                await cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'aptitude_tests'
+                      AND COLUMN_NAME = %s
+                    LIMIT 1
+                    """,
+                    (column_name,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute(
+                        f"ALTER TABLE `aptitude_tests` ADD COLUMN `{column_name}` {definition}"
+                    )
+
+            _problem_migrations = [
+                ("enable_microphone", "VARCHAR(10) NULL"),
+                ("detect_phone_usage", "VARCHAR(10) NULL"),
+                ("detect_camera_blocking", "VARCHAR(10) NULL"),
+                ("enforce_fullscreen", "VARCHAR(10) NULL"),
+                ("auto_submit_on_violation", "VARCHAR(10) NULL"),
+            ]
+            for column_name, definition in _problem_migrations:
+                await cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'problems'
+                      AND COLUMN_NAME = %s
+                    LIMIT 1
+                    """,
+                    (column_name,),
+                )
+                if not await cur.fetchone():
+                    await cur.execute(
+                        f"ALTER TABLE `problems` ADD COLUMN `{column_name}` {definition}"
                     )
 
             # Migrate existing submissions tables that are missing columns added after initial schema

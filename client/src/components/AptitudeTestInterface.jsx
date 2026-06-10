@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { X, Clock, CheckCircle, XCircle, AlertTriangle, ChevronLeft, ChevronRight, Send, Eye, Brain, Target, Award, Sparkles, Shield, Camera, CameraOff, Smartphone } from 'lucide-react'
 import axios from 'axios'
 import socketService from '@/services/socketService'
-import { useCamera, useObjectDetection } from '@/hooks/useProctoring'
+import { useCamera, useObjectDetection, useFaceDetection } from '@/hooks/useProctoring'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 const EMPTY_QUESTIONS = []
@@ -41,6 +41,34 @@ function generateSeed(studentId, testId) {
 
 // ==================== APTITUDE TEST INTERFACE (PROCTORED) ====================
 function AptitudeTestInterface({ test, user, onClose, onComplete }) {
+    const proctoring = useMemo(() => ({
+        enabled: test.proctoringEnabled ?? test.proctoringConfig?.enabled ?? true,
+        enableVideoAudio: test.proctoringConfig?.enableVideoAudio ?? true,
+        enableMicrophone: test.proctoringConfig?.enableMicrophone ?? true,
+        enforceFullscreen: test.proctoringConfig?.enforceFullscreen ?? true,
+        trackTabSwitches: test.proctoringConfig?.trackTabSwitches ?? true,
+        maxTabSwitches: test.proctoringConfig?.maxTabSwitches ?? test.maxTabSwitches ?? 3,
+        disableCopyPaste: test.proctoringConfig?.disableCopyPaste ?? true,
+        detectPhoneUsage: test.proctoringConfig?.detectPhoneUsage ?? true,
+        detectCameraBlocking: test.proctoringConfig?.detectCameraBlocking ?? true,
+        enableFaceDetection: test.proctoringConfig?.enableFaceDetection ?? true,
+        detectMultipleFaces: test.proctoringConfig?.detectMultipleFaces ?? true,
+        autoSubmitOnViolation: test.proctoringConfig?.autoSubmitOnViolation ?? false,
+        multiMonitorDetection: test.proctoringConfig?.multiMonitorDetection ?? false,
+    }), [test])
+    const shouldUseVideo = proctoring.enabled && (
+        proctoring.enableVideoAudio ||
+        proctoring.detectCameraBlocking ||
+        proctoring.detectPhoneUsage ||
+        proctoring.enableFaceDetection ||
+        proctoring.detectMultipleFaces
+    )
+    const shouldUseAudio = proctoring.enabled && proctoring.enableMicrophone
+    const shouldEnforceFullscreen = proctoring.enabled && proctoring.enforceFullscreen
+    const shouldTrackTabs = proctoring.enabled && proctoring.trackTabSwitches
+    const shouldBlockClipboard = proctoring.enabled && proctoring.disableCopyPaste
+    const shouldDetectMultiMonitors = proctoring.enabled && proctoring.multiMonitorDetection
+
     const [currentQuestion, setCurrentQuestion] = useState(0)
     const [answers, setAnswers] = useState({})
     const [timeLeft, setTimeLeft] = useState(test.duration * 60)
@@ -85,8 +113,9 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
     const behaviorSendInterval = useRef(null)
 
     // ── Camera & Phone Detection (shared hooks) ──
-    const camera = useCamera(true)
-    const objectDetection = useObjectDetection(camera.videoEnabled, camera.videoRef)
+    const camera = useCamera(shouldUseVideo || shouldUseAudio, { requestVideo: shouldUseVideo, requestAudio: shouldUseAudio })
+    const objectDetection = useObjectDetection(camera.videoEnabled && (proctoring.detectPhoneUsage || proctoring.enableFaceDetection), camera.videoRef)
+    const faceDetection = useFaceDetection(camera.videoEnabled && (proctoring.enableFaceDetection || proctoring.detectMultipleFaces), camera.videoRef)
 
     // Keep refs in sync with state (to avoid stale closures in timer)
     useEffect(() => { answersRef.current = answers }, [answers])
@@ -95,22 +124,24 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
 
     // Initialize camera on mount
     useEffect(() => {
-        camera.initializeCamera()
+        if (shouldUseVideo || shouldUseAudio) camera.initializeCamera()
         return () => camera.stopCamera()
-    }, [])
+    }, [shouldUseAudio, shouldUseVideo])
 
     // Wire camera blocked → recordViolation
     useEffect(() => {
+        if (!proctoring.detectCameraBlocking) return
         if (camera.cameraBlocked && camera.cameraBlockedCount > 0) {
             recordViolation('camera_blocked', 'critical')
             setWarningMessage('📷 Camera is blocked! Uncover your camera immediately.')
             setShowWarning(true)
             setTimeout(() => setShowWarning(false), 4000)
         }
-    }, [camera.cameraBlockedCount])
+    }, [camera.cameraBlockedCount, proctoring.detectCameraBlocking])
 
     // Wire phone detection → recordViolation
     useEffect(() => {
+        if (!proctoring.detectPhoneUsage) return
         if (objectDetection.phoneDetectionCount > 0) {
             recordViolation('phone_detected', 'critical')
             socketService.emitProctoringViolation(user.id, user.name || user.email, 'phone_detected', 'critical', null)
@@ -118,7 +149,27 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             setShowWarning(true)
             setTimeout(() => setShowWarning(false), 4000)
         }
-    }, [objectDetection.phoneDetectionCount])
+    }, [objectDetection.phoneDetectionCount, proctoring.detectPhoneUsage])
+
+    useEffect(() => {
+        if (!proctoring.enableFaceDetection) return
+        if (faceDetection.noFaceCount > 0) {
+            recordViolation('face_not_detected', 'warning')
+            setWarningMessage('👤 Face not detected! Keep your face visible.')
+            setShowWarning(true)
+            setTimeout(() => setShowWarning(false), 3000)
+        }
+    }, [faceDetection.noFaceCount, proctoring.enableFaceDetection, recordViolation])
+
+    useEffect(() => {
+        if (!proctoring.detectMultipleFaces) return
+        if (faceDetection.multipleFaceCount > 0) {
+            recordViolation('multiple_faces', 'critical')
+            setWarningMessage('👥 Multiple people detected! Only one person should be visible.')
+            setShowWarning(true)
+            setTimeout(() => setShowWarning(false), 4000)
+        }
+    }, [faceDetection.multipleFaceCount, proctoring.detectMultipleFaces, recordViolation])
 
     // ── Auto-terminate test ──
     const autoTerminateTest = useCallback(async (reason) => {
@@ -197,15 +248,15 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
     useEffect(() => {
         const enterFullscreen = async () => {
             try {
-                if (!document.fullscreenElement && !submittedRef.current) {
+                if (shouldEnforceFullscreen && !document.fullscreenElement && !submittedRef.current) {
                     await document.documentElement.requestFullscreen()
                 }
             } catch (_) {}
         }
-        enterFullscreen()
+        if (shouldEnforceFullscreen) enterFullscreen()
 
         const handleFullscreenChange = () => {
-            if (!document.fullscreenElement && !submittedRef.current) {
+            if (shouldEnforceFullscreen && !document.fullscreenElement && !submittedRef.current) {
                 setWarningMessage('⚠️ Fullscreen mode required! Re-entering...')
                 setShowWarning(true)
                 recordViolation('fullscreen_exit', 'medium')
@@ -225,13 +276,13 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
 
         return () => {
             document.removeEventListener('fullscreenchange', handleFullscreenChange)
-            if (document.fullscreenElement && !submittedRef.current) {
+            if (shouldEnforceFullscreen && document.fullscreenElement && !submittedRef.current) {
                 document.exitFullscreen().catch(() => {})
             }
             if (behaviorSendInterval.current) clearInterval(behaviorSendInterval.current)
             flushBehaviorEvents()
         }
-    }, [flushBehaviorEvents])
+    }, [flushBehaviorEvents, recordViolation, shouldEnforceFullscreen, test, user])
 
     // Timer countdown
     useEffect(() => {
@@ -252,10 +303,11 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
     }, [result, forceExit])
 
     // Get max tab switches from test config (default to 3)
-    const maxAllowedTabSwitches = test.maxTabSwitches || 3
+    const maxAllowedTabSwitches = shouldTrackTabs ? (proctoring.maxTabSwitches || 3) : Number.POSITIVE_INFINITY
 
     // Tab switch detection + window blur
     useEffect(() => {
+        if (!shouldTrackTabs) return
         const handleVisibilityChange = () => {
             if (document.hidden && !result && !forceExit && !terminatedRef.current) {
                 setTabSwitches(prev => {
@@ -288,10 +340,11 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             document.removeEventListener('visibilitychange', handleVisibilityChange)
             window.removeEventListener('blur', handleBlur)
         }
-    }, [result, forceExit, recordViolation])
+    }, [forceExit, recordViolation, result, shouldTrackTabs, user, maxAllowedTabSwitches])
 
     // Copy/paste/cut prevention + DevTools blocking
     useEffect(() => {
+        if (!shouldBlockClipboard) return
         const preventClipboard = (e) => {
             e.preventDefault()
             recordViolation('copy_paste', 'medium')
@@ -334,7 +387,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             document.removeEventListener('contextmenu', preventContextMenu)
             document.removeEventListener('keydown', preventKeys, true)
         }
-    }, [recordViolation, user])
+    }, [recordViolation, shouldBlockClipboard, user])
 
     // ── Multiple Monitor Detection ──
     const triggerMonitorViolation = useCallback((reason) => {
@@ -378,6 +431,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
     }, [multipleMonitors, triggerMonitorViolation])
 
     useEffect(() => {
+        if (!shouldDetectMultiMonitors) return
         detectMultipleMonitors()
         monitorCheckIntervalRef.current = setInterval(detectMultipleMonitors, 5000)
         const handleResize = () => detectMultipleMonitors()
@@ -389,7 +443,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             window.removeEventListener('resize', handleResize)
             if (window.screen?.removeEventListener) window.screen.removeEventListener('change', handleScreenChange)
         }
-    }, [detectMultipleMonitors])
+    }, [detectMultipleMonitors, shouldDetectMultiMonitors])
 
     // ── Proctor Agent Termination Listener ──
     useEffect(() => {
@@ -1107,6 +1161,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
                         </div>
 
                         {/* Camera Preview */}
+                        {(shouldUseVideo || shouldUseAudio) && (
                         <div style={{
                             marginTop: '1rem',
                             width: '100%',
@@ -1125,7 +1180,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
                                     <span style={{ fontSize: '0.6rem', color: '#fff', fontWeight: 600 }}>BLOCKED</span>
                                 </div>
                             )}
-                            {objectDetection.phoneDetectionCount > 0 && !camera.cameraBlocked && (
+                            {proctoring.detectPhoneUsage && objectDetection.phoneDetectionCount > 0 && !camera.cameraBlocked && (
                                 <div style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(239,68,68,0.95)', borderRadius: '4px', padding: '1px 4px', fontSize: '0.55rem', color: '#fff', fontWeight: 700 }}>📱{objectDetection.phoneDetectionCount}</div>
                             )}
                             {!camera.videoEnabled && !camera.cameraAccessDenied && (
@@ -1138,17 +1193,23 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
                                 </div>
                             )}
                         </div>
+                        )}
 
                         {/* Camera Status */}
-                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', fontSize: '0.65rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                {camera.videoEnabled ? <Camera size={10} color="#10b981" /> : <CameraOff size={10} color="#ef4444" />}
-                                {camera.videoEnabled ? 'Cam' : 'Off'}
-                            </span>
-                            {camera.cameraBlockedCount > 0 && <span style={{ color: '#ef4444' }}>Blk:{camera.cameraBlockedCount}</span>}
-                            {objectDetection.phoneDetectionCount > 0 && <span style={{ color: '#ef4444' }}>📱{objectDetection.phoneDetectionCount}</span>}
-                            {objectDetection.faceMissingCount > 0 && <span style={{ color: '#f59e0b' }}>👤{objectDetection.faceMissingCount}</span>}
-                        </div>
+                        {(shouldUseVideo || shouldUseAudio) && (
+                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', fontSize: '0.65rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                                {shouldUseVideo && (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                        {camera.videoEnabled ? <Camera size={10} color="#10b981" /> : <CameraOff size={10} color="#ef4444" />}
+                                        {camera.videoEnabled ? 'Cam' : 'Off'}
+                                    </span>
+                                )}
+                                {proctoring.detectCameraBlocking && camera.cameraBlockedCount > 0 && <span style={{ color: '#ef4444' }}>Blk:{camera.cameraBlockedCount}</span>}
+                                {proctoring.detectPhoneUsage && objectDetection.phoneDetectionCount > 0 && <span style={{ color: '#ef4444' }}>📱{objectDetection.phoneDetectionCount}</span>}
+                                {proctoring.enableFaceDetection && faceDetection.noFaceCount > 0 && <span style={{ color: '#f59e0b' }}>👤{faceDetection.noFaceCount}</span>}
+                                {proctoring.detectMultipleFaces && faceDetection.multipleFaceCount > 0 && <span style={{ color: '#ef4444' }}>👥{faceDetection.multipleFaceCount}</span>}
+                            </div>
+                        )}
 
                         {/* Proctoring Violations Counter */}
                         <div style={{

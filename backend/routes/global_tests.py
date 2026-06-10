@@ -256,10 +256,13 @@ def _normalize_proctoring_config(raw: Any, fallback_max_tab: int = 3) -> dict:
         max_tab = 0
 
     enable_video = _to_bool(cfg.get("enableVideoAudio", cfg.get("videoAudio")), False) if enabled else False
+    enable_microphone = _to_bool(cfg.get("enableMicrophone"), False) if enabled else False
     disable_copy = _to_bool(cfg.get("disableCopyPaste"), False) if enabled else False
     detect_block = _to_bool(cfg.get("detectCameraBlocking", cfg.get("enableFaceDetection")), False) if enabled else False
     detect_phone = _to_bool(cfg.get("detectPhoneUsage"), False) if enabled else False
     fullscreen = _to_bool(cfg.get("enforceFullscreen"), False) if enabled else False
+    enable_face = _to_bool(cfg.get("enableFaceDetection", cfg.get("detectCameraBlocking")), False) if enabled else False
+    detect_multiple = _to_bool(cfg.get("detectMultipleFaces", cfg.get("multiplePeopleDetection")), False) if enabled else False
     auto_submit = _to_bool(cfg.get("autoSubmitOnViolation"), False) if enabled else False
 
     return {
@@ -267,14 +270,17 @@ def _normalize_proctoring_config(raw: Any, fallback_max_tab: int = 3) -> dict:
         "trackTabSwitches": track_tab,
         "maxTabSwitches": max_tab,
         "enableVideoAudio": enable_video,
+        "enableMicrophone": enable_microphone,
         "disableCopyPaste": disable_copy,
         "detectCameraBlocking": detect_block,
         "detectPhoneUsage": detect_phone,
         "enforceFullscreen": fullscreen,
+        "enableFaceDetection": enable_face,
+        "detectMultipleFaces": detect_multiple,
         "autoSubmitOnViolation": auto_submit,
         # Compatibility keys for consumers that still use problem-style naming.
         "videoAudio": enable_video,
-        "enableFaceDetection": detect_block,
+        "multiplePeopleDetection": detect_multiple,
     }
 
 

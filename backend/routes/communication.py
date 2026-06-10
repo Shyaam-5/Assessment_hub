@@ -845,8 +845,17 @@ async def create_comm_test(request: Request):
     module_d_questions = module_d_questions or QUESTIONS_BANK[:module_d_count]
 
     proctoring_config = data.get("proctoring_config", {
-        "camera": True, "fullscreen": True,
-        "tab_switch": True, "copy_paste": True
+        "camera": True,
+        "fullscreen": True,
+        "tab_switch": True,
+        "max_tab_switches": 3,
+        "copy_paste": True,
+        "phone_detect": True,
+        "multi_monitor_detect": True,
+        "face_detection": True,
+        "camera_block_detect": True,
+        "multiple_people_detect": True,
+        "auto_submit_on_violation": True,
     })
 
     pool = await get_pool()
@@ -1020,7 +1029,17 @@ async def update_comm_test(test_id: int, request: Request):
     module_d_questions = data.get("module_d_questions") or []
 
     proctoring_config = data.get("proctoring_config", {
-        "camera": True, "fullscreen": True, "tab_switch": True, "copy_paste": True
+        "camera": True,
+        "fullscreen": True,
+        "tab_switch": True,
+        "max_tab_switches": 3,
+        "copy_paste": True,
+        "phone_detect": True,
+        "multi_monitor_detect": True,
+        "face_detection": True,
+        "camera_block_detect": True,
+        "multiple_people_detect": True,
+        "auto_submit_on_violation": True,
     })
 
     pool = await get_pool()

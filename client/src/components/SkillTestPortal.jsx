@@ -9,6 +9,40 @@ import SkillTestReport from './SkillTestReport';
 import socketService from '../services/socketService';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const DEFAULT_SKILL_PROCTORING_CONFIG = {
+    camera: true,
+    mic: true,
+    fullscreen: true,
+    tab_switch: true,
+    max_tab_switches: 3,
+    paste_disabled: true,
+    face_detection: true,
+    camera_block_detect: true,
+    phone_detect: true,
+    multiple_people_detect: true,
+    multi_monitor_detect: true,
+    auto_submit_on_violation: true,
+};
+
+const normalizeSkillProctoring = (config = {}) => ({
+    ...DEFAULT_SKILL_PROCTORING_CONFIG,
+    ...(config || {})
+});
+const getSkillProctoringRules = (config = {}) => {
+    const cfg = normalizeSkillProctoring(config);
+    return [
+        (cfg.camera || cfg.camera_block_detect || cfg.face_detection || cfg.multiple_people_detect || cfg.phone_detect) && 'Keep your face visible in camera during the test',
+        cfg.mic && 'Allow microphone access during the test',
+        cfg.fullscreen && 'Stay in fullscreen mode',
+        cfg.tab_switch && `Do not switch tabs or windows${cfg.max_tab_switches ? ` (max ${cfg.max_tab_switches})` : ''}`,
+        cfg.paste_disabled && 'Copy, paste, and cut actions are blocked',
+        cfg.phone_detect && 'Keep phones and unauthorized devices away',
+        cfg.camera_block_detect && 'Do not cover or block the camera',
+        cfg.multiple_people_detect && 'Only one person should be visible',
+        cfg.multi_monitor_detect && 'Use a single monitor only',
+        cfg.auto_submit_on_violation && 'Repeated violations can auto-submit the test',
+    ].filter(Boolean);
+};
 
 export default function SkillTestPortal({ user }) {
     const [tests, setTests] = useState([]);
@@ -58,6 +92,21 @@ export default function SkillTestPortal({ user }) {
     // Multiple monitor detection
     const [multipleMonitors, setMultipleMonitors] = useState(false);
     const multiMonitorIntervalRef = useRef(null);
+    const activeProctoringConfig = normalizeSkillProctoring(attemptData?.proctoring_config);
+    const pendingTestConfig = normalizeSkillProctoring(tests.find(t => t.id === pendingTestId)?.proctoring_config);
+    const proctoringEnabled = attemptData?.proctoring_enabled !== false;
+    const shouldTrackTabs = proctoringEnabled && activeProctoringConfig.tab_switch;
+    const shouldBlockClipboard = proctoringEnabled && activeProctoringConfig.paste_disabled;
+    const shouldEnforceFullscreen = proctoringEnabled && activeProctoringConfig.fullscreen;
+    const shouldDetectMonitors = proctoringEnabled && activeProctoringConfig.multi_monitor_detect;
+    const shouldUseCamera = proctoringEnabled && (
+        activeProctoringConfig.camera ||
+        activeProctoringConfig.camera_block_detect ||
+        activeProctoringConfig.phone_detect ||
+        activeProctoringConfig.face_detection ||
+        activeProctoringConfig.multiple_people_detect
+    );
+    const shouldRequestAudio = proctoringEnabled && activeProctoringConfig.mic;
 
     useEffect(() => {
         loadTests();
@@ -176,16 +225,20 @@ export default function SkillTestPortal({ user }) {
                 eventType, severity, null
             );
             setProctoringStats(prev => {
+                const nextTabSwitchCount = eventType === 'tab_switch' ? prev.tabSwitchCount + 1 : prev.tabSwitchCount;
                 const next = {
                     ...prev,
                     violationCount: prev.violationCount + 1,
-                    tabSwitchCount: eventType === 'tab_switch' ? prev.tabSwitchCount + 1 : prev.tabSwitchCount,
+                    tabSwitchCount: nextTabSwitchCount,
                     fullscreenExits: eventType === 'fullscreen_exit' ? prev.fullscreenExits + 1 : prev.fullscreenExits,
                     phoneDetections: eventType === 'phone_detected' ? prev.phoneDetections + 1 : prev.phoneDetections,
                     cameraBlocks: eventType === 'camera_blocked' ? prev.cameraBlocks + 1 : prev.cameraBlocks,
                 };
+                if (eventType === 'tab_switch' && activeProctoringConfig.auto_submit_on_violation && nextTabSwitchCount > (activeProctoringConfig.max_tab_switches || 3) && !terminatedRef.current) {
+                    terminateAttempt(`Maximum tab switches exceeded (${nextTabSwitchCount}/${activeProctoringConfig.max_tab_switches || 3}).`);
+                }
                 // Auto-terminate at MAX_VIOLATIONS
-                if (next.violationCount >= MAX_VIOLATIONS && !terminatedRef.current) {
+                if (activeProctoringConfig.auto_submit_on_violation && next.violationCount >= MAX_VIOLATIONS && !terminatedRef.current) {
                     terminateAttempt(`Maximum proctoring violations reached (${next.violationCount}/${MAX_VIOLATIONS}). Your test has been automatically terminated.`);
                 }
                 return next;
@@ -207,7 +260,7 @@ export default function SkillTestPortal({ user }) {
 
     // Block Copy/Paste/Right-click
     useEffect(() => {
-        if (!activeAttempt || currentView === 'list' || currentView === 'report' || attemptData?.proctoring_enabled === false) return;
+        if (!activeAttempt || currentView === 'list' || currentView === 'report' || !shouldBlockClipboard) return;
         const preventEvent = (e) => { e.preventDefault(); };
         window.addEventListener('copy', preventEvent);
         window.addEventListener('paste', preventEvent);
@@ -219,32 +272,32 @@ export default function SkillTestPortal({ user }) {
             window.removeEventListener('cut', preventEvent);
             window.removeEventListener('contextmenu', preventEvent);
         };
-    }, [activeAttempt, currentView, attemptData]);
+    }, [activeAttempt, currentView, shouldBlockClipboard]);
 
     // Tab switch / visibility change detection
     useEffect(() => {
         const handleVisibility = () => {
-            if (document.hidden && activeAttempt && currentView !== 'list' && currentView !== 'report') {
+            if (document.hidden && activeAttempt && currentView !== 'list' && currentView !== 'report' && shouldTrackTabs) {
                 logProctoringRef.current?.('tab_switch', 'Student switched tabs or minimized window', 'high');
             }
         };
         document.addEventListener('visibilitychange', handleVisibility);
         return () => document.removeEventListener('visibilitychange', handleVisibility);
-    }, [activeAttempt, currentView]);
+    }, [activeAttempt, currentView, shouldTrackTabs]);
 
     // Window blur detection (separate from visibilitychange – catches Alt+Tab, clicking outside)
     useEffect(() => {
-        if (!activeAttempt || currentView === 'list' || currentView === 'report' || attemptData?.proctoring_enabled === false) return;
+        if (!activeAttempt || currentView === 'list' || currentView === 'report' || !shouldTrackTabs) return;
         const handleBlur = () => {
             logProctoringRef.current?.('window_blur', 'Window lost focus (possible Alt+Tab or clicking outside)', 'high');
         };
         window.addEventListener('blur', handleBlur);
         return () => window.removeEventListener('blur', handleBlur);
-    }, [activeAttempt, currentView, attemptData]);
+    }, [activeAttempt, currentView, shouldTrackTabs]);
 
     // DevTools blocking
     useEffect(() => {
-        if (!activeAttempt || currentView === 'list' || currentView === 'report' || attemptData?.proctoring_enabled === false) return;
+        if (!activeAttempt || currentView === 'list' || currentView === 'report' || !proctoringEnabled) return;
         const blockDevTools = (e) => {
             if (
                 e.key === 'F12' ||
@@ -259,11 +312,11 @@ export default function SkillTestPortal({ user }) {
         };
         window.addEventListener('keydown', blockDevTools, true);
         return () => window.removeEventListener('keydown', blockDevTools, true);
-    }, [activeAttempt, currentView, attemptData]);
+    }, [activeAttempt, currentView, proctoringEnabled]);
 
     // Multiple monitor detection
     useEffect(() => {
-        if (!activeAttempt || currentView === 'list' || currentView === 'report' || attemptData?.proctoring_enabled === false) return;
+        if (!activeAttempt || currentView === 'list' || currentView === 'report' || !shouldDetectMonitors) return;
         const checkMonitors = async () => {
             let detected = false;
             // Method 1: screen.isExtended
@@ -289,11 +342,11 @@ export default function SkillTestPortal({ user }) {
         checkMonitors();
         multiMonitorIntervalRef.current = setInterval(checkMonitors, 5000);
         return () => { if (multiMonitorIntervalRef.current) clearInterval(multiMonitorIntervalRef.current); };
-    }, [activeAttempt, currentView, attemptData, multipleMonitors]);
+    }, [activeAttempt, currentView, shouldDetectMonitors, multipleMonitors]);
 
     // Fullscreen re-enforcement (re-request when student escapes)
     useEffect(() => {
-        if (!activeAttempt || currentView === 'list' || currentView === 'report' || attemptData?.proctoring_enabled === false) return;
+        if (!activeAttempt || currentView === 'list' || currentView === 'report' || !shouldEnforceFullscreen) return;
         const handleFSReinforce = () => {
             if (!document.fullscreenElement && !terminatedRef.current) {
                 setTimeout(() => {
@@ -304,7 +357,7 @@ export default function SkillTestPortal({ user }) {
         };
         document.addEventListener('fullscreenchange', handleFSReinforce);
         return () => document.removeEventListener('fullscreenchange', handleFSReinforce);
-    }, [activeAttempt, currentView, attemptData]);
+    }, [activeAttempt, currentView, shouldEnforceFullscreen]);
 
     // Update camera active status
     useEffect(() => {
@@ -313,7 +366,7 @@ export default function SkillTestPortal({ user }) {
 
     // Camera monitoring - detect camera blocked, phones, or multiple people
     useEffect(() => {
-        if (!cameraStream || !activeAttempt || currentView === 'list' || currentView === 'report') {
+        if (!cameraStream || !activeAttempt || currentView === 'list' || currentView === 'report' || !shouldUseCamera) {
             if (monitorIntervalRef.current) {
                 clearInterval(monitorIntervalRef.current);
                 monitorIntervalRef.current = null;
@@ -357,7 +410,7 @@ export default function SkillTestPortal({ user }) {
                         totalBrightness += (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
                     }
                     const avgBrightness = totalBrightness / (data.length / 16);
-                    if (avgBrightness < DARK_THRESHOLD) {
+                    if (activeProctoringConfig.camera_block_detect && avgBrightness < DARK_THRESHOLD) {
                         darkFrameCount++;
                         if (darkFrameCount === DARK_FRAMES_TRIGGER) {
                             logProctoringRef.current?.('camera_blocked', 'Camera appears to be covered', 'high');
@@ -382,7 +435,7 @@ export default function SkillTestPortal({ user }) {
                         // Standardized Device Detection (Phone, Remote, Laptop group)
                         // Grouping these as requested by user to count as "Phone" violations
                         const deviceClasses = ['cell phone', 'remote', 'laptop', 'mouse', 'tablet'];
-                        const deviceObj = predictions.find(p => deviceClasses.includes(p.class) && p.score >= 0.40);
+                        const deviceObj = activeProctoringConfig.phone_detect ? predictions.find(p => deviceClasses.includes(p.class) && p.score >= 0.40) : null;
 
                         if (deviceObj) {
                             const now = Date.now();
@@ -395,9 +448,9 @@ export default function SkillTestPortal({ user }) {
                         }
 
                         // Suspicious objects (books, keyboards outside of student's own)
-                        const suspiciousObjects = predictions.filter(p =>
+                        const suspiciousObjects = activeProctoringConfig.phone_detect ? predictions.filter(p =>
                             ['book', 'keyboard'].includes(p.class) && p.score > 0.45
-                        );
+                        ) : [];
                         if (suspiciousObjects.length > 0) {
                             console.warn('⚠️ Suspicious:', suspiciousObjects.map(o => `${o.class}(${(o.score * 100).toFixed(0)}%)`).join(', '));
                             const now = Date.now();
@@ -409,8 +462,8 @@ export default function SkillTestPortal({ user }) {
 
                         // Multiple people detection
                         const persons = predictions.filter(p => p.class === 'person' && p.score > 0.35);
-                        if (persons.length > 1) {
-                            logProctoringRef.current?.('phone_detected', `Multiple people detected (${persons.length} persons)`, 'high');
+                        if (activeProctoringConfig.multiple_people_detect && persons.length > 1) {
+                            logProctoringRef.current?.('multiple_people', `Multiple people detected (${persons.length} persons)`, 'high');
                         }
                     } catch (e) {
                         console.warn("Detection error:", e.message);
@@ -428,7 +481,7 @@ export default function SkillTestPortal({ user }) {
             monitorVideo.pause();
             monitorVideo.srcObject = null;
         };
-    }, [cameraStream, activeAttempt, currentView, model]);
+    }, [cameraStream, activeAttempt, currentView, model, shouldUseCamera, activeProctoringConfig]);
 
     // Cleanup warning timer on unmount
     useEffect(() => {
@@ -459,6 +512,12 @@ export default function SkillTestPortal({ user }) {
             startTest(testId);
             return;
         }
+        const cfg = normalizeSkillProctoring(test?.proctoring_config);
+        const needsSetup = cfg.camera || cfg.mic || cfg.fullscreen;
+        if (!needsSetup) {
+            startTest(testId);
+            return;
+        }
         setPendingTestId(testId);
         setShowProctoringSetup(true);
         setCameraError('');
@@ -472,7 +531,10 @@ export default function SkillTestPortal({ user }) {
             const videoConstraints = webcam?.deviceId
                 ? { deviceId: { exact: webcam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
                 : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' };
-            const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: pendingTestConfig.camera ? videoConstraints : false,
+                audio: !!pendingTestConfig.mic
+            });
             setCameraStream(stream);
             setCameraError('');
             if (videoRef.current) {
@@ -501,7 +563,9 @@ export default function SkillTestPortal({ user }) {
     // Start test after proctoring setup
     const proceedAfterSetup = async () => {
         // Enter fullscreen
-        await enterFullscreen();
+        if (pendingTestConfig.fullscreen) {
+            await enterFullscreen();
+        }
 
         setShowProctoringSetup(false);
 
@@ -605,10 +669,11 @@ export default function SkillTestPortal({ user }) {
                         Proctoring Setup
                     </h2>
                     <p style={{ fontSize: '14px', color: '#94a3b8', margin: '0 0 28px' }}>
-                        This test requires camera access and fullscreen mode for proctoring.
+                        Review the required proctoring permissions before starting your assessment.
                     </p>
 
                     {/* Camera Preview */}
+                    {pendingTestConfig.camera && (
                     <div style={{
                         width: '240px', height: '180px', margin: '0 auto 20px', borderRadius: '12px',
                         overflow: 'hidden', border: '2px solid ' + (cameraStream ? '#22c55e' : '#475569'),
@@ -620,6 +685,7 @@ export default function SkillTestPortal({ user }) {
                             <Camera size={40} color="#475569" />
                         )}
                     </div>
+                    )}
 
                     {cameraError && (
                         <div style={{ fontSize: '12px', color: '#fca5a5', margin: '0 0 16px', padding: '8px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: '8px' }}>
@@ -629,6 +695,7 @@ export default function SkillTestPortal({ user }) {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
                         {/* Enable Camera Button */}
+                        {(pendingTestConfig.camera || pendingTestConfig.mic) && (
                         <button onClick={enableCamera} style={{
                             padding: '12px 24px', borderRadius: '10px', cursor: 'pointer',
                             fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center',
@@ -637,20 +704,33 @@ export default function SkillTestPortal({ user }) {
                             color: cameraStream ? '#34d399' : '#60a5fa',
                             border: '1px solid ' + (cameraStream ? 'rgba(16,185,129,0.3)' : 'rgba(59,130,246,0.3)')
                         }}>
-                            {cameraStream ? <><CheckCircle size={16} /> Camera Enabled</> : <><Camera size={16} /> Enable Camera</>}
+                            {cameraStream ? <><CheckCircle size={16} /> Media Enabled</> : <><Camera size={16} /> Enable Required Media</>}
                         </button>
+                        )}
 
                         {/* Checklist */}
                         <div style={{ textAlign: 'left', fontSize: '13px', padding: '12px 16px', background: '#0f172a', borderRadius: '10px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: cameraStream ? '#34d399' : '#94a3b8' }}>
-                                {cameraStream ? <CheckCircle size={14} /> : <XCircle size={14} />} Camera access
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8' }}>
-                                <Maximize size={14} /> Fullscreen will activate on start
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8' }}>
-                                <Monitor size={14} /> Tab switches are monitored
-                            </div>
+                            {(pendingTestConfig.camera || pendingTestConfig.mic) && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: cameraStream ? '#34d399' : '#94a3b8' }}>
+                                    {cameraStream ? <CheckCircle size={14} /> : <XCircle size={14} />} {pendingTestConfig.camera && pendingTestConfig.mic ? 'Camera & microphone access' : pendingTestConfig.camera ? 'Camera access' : 'Microphone access'}
+                                </div>
+                            )}
+                            {pendingTestConfig.fullscreen && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8' }}>
+                                    <Maximize size={14} /> Fullscreen will activate on start
+                                </div>
+                            )}
+                            {pendingTestConfig.tab_switch && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8' }}>
+                                    <Monitor size={14} /> Max tab switches: {pendingTestConfig.max_tab_switches || 3}
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ textAlign: 'left', fontSize: '13px', padding: '12px 16px', background: 'rgba(245, 158, 11, 0.08)', borderRadius: '10px', border: '1px solid rgba(245, 158, 11, 0.22)' }}>
+                            <div style={{ fontWeight: 700, color: '#fbbf24', marginBottom: '8px' }}>Rules for this test</div>
+                            <ul style={{ margin: 0, paddingLeft: '18px', color: '#cbd5e1', lineHeight: 1.6 }}>
+                                {getSkillProctoringRules(pendingTestConfig).map(rule => <li key={rule}>{rule}</li>)}
+                            </ul>
                         </div>
                     </div>
 
@@ -659,15 +739,15 @@ export default function SkillTestPortal({ user }) {
                             flex: 1, padding: '12px', background: '#334155', color: '#94a3b8', border: 'none',
                             borderRadius: '10px', cursor: 'pointer', fontWeight: 600, fontSize: '14px'
                         }}>Cancel</button>
-                        <button onClick={proceedAfterSetup} disabled={!cameraStream} style={{
+                        <button onClick={proceedAfterSetup} disabled={(pendingTestConfig.camera || pendingTestConfig.mic) && !cameraStream} style={{
                             flex: 2, padding: '12px',
-                            background: cameraStream ? 'linear-gradient(135deg, #8b5cf6, #7c3aed)' : '#334155',
-                            color: cameraStream ? 'white' : '#64748b',
+                            background: ((pendingTestConfig.camera || pendingTestConfig.mic) ? cameraStream : true) ? 'linear-gradient(135deg, #8b5cf6, #7c3aed)' : '#334155',
+                            color: ((pendingTestConfig.camera || pendingTestConfig.mic) ? cameraStream : true) ? 'white' : '#64748b',
                             border: 'none', borderRadius: '10px',
-                            cursor: cameraStream ? 'pointer' : 'not-allowed',
+                            cursor: ((pendingTestConfig.camera || pendingTestConfig.mic) ? cameraStream : true) ? 'pointer' : 'not-allowed',
                             fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center',
                             justifyContent: 'center', gap: '8px',
-                            boxShadow: cameraStream ? '0 2px 10px rgba(139,92,246,0.3)' : 'none'
+                            boxShadow: ((pendingTestConfig.camera || pendingTestConfig.mic) ? cameraStream : true) ? '0 2px 10px rgba(139,92,246,0.3)' : 'none'
                         }}>
                             <Play size={16} /> Start Assessment
                         </button>
@@ -694,7 +774,7 @@ export default function SkillTestPortal({ user }) {
                 <style>{`@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
 
                 {/* Left Sidebar - Camera & Proctoring */}
-                {cameraStream && (
+                {cameraStream && shouldUseCamera && (
                     <div style={{
                         width: '260px', minWidth: '260px', background: '#0b1120',
                         borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column',
@@ -757,30 +837,30 @@ export default function SkillTestPortal({ user }) {
                                 Monitoring
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
+                                {shouldTrackTabs && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
                                     <span style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                         <ArrowLeftRight size={10} /> Tab Switches
                                     </span>
                                     <span style={{ fontSize: '12px', fontWeight: 700, color: proctoringStats.tabSwitchCount > 0 ? '#fbbf24' : '#64748b' }}>
                                         {proctoringStats.tabSwitchCount}
                                     </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
+                                </div>}
+                                {activeProctoringConfig.phone_detect && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
                                     <span style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                         <Smartphone size={10} /> Phone
                                     </span>
                                     <span style={{ fontSize: '12px', fontWeight: 700, color: proctoringStats.phoneDetections > 0 ? '#fbbf24' : '#64748b' }}>
                                         {proctoringStats.phoneDetections}
                                     </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
+                                </div>}
+                                {shouldEnforceFullscreen && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
                                     <span style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                         <Maximize size={10} /> FS Exits
                                     </span>
                                     <span style={{ fontSize: '12px', fontWeight: 700, color: proctoringStats.fullscreenExits > 0 ? '#fbbf24' : '#64748b' }}>
                                         {proctoringStats.fullscreenExits}
                                     </span>
-                                </div>
+                                </div>}
                                 {proctoringStats.violationCount > 0 && (
                                     <div style={{
                                         marginTop: '4px', padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700,
@@ -804,7 +884,7 @@ export default function SkillTestPortal({ user }) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                 <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#f1f5f9' }}>{attemptData.test_title || attemptData.title || 'Skill Test'}</h2>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    {!isFullscreen && (
+                                    {!isFullscreen && shouldEnforceFullscreen && (
                                         <button onClick={enterFullscreen} style={{
                                             padding: '6px 12px', background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)',
                                             borderRadius: '8px', cursor: 'pointer', fontSize: '11px', color: '#fbbf24',
@@ -844,7 +924,7 @@ export default function SkillTestPortal({ user }) {
                             </div>
 
                             {/* Proctoring Stats Bar (only when no camera sidebar) */}
-                            {attemptData.proctoring_enabled !== false && !cameraStream && (
+                            {proctoringEnabled && !cameraStream && (
                                 <div style={{
                                     display: 'flex', gap: '10px', padding: '8px 14px', background: '#1e293b',
                                     borderRadius: '8px', border: '1px solid #334155', flexWrap: 'wrap', alignItems: 'center'
@@ -854,15 +934,15 @@ export default function SkillTestPortal({ user }) {
                                         <span style={{ color: '#94a3b8' }}>Proctoring:</span>
                                     </div>
                                     <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-                                        <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', background: '#0f172a', padding: '3px 7px', borderRadius: '6px', border: '1px solid #334155' }}>
+                                        {shouldTrackTabs && <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', background: '#0f172a', padding: '3px 7px', borderRadius: '6px', border: '1px solid #334155' }}>
                                             <ArrowLeftRight size={9} /> Tabs: <span style={{ color: proctoringStats.tabSwitchCount > 0 ? '#fbbf24' : '#94a3b8' }}>{proctoringStats.tabSwitchCount}</span>
-                                        </div>
-                                        <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', background: '#0f172a', padding: '3px 7px', borderRadius: '6px', border: '1px solid #334155' }}>
+                                        </div>}
+                                        {activeProctoringConfig.phone_detect && <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', background: '#0f172a', padding: '3px 7px', borderRadius: '6px', border: '1px solid #334155' }}>
                                             <Smartphone size={9} /> Phone: <span style={{ color: proctoringStats.phoneDetections > 0 ? '#fbbf24' : '#94a3b8' }}>{proctoringStats.phoneDetections}</span>
-                                        </div>
-                                        <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', background: '#0f172a', padding: '3px 7px', borderRadius: '6px', border: '1px solid #334155' }}>
+                                        </div>}
+                                        {shouldEnforceFullscreen && <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', background: '#0f172a', padding: '3px 7px', borderRadius: '6px', border: '1px solid #334155' }}>
                                             <Maximize size={9} /> FS: <span style={{ color: proctoringStats.fullscreenExits > 0 ? '#fbbf24' : '#94a3b8' }}>{proctoringStats.fullscreenExits}</span>
-                                        </div>
+                                        </div>}
                                     </div>
                                 </div>
                             )}

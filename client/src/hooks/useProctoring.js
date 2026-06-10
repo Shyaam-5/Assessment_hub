@@ -107,7 +107,7 @@ export function useMultiMonitorDetection(enabled) {
 }
 
 // ── Camera & Object Detection (AI-Proctored only) ────────────────
-export function useCamera(enabled) {
+export function useCamera(enabled, options = {}) {
     const videoRef = useRef(null)
     const canvasRef = useRef(null)
     const [mediaStream, setMediaStream] = useState(null)
@@ -118,6 +118,10 @@ export function useCamera(enabled) {
     const [cameraAccessDenied, setCameraAccessDenied] = useState(false)
     const camBlockRef = useRef(0)
     const camCheckRef = useRef(null)
+    const {
+        requestVideo = true,
+        requestAudio = true,
+    } = options
 
     const initializeCamera = useCallback(async () => {
         try {
@@ -127,20 +131,20 @@ export function useCamera(enabled) {
                 ? { deviceId: { exact: webcam.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
                 : { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: videoConstraints,
-                audio: true
+                video: requestVideo ? videoConstraints : false,
+                audio: requestAudio
             })
             setMediaStream(stream)
-            setVideoEnabled(true)
-            setAudioEnabled(true)
+            setVideoEnabled(requestVideo)
+            setAudioEnabled(requestAudio)
             setCameraAccessDenied(false)
-            if (videoRef.current) videoRef.current.srcObject = stream
+            if (videoRef.current && requestVideo) videoRef.current.srcObject = stream
             return true
         } catch {
             setCameraAccessDenied(true)
             return false
         }
-    }, [])
+    }, [requestAudio, requestVideo])
 
     useEffect(() => {
         if (!enabled || !mediaStream) return

@@ -126,6 +126,8 @@ class AptitudeTestCreate(BaseModel):
     questions: List[QuestionCreate]
     createdBy: str = ""
     resultVisibility: str = "immediate"
+    proctoringEnabled: bool = True
+    proctoringConfig: Optional[dict] = None
 
 
 class AptitudeSubmit(BaseModel):
@@ -148,6 +150,7 @@ class AllocateStudents(BaseModel):
 
 def _clean_test(t: dict) -> dict:
     """Map DB row to camelCase API response."""
+    proctoring_config = _normalize_proctoring_config(t.get("proctoring_config"), t.get("max_tab_switches") or 3)
     return {
         "id": t["id"],
         "title": t["title"],
@@ -166,6 +169,8 @@ def _clean_test(t: dict) -> dict:
         "createdAt": str(t.get("created_at", "")),
         "questionCount": t.get("total_questions"),
         "resultVisibility": t.get("result_visibility") or "immediate",
+        "proctoringEnabled": bool(t.get("proctoring_enabled")) if t.get("proctoring_enabled") is not None else proctoring_config.get("enabled", True),
+        "proctoringConfig": proctoring_config,
     }
 
 
@@ -186,6 +191,57 @@ def _as_utc(value: Any) -> Optional[datetime]:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
+
+def _to_bool(v: Any, default: bool = False) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return default
+
+
+def _safe_json(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return None
+    return value
+
+
+def _normalize_proctoring_config(raw: Any, fallback_max_tab: int = 3) -> dict:
+    cfg = _safe_json(raw) if not isinstance(raw, dict) else raw
+    cfg = cfg or {}
+    enabled = _to_bool(cfg.get("enabled"), True)
+    track_tab = _to_bool(cfg.get("trackTabSwitches"), True) if enabled else False
+    try:
+        max_tab = int(cfg.get("maxTabSwitches", fallback_max_tab))
+    except Exception:
+        max_tab = fallback_max_tab
+    max_tab = max(0, max_tab)
+    if not enabled or not track_tab:
+        max_tab = 0
+    return {
+        "enabled": enabled,
+        "enableVideoAudio": _to_bool(cfg.get("enableVideoAudio", True), True) if enabled else False,
+        "enableMicrophone": _to_bool(cfg.get("enableMicrophone", True), True) if enabled else False,
+        "enforceFullscreen": _to_bool(cfg.get("enforceFullscreen", True), True) if enabled else False,
+        "trackTabSwitches": track_tab,
+        "maxTabSwitches": max_tab,
+        "disableCopyPaste": _to_bool(cfg.get("disableCopyPaste", True), True) if enabled else False,
+        "detectPhoneUsage": _to_bool(cfg.get("detectPhoneUsage", True), True) if enabled else False,
+        "detectCameraBlocking": _to_bool(cfg.get("detectCameraBlocking", True), True) if enabled else False,
+        "enableFaceDetection": _to_bool(cfg.get("enableFaceDetection", True), True) if enabled else False,
+        "detectMultipleFaces": _to_bool(cfg.get("detectMultipleFaces", True), True) if enabled else False,
+        "autoSubmitOnViolation": _to_bool(cfg.get("autoSubmitOnViolation", False), False) if enabled else False,
+    }
 
 
 def _result_visibility_status(test_row: dict, *, can_manage: bool = False) -> dict:
@@ -349,6 +405,8 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
     if body.maxAttempts == 0 or body.maxAttempts < -1:
         raise HTTPException(400, "maxAttempts must be greater than 0, or -1 for unlimited")
     result_visibility = _normalize_result_visibility(body.resultVisibility)
+    normalized_proctoring = _normalize_proctoring_config(body.proctoringConfig, body.maxTabSwitches or 3)
+    proctoring_enabled = 1 if (body.proctoringEnabled and normalized_proctoring.get("enabled")) else 0
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -357,15 +415,17 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
                    (id, title, type, difficulty, duration, total_questions,
                     passing_score, max_tab_switches, max_attempts,
                     start_time, deadline, description, status, created_by, created_at,
-                    result_visibility)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    result_visibility, proctoring_enabled, proctoring_config)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     test_id, body.title, "aptitude", body.difficulty,
                     body.duration, len(body.questions), body.passingScore,
-                    body.maxTabSwitches, body.maxAttempts,
+                    normalized_proctoring.get("maxTabSwitches", 0), body.maxAttempts,
                     _fmt_dt(body.startTime), _fmt_dt(body.deadline),
                     body.description, body.status, actor, created_at,
                     result_visibility,
+                    proctoring_enabled,
+                    json.dumps(normalized_proctoring),
                 ),
             )
 
@@ -399,13 +459,15 @@ async def create_aptitude_test(body: AptitudeTestCreate, request: Request):
         "duration": body.duration,
         "totalQuestions": len(body.questions),
         "passingScore": body.passingScore,
-        "maxTabSwitches": body.maxTabSwitches,
+        "maxTabSwitches": normalized_proctoring.get("maxTabSwitches", 0),
         "maxAttempts": body.maxAttempts,
         "startTime": body.startTime,
         "deadline": body.deadline,
         "description": body.description,
         "status": body.status,
         "resultVisibility": result_visibility,
+        "proctoringEnabled": bool(proctoring_enabled),
+        "proctoringConfig": normalized_proctoring,
         "createdBy": actor,
         "createdAt": str(created_at),
     }

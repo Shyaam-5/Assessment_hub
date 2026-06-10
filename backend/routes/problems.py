@@ -41,12 +41,17 @@ class ProblemCreate(BaseModel):
     # Proctoring
     enableProctoring: bool | None = False
     enableVideoAudio: bool | None = False
+    enableMicrophone: bool | None = False
     disableCopyPaste: bool | None = False
     trackTabSwitches: bool | None = False
     maxTabSwitches: int | None = 3
+    detectPhoneUsage: bool | None = False
+    detectCameraBlocking: bool | None = False
+    enforceFullscreen: bool | None = False
     enableFaceDetection: bool | None = False
     detectMultipleFaces: bool | None = False
     trackFaceLookaway: bool | None = False
+    autoSubmitOnViolation: bool | None = False
 
 
 def _enrich_problem(p: dict) -> dict:
@@ -63,12 +68,17 @@ def _enrich_problem(p: dict) -> dict:
     p["proctoring"] = {
         "enabled": enable_proc,
         "videoAudio": p.pop("enable_video_audio", None) == "true",
+        "enableMicrophone": p.pop("enable_microphone", None) == "true",
         "disableCopyPaste": p.pop("disable_copy_paste", None) == "true",
         "trackTabSwitches": p.pop("track_tab_switches", None) == "true",
         "maxTabSwitches": int(p.pop("max_tab_switches", 3) or 3),
+        "detectPhoneUsage": p.pop("detect_phone_usage", None) == "true",
+        "detectCameraBlocking": p.pop("detect_camera_blocking", None) == "true",
+        "enforceFullscreen": p.pop("enforce_fullscreen", None) == "true",
         "enableFaceDetection": p.pop("enable_face_detection", None) == "true",
         "detectMultipleFaces": p.pop("detect_multiple_faces", None) == "true",
         "trackFaceLookaway": p.pop("track_face_lookaway", None) == "true",
+        "autoSubmitOnViolation": p.pop("auto_submit_on_violation", None) == "true",
     }
     return p
 
@@ -219,6 +229,7 @@ async def create_problem(body: ProblemCreate, request: Request):
     await assert_assessment_limit_for_actor(actor_id)
     problem_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+    normalized_deadline = body.deadline or None
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -227,26 +238,33 @@ async def create_problem(body: ProblemCreate, request: Request):
                     id, mentor_id, title, description, sample_input, expected_output,
                     difficulty, type, language, status, deadline,
                     sql_schema, expected_query_result,
-                    enable_proctoring, enable_video_audio, disable_copy_paste,
+                    enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
                     track_tab_switches, max_tab_switches,
-                    enable_face_detection, detect_multiple_faces, track_face_lookaway,
+                    detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
+                    enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation,
                     created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     problem_id, body.mentorId, body.title, body.description,
                     body.sampleInput, body.expectedOutput,
-                    body.difficulty, body.type, body.language, body.status, body.deadline,
+                    body.difficulty, body.type, body.language, body.status, normalized_deadline,
                     body.sqlSchema, body.expectedQueryResult,
                     str(body.enableProctoring).lower(),
                     str(body.enableVideoAudio).lower(),
+                    str(body.enableMicrophone).lower(),
                     str(body.disableCopyPaste).lower(),
                     str(body.trackTabSwitches).lower(), body.maxTabSwitches,
+                    str(body.detectPhoneUsage).lower(),
+                    str(body.detectCameraBlocking).lower(),
+                    str(body.enforceFullscreen).lower(),
                     str(body.enableFaceDetection).lower(),
                     str(body.detectMultipleFaces).lower(),
                     str(body.trackFaceLookaway).lower(),
+                    str(body.autoSubmitOnViolation).lower(),
                     now,
                 ),
             )
+        await conn.commit()
 
     audit_logger.log_event(
         event_type=AuditEventType.ADMIN_TEST_CREATED,

@@ -632,11 +632,15 @@ function Assignments({ user, mode = 'all' }) {
                 <div className="proctoring-info-bar">
                     <Eye size={12} /> Proctoring Enabled:
                     {problem.proctoring.videoAudio && <span>📹 Video</span>}
+                    {problem.proctoring.enableMicrophone && <span>🎤 Mic</span>}
+                    {problem.proctoring.enforceFullscreen && <span>🖥️ Fullscreen</span>}
                     {problem.proctoring.disableCopyPaste && <span>📋 No Copy</span>}
                     {problem.proctoring.trackTabSwitches && <span>🔒 Tab Track</span>}
+                    {problem.proctoring.detectPhoneUsage && <span>📱 Phone</span>}
+                    {problem.proctoring.detectCameraBlocking && <span>🚫 Cam Block</span>}
                     {problem.proctoring.enableFaceDetection && <span>👁️ Face</span>}
                     {problem.proctoring.detectMultipleFaces && <span>👥 Multi-Face</span>}
-                    {problem.proctoring.trackFaceLookaway && <span>👀 Lookaway</span>}
+                    {problem.proctoring.autoSubmitOnViolation && <span>⚠️ Auto Submit</span>}
                 </div>
             )}
 

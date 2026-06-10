@@ -343,6 +343,21 @@ async def create_test(request: Request, body: dict = Body(...)):
     coding_count = max(0, int(body.get("coding_count", 3) or 0))
     sql_count = max(0, int(body.get("sql_count", 3) or 0))
     interview_count = max(0, int(body.get("interview_count", 5) or 0))
+    proctoring_enabled = bool(body.get("proctoring_enabled", True))
+    proctoring_config = body.get("proctoring_config") or {
+        "camera": True,
+        "mic": True,
+        "fullscreen": True,
+        "tab_switch": True,
+        "max_tab_switches": 3,
+        "paste_disabled": True,
+        "face_detection": True,
+        "camera_block_detect": True,
+        "phone_detect": True,
+        "multiple_people_detect": True,
+        "multi_monitor_detect": True,
+        "auto_submit_on_violation": True,
+    }
     total_questions = mcq_count + coding_count + sql_count + interview_count
     if total_questions <= 0:
         raise HTTPException(status_code=400, detail="Add at least one question or problem before creating a skill test")
@@ -350,8 +365,8 @@ async def create_test(request: Request, body: dict = Body(...)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO skill_tests (title,description,skills,mcq_count,coding_count,sql_count,interview_count,attempt_limit,mcq_duration_minutes,coding_duration_minutes,sql_duration_minutes,interview_duration_minutes,mcq_passing_score,coding_passing_score,sql_passing_score,interview_passing_score) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (body.get("title"), body.get("description"), _json_str(body.get("skills",[])), mcq_count, coding_count, sql_count, interview_count, body.get("attempt_limit",3), body.get("mcq_duration_minutes",30), body.get("coding_duration_minutes",60), body.get("sql_duration_minutes",30), body.get("interview_duration_minutes",30), body.get("mcq_passing_score",60), body.get("coding_passing_score",60), body.get("sql_passing_score",60), body.get("interview_passing_score",5))
+                "INSERT INTO skill_tests (title,description,skills,mcq_count,coding_count,sql_count,interview_count,attempt_limit,mcq_duration_minutes,coding_duration_minutes,sql_duration_minutes,interview_duration_minutes,mcq_passing_score,coding_passing_score,sql_passing_score,interview_passing_score,proctoring_enabled,proctoring_config) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (body.get("title"), body.get("description"), _json_str(body.get("skills",[])), mcq_count, coding_count, sql_count, interview_count, body.get("attempt_limit",3), body.get("mcq_duration_minutes",30), body.get("coding_duration_minutes",60), body.get("sql_duration_minutes",30), body.get("interview_duration_minutes",30), body.get("mcq_passing_score",60), body.get("coding_passing_score",60), body.get("sql_passing_score",60), body.get("interview_passing_score",5), proctoring_enabled, _json_str(proctoring_config))
             )
             test_id = cur.lastrowid
         await conn.commit()
@@ -396,7 +411,15 @@ async def get_all_tests(request: Request):
         if _is_missing_table_error(exc):
             return []
         raise
-    return [dict(r, skills=_safe_json(r.get("skills")), allocatedCount=alloc_counts.get(str(r.get("id")), 0)) for r in rows]
+    return [
+        dict(
+            r,
+            skills=_safe_json(r.get("skills")),
+            proctoring_config=_safe_json(r.get("proctoring_config")),
+            allocatedCount=alloc_counts.get(str(r.get("id")), 0),
+        )
+        for r in rows
+    ]
 
 @router.put("/{test_id}/toggle")
 async def toggle_test(test_id: int, request: Request):
@@ -483,7 +506,14 @@ async def student_available(studentId: str = Query(...), request: Request = None
             for t in tests:
                 await cur.execute("SELECT id,attempt_number,overall_status,current_stage,mcq_score,started_at FROM skill_test_attempts WHERE test_id=%s AND student_id=%s ORDER BY attempt_number DESC", (t["id"], studentId))
                 attempts = await cur.fetchall()
-                enriched.append({**t, "skills": _safe_json(t.get("skills")), "attempts_used": len(attempts), "can_attempt": len(attempts) < t["attempt_limit"] and not any(a["overall_status"] == "completed" for a in attempts), "my_attempts": attempts})
+                enriched.append({
+                    **t,
+                    "skills": _safe_json(t.get("skills")),
+                    "proctoring_config": _safe_json(t.get("proctoring_config")),
+                    "attempts_used": len(attempts),
+                    "can_attempt": len(attempts) < t["attempt_limit"] and not any(a["overall_status"] == "completed" for a in attempts),
+                    "my_attempts": attempts
+                })
     return enriched
 
 @router.post("/{test_id}/start")
@@ -540,10 +570,18 @@ async def get_attempt(attempt_id: int, request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT a.*,t.title as test_title,t.skills as test_skills FROM skill_test_attempts a JOIN skill_tests t ON a.test_id=t.id WHERE a.id=%s", (attempt_id,))
+            await cur.execute("SELECT a.*,t.title as test_title,t.skills as test_skills,t.proctoring_enabled,t.proctoring_config FROM skill_test_attempts a JOIN skill_tests t ON a.test_id=t.id WHERE a.id=%s", (attempt_id,))
             a = await cur.fetchone()
     if not a: raise HTTPException(404, "Attempt not found")
-    return {**a, "test_skills": _safe_json(a.get("test_skills")), "mcq_questions": _safe_json(a.get("mcq_questions")), "coding_problems": _safe_json(a.get("coding_problems")), "sql_problems": _safe_json(a.get("sql_problems")), "interview_qa": _safe_json(a.get("interview_qa"))}
+    return {
+        **a,
+        "test_skills": _safe_json(a.get("test_skills")),
+        "proctoring_config": _safe_json(a.get("proctoring_config")),
+        "mcq_questions": _safe_json(a.get("mcq_questions")),
+        "coding_problems": _safe_json(a.get("coding_problems")),
+        "sql_problems": _safe_json(a.get("sql_problems")),
+        "interview_qa": _safe_json(a.get("interview_qa"))
+    }
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STAGE 1: MCQ

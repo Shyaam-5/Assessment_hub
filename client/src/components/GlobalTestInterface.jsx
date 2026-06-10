@@ -10,6 +10,7 @@ import SQLVisualizer from '@/components/SQLVisualizer'
 import SQLDebugger from '@/components/SQLDebugger'
 import socketService from '@/services/socketService'
 import proctoringSocketAdapter from '@/services/proctoringSocketAdapter'
+import { useFaceDetection } from '@/hooks/useProctoring'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 
@@ -100,7 +101,28 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
 
     // Enhanced Proctoring State
     const proctoring = test.proctoring || {}
+    const shouldUseVideo = proctoring.enabled && (
+        proctoring.enableVideoAudio ||
+        proctoring.detectCameraBlocking ||
+        proctoring.detectPhoneUsage ||
+        proctoring.enableFaceDetection ||
+        proctoring.detectMultipleFaces
+    )
+    const shouldUseAudio = proctoring.enabled && !!proctoring.enableMicrophone
     const shouldEnforceFullscreen = proctoring.enabled && proctoring.enforceFullscreen !== false
+    const shouldDetectMultiMonitors = proctoring.enabled && !!proctoring.multiMonitorDetection
+    const proctoringRules = [
+        shouldUseVideo && 'Keep your face visible in camera during the test',
+        shouldUseAudio && 'Allow microphone access during the test',
+        proctoring.trackTabSwitches && `Do not switch tabs or windows${proctoring.maxTabSwitches ? ` (max ${proctoring.maxTabSwitches})` : ''}`,
+        shouldEnforceFullscreen && 'Stay in fullscreen mode',
+        shouldDetectMultiMonitors && 'Use a single monitor only',
+        proctoring.disableCopyPaste && 'Copy, paste, and cut actions are blocked',
+        proctoring.detectCameraBlocking && 'Do not cover or block the camera',
+        proctoring.detectPhoneUsage && 'Keep phones and unauthorized devices away',
+        proctoring.detectMultipleFaces && 'Only one person should be visible',
+        proctoring.autoSubmitOnViolation && 'Repeated violations can auto-submit the test',
+    ].filter(Boolean)
     const [videoEnabled, setVideoEnabled] = useState(false)
     const [audioEnabled, setAudioEnabled] = useState(false)
     const [mediaStream, setMediaStream] = useState(null)
@@ -108,7 +130,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
     const [cameraBlockedCount, setCameraBlockedCount] = useState(0)
     const [cameraReady, setCameraReady] = useState(false)
     const [cameraAccessDenied, setCameraAccessDenied] = useState(false)
-    const [showCameraSetup, setShowCameraSetup] = useState(proctoring.enabled && proctoring.enableVideoAudio)
+    const [showCameraSetup, setShowCameraSetup] = useState(proctoring.enabled && (shouldUseVideo || shouldUseAudio))
     const [phoneDetected, setPhoneDetected] = useState(false)
     const [phoneDetectionCount, setPhoneDetectionCount] = useState(0)
     const [copyPasteAttempts, setCopyPasteAttempts] = useState(0)
@@ -123,6 +145,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
     const [faceMissingCount, setFaceMissingCount] = useState(0)
     const faceMissingCountRef = useRef(0)
     const cameraBlockedRef = useRef(false)
+    const faceDetection = useFaceDetection(videoEnabled && (proctoring.enableFaceDetection || proctoring.detectMultipleFaces), videoRef)
 
     // ── Unified Violation Counter ──
     const MAX_VIOLATIONS = 10
@@ -227,10 +250,10 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
             severity,
             details: `Violation ${count}/${MAX_VIOLATIONS}`
         }).catch(() => {})
-        if (count >= MAX_VIOLATIONS) {
+        if (count >= MAX_VIOLATIONS && proctoring.autoSubmitOnViolation) {
             autoTerminateTest(`Maximum proctoring violations reached (${count}/${MAX_VIOLATIONS}). Your test has been automatically terminated.`)
         }
-    }, [autoTerminateTest, user.id])
+    }, [autoTerminateTest, proctoring.autoSubmitOnViolation, user.id])
 
     // ── Behavior Agent: push event, flush to backend ──
     const pushBehaviorEvent = useCallback((type, data = {}) => {
@@ -377,15 +400,15 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                 ? { deviceId: { exact: webcam.deviceId }, width: 320, height: 240 }
                 : { facingMode: 'user', width: 320, height: 240 }
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: videoConstraints,
-                audio: true
+                video: shouldUseVideo ? videoConstraints : false,
+                audio: shouldUseAudio
             })
             setMediaStream(stream)
-            setVideoEnabled(true)
-            setAudioEnabled(true)
+            setVideoEnabled(shouldUseVideo)
+            setAudioEnabled(shouldUseAudio)
             setCameraReady(true)
             setCameraAccessDenied(false)
-            if (videoRef.current) {
+            if (videoRef.current && shouldUseVideo) {
                 videoRef.current.srcObject = stream
                 videoRef.current.play().catch(() => { })
             }
@@ -417,13 +440,13 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
     useEffect(() => {
         // Only auto-init if proctoring is NOT enabled (non-proctored tests)
         // For proctored tests, we wait for user to click "Start Test" in the camera setup modal
-        if (proctoring.enabled && proctoring.enableVideoAudio) {
+        if (proctoring.enabled && (shouldUseVideo || shouldUseAudio)) {
             // Don't auto-initialize - wait for camera setup modal
             return
         }
 
         // For non-proctored tests, just continue normally
-        if (!proctoring.enabled || !proctoring.enableVideoAudio) {
+        if (!proctoring.enabled || (!shouldUseVideo && !shouldUseAudio)) {
             setCameraReady(true)
             setShowCameraSetup(false)
         }
@@ -432,7 +455,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
             if (phoneCheckIntervalRef.current) clearInterval(phoneCheckIntervalRef.current)
             if (mediaStream) mediaStream.getTracks().forEach(t => t.stop())
         }
-    }, [proctoring.enabled, proctoring.enableVideoAudio])
+    }, [proctoring.enabled, shouldUseAudio, shouldUseVideo])
 
     useEffect(() => { cameraBlockedRef.current = cameraBlocked }, [cameraBlocked])
 
@@ -471,7 +494,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
 
             // Face/Person Detection
             const person = predictions.find(p => p.class === 'person' && p.score > 0.5)
-            if (!person && !cameraBlockedRef.current) {
+            if (proctoring.enableFaceDetection && !person && !cameraBlockedRef.current) {
                 setFaceMissingCount(prev => {
                     const next = prev + 1
                     faceMissingCountRef.current = next
@@ -493,7 +516,17 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
         } catch (e) {
             console.error('Detection error:', e)
         }
-    }, [proctoring.detectPhoneUsage])
+    }, [proctoring.detectPhoneUsage, proctoring.enableFaceDetection])
+
+    useEffect(() => {
+        if (!proctoring.detectMultipleFaces) return
+        if (faceDetection.multipleFaceCount > 0) {
+            recordViolation('multiple_faces', 'critical')
+            setWarningMessage('👥 Multiple people detected! Only one person should be visible.')
+            setShowWarning(true)
+            setTimeout(() => setShowWarning(false), 4000)
+        }
+    }, [faceDetection.multipleFaceCount, proctoring.detectMultipleFaces, recordViolation])
 
     const checkCameraObstruction = useCallback(() => {
         if (!videoRef.current || !canvasRef.current) return
@@ -672,7 +705,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
     }, [multipleMonitors, triggerMonitorViolation])
 
     useEffect(() => {
-        if (!proctoring.enabled) return
+        if (!shouldDetectMultiMonitors) return
         detectMultipleMonitors()
         monitorCheckIntervalRef.current = setInterval(detectMultipleMonitors, 5000)
         const handleResize = () => detectMultipleMonitors()
@@ -684,7 +717,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
             window.removeEventListener('resize', handleResize)
             if (window.screen?.removeEventListener) window.screen.removeEventListener('change', handleScreenChange)
         }
-    }, [proctoring.enabled, detectMultipleMonitors])
+    }, [detectMultipleMonitors, shouldDetectMultiMonitors])
 
     // ── Proctor Agent Termination Listener ──
     useEffect(() => {
@@ -1237,7 +1270,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
             )}
 
             {/* Camera Access Required Modal - Must allow camera before test starts */}
-            {showCameraSetup && proctoring.enabled && proctoring.enableVideoAudio && (
+            {showCameraSetup && proctoring.enabled && (shouldUseVideo || shouldUseAudio) && (
                 <div style={{
                     position: 'fixed',
                     inset: 0,
@@ -1275,7 +1308,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                 Camera Access Required
                             </h2>
                             <p style={{ margin: 0, color: 'rgba(255,255,255,0.6)', fontSize: '1rem', lineHeight: 1.6 }}>
-                                This is a proctored test. You must allow camera and microphone access to continue.
+                                This is a proctored test. You must allow the required media permissions to continue.
                             </p>
                         </div>
 
@@ -1291,10 +1324,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                 <div style={{ fontSize: '0.9rem', color: '#fbbf24', lineHeight: 1.5 }}>
                                     <strong>Proctoring features enabled:</strong>
                                     <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
-                                        {proctoring.enableVideoAudio && <li>Camera & Audio monitoring</li>}
-                                        {proctoring.detectCameraBlocking && <li>Camera obstruction detection</li>}
-                                        {proctoring.detectPhoneUsage && <li>Phone usage detection</li>}
-                                        {proctoring.disableCopyPaste && <li>Copy/Paste disabled</li>}
+                                        {proctoringRules.map(rule => <li key={rule}>{rule}</li>)}
                                     </ul>
                                 </div>
                             </div>
@@ -1546,7 +1576,7 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                     PROCTORED MODE
                                 </div>
 
-                                {proctoring.enableVideoAudio && (
+                                {shouldUseVideo && (
                                     <div style={{
                                         position: 'relative',
                                         borderRadius: 12,
@@ -1585,11 +1615,13 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                             <span style={{ color: phoneDetectionCount > 0 ? '#ef4444' : '#10b981', fontWeight: 700 }}>{phoneDetectionCount}</span>
                                         </div>
                                     )}
+                                    {proctoring.enableFaceDetection && (
                                     <div style={{ display: 'flex', justifyContent: 'space-between', color: '#e2e8f0', fontWeight: 500 }}>
                                         <span>Face Missing:</span>
                                         <span style={{ color: faceMissingCount > 0 ? '#f59e0b' : '#10b981', fontWeight: 700 }}>{faceMissingCount}</span>
                                     </div>
-                                    {multipleMonitorCount > 0 && (
+                                    )}
+                                    {shouldDetectMultiMonitors && multipleMonitorCount > 0 && (
                                         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#e2e8f0', fontWeight: 500 }}>
                                             <span>Multi-Monitor:</span>
                                             <span style={{ color: '#ef4444', fontWeight: 700 }}>{multipleMonitorCount}</span>
@@ -1607,7 +1639,8 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
                                     </h4>
                                     <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                         <li>Do not switch tabs or windows.</li>
-                                        {proctoring.enableVideoAudio && <li>Keep your camera and microphone on.</li>}
+                                        {shouldUseVideo && <li>Keep your camera on.</li>}
+                                        {shouldUseAudio && <li>Keep your microphone on.</li>}
                                         {proctoring.enforceFullscreen && <li>Do not exit fullscreen mode.</li>}
                                         {proctoring.detectCameraBlocking && <li>Ensure your face is always visible.</li>}
                                         {proctoring.detectPhoneUsage && <li>No mobile phones allowed.</li>}

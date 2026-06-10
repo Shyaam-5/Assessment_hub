@@ -22,6 +22,31 @@ const SKILL_CATEGORIES = {
 
 const ALL_SKILLS = Object.values(SKILL_CATEGORIES).flat();
 
+const generatedOnStartBadgeStyle = {
+    padding: '3px 10px',
+    borderRadius: '999px',
+    fontSize: '11px',
+    fontWeight: 700,
+    background: 'rgba(251, 191, 36, 0.12)',
+    color: '#fbbf24',
+    border: '1px solid rgba(251, 191, 36, 0.28)'
+};
+
+const DEFAULT_SKILL_PROCTORING_CONFIG = {
+    camera: true,
+    mic: true,
+    fullscreen: true,
+    tab_switch: true,
+    max_tab_switches: 3,
+    paste_disabled: true,
+    face_detection: true,
+    camera_block_detect: true,
+    phone_detect: true,
+    multiple_people_detect: true,
+    multi_monitor_detect: true,
+    auto_submit_on_violation: true,
+};
+
 // Section card helper
 const SectionCard = ({ icon, title, subtitle, color, children }) => (
     <div style={{
@@ -96,11 +121,7 @@ export default function SkillTestManager() {
         attempt_limit: 1, mcq_duration_minutes: 30, coding_duration_minutes: 45, sql_duration_minutes: 45, interview_duration_minutes: 30,
         mcq_passing_score: 60, coding_passing_score: 50, sql_passing_score: 50, interview_passing_score: 6,
         proctoring_enabled: true,
-        proctoring_config: {
-            camera: true, mic: true, fullscreen: true,
-            paste_disabled: true, face_detection: true,
-            camera_block_detect: true, phone_detect: true
-        }
+        proctoring_config: { ...DEFAULT_SKILL_PROCTORING_CONFIG }
     });
     const [skillSearch, setSkillSearch] = useState('');
     const [expandedCategory, setExpandedCategory] = useState(null);
@@ -140,7 +161,7 @@ export default function SkillTestManager() {
                 message: 'Skill test created. Next step: allocate learners with coding.assign access before candidates can start.'
             });
             setShowCreate(false);
-            setForm({ title: '', description: '', skills: [], difficulty_level: 'mixed', mcq_count: 10, coding_count: 3, sql_count: 3, interview_count: 5, attempt_limit: 1, mcq_duration_minutes: 30, coding_duration_minutes: 45, sql_duration_minutes: 45, interview_duration_minutes: 30, mcq_passing_score: 60, coding_passing_score: 50, sql_passing_score: 50, interview_passing_score: 6, proctoring_enabled: true, proctoring_config: { camera: true, mic: true, fullscreen: true, paste_disabled: true, face_detection: true, camera_block_detect: true, phone_detect: true } });
+            setForm({ title: '', description: '', skills: [], difficulty_level: 'mixed', mcq_count: 10, coding_count: 3, sql_count: 3, interview_count: 5, attempt_limit: 1, mcq_duration_minutes: 30, coding_duration_minutes: 45, sql_duration_minutes: 45, interview_duration_minutes: 30, mcq_passing_score: 60, coding_passing_score: 50, sql_passing_score: 50, interview_passing_score: 6, proctoring_enabled: true, proctoring_config: { ...DEFAULT_SKILL_PROCTORING_CONFIG } });
             loadTests();
         } catch (err) {
             setError(err.response?.data?.error || err.message);
@@ -517,10 +538,14 @@ export default function SkillTestManager() {
                                     { key: 'camera', label: 'Camera', desc: 'Webcam monitoring', icon: <Camera size={16} />, color: '#3b82f6' },
                                     { key: 'mic', label: 'Microphone', desc: 'Audio monitoring', icon: <Mic size={16} />, color: '#8b5cf6' },
                                     { key: 'fullscreen', label: 'Fullscreen', desc: 'Force fullscreen mode', icon: <Maximize size={16} />, color: '#06b6d4' },
+                                    { key: 'tab_switch', label: 'Tab Tracking', desc: 'Detect tab switching', icon: <Eye size={16} />, color: '#f59e0b' },
                                     { key: 'paste_disabled', label: 'Paste Disabled', desc: 'Block copy-paste', icon: <ClipboardX size={16} />, color: '#f59e0b' },
-                                    { key: 'face_detection', label: 'Face Movement', desc: 'Detect face away/moving', icon: <ScanFace size={16} />, color: '#10b981' },
+                                    { key: 'face_detection', label: 'Face Detection', desc: 'Require visible face', icon: <ScanFace size={16} />, color: '#10b981' },
                                     { key: 'camera_block_detect', label: 'Camera Block', desc: 'Detect covered camera', icon: <Video size={16} />, color: '#ef4444' },
-                                    { key: 'phone_detect', label: 'Phone Detection', desc: 'Detect mobile phone', icon: <Smartphone size={16} />, color: '#ec4899' }
+                                    { key: 'phone_detect', label: 'Phone Detection', desc: 'Detect mobile phone', icon: <Smartphone size={16} />, color: '#ec4899' },
+                                    { key: 'multiple_people_detect', label: 'People Detect', desc: 'Detect extra people/faces', icon: <Users size={16} />, color: '#f97316' },
+                                    { key: 'multi_monitor_detect', label: 'Multi-Monitor', desc: 'Detect extra displays', icon: <Monitor size={16} />, color: '#06b6d4' },
+                                    { key: 'auto_submit_on_violation', label: 'Auto Submit', desc: 'Terminate on repeated violations', icon: <Shield size={16} />, color: '#ef4444' }
                                 ].map(opt => {
                                     const enabled = form.proctoring_config[opt.key];
                                     return (
@@ -549,6 +574,23 @@ export default function SkillTestManager() {
                                 })}
                             </div>
                         )}
+                        {form.proctoring_enabled && form.proctoring_config.tab_switch && (
+                            <div style={{ marginTop: '12px' }}>
+                                <NumberInput
+                                    label="Max Tab Switches"
+                                    value={form.proctoring_config.max_tab_switches || 3}
+                                    onChange={v => setForm({
+                                        ...form,
+                                        proctoring_config: { ...form.proctoring_config, max_tab_switches: v }
+                                    })}
+                                    min={1}
+                                    max={10}
+                                    icon={<Eye size={12} />}
+                                    color="#f59e0b"
+                                    suffix="before escalation"
+                                />
+                            </div>
+                        )}
                     </SectionCard>
 
                     <div style={{ height: '14px' }} />
@@ -556,6 +598,9 @@ export default function SkillTestManager() {
                     {/* Step 5: Question Counts */}
                     <SectionCard icon={<Hash size={16} />} title="Question Configuration"
                         subtitle="Set number of questions per section" color="#10b981">
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+                            <span style={generatedOnStartBadgeStyle}>Generated on start</span>
+                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
                             <NumberInput label="MCQ Questions" value={form.mcq_count}
                                 onChange={v => setForm({ ...form, mcq_count: v })}
@@ -625,13 +670,15 @@ export default function SkillTestManager() {
                             <span><Code size={13} style={{ verticalAlign: 'middle' }} /> {form.coding_count} Coding</span>
                             <span><Database size={13} style={{ verticalAlign: 'middle' }} /> {form.sql_count} SQL</span>
                             <span><MessageSquare size={13} style={{ verticalAlign: 'middle' }} /> {form.interview_count} Interview</span>
-                            <span><MessageSquare size={13} style={{ verticalAlign: 'middle' }} /> {form.interview_count} Interview</span>
                             <span><Clock size={13} style={{ verticalAlign: 'middle' }} /> {form.mcq_duration_minutes}m+{form.coding_duration_minutes}m+{form.sql_duration_minutes}m+{form.interview_duration_minutes}m</span>
                             <span style={{ color: { easy: '#22c55e', medium: '#f59e0b', hard: '#ef4444', mixed: '#8b5cf6' }[form.difficulty_level] }}>
                                 <Target size={13} style={{ verticalAlign: 'middle' }} /> {form.difficulty_level}
                             </span>
                             <span style={{ color: form.proctoring_enabled ? '#22c55e' : '#ef4444' }}>
                                 <Shield size={13} style={{ verticalAlign: 'middle' }} /> {form.proctoring_enabled ? 'Proctored' : 'No Proctor'}
+                            </span>
+                            <span style={{ color: '#94a3b8' }}>
+                                <Sparkles size={13} style={{ verticalAlign: 'middle' }} /> Questions generate when a learner starts the test
                             </span>
                         </div>
                         <button onClick={createTest} disabled={creating} style={{
@@ -715,6 +762,7 @@ export default function SkillTestManager() {
                                         display: 'flex', gap: '6px', flexWrap: 'wrap', fontSize: '11px',
                                         padding: '8px 12px', background: '#0f172a', borderRadius: '8px'
                                     }}>
+                                        <span style={generatedOnStartBadgeStyle}>Generated on start</span>
                                         <span style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#8b5cf6', fontWeight: 600 }}>
                                             <Brain size={12} /> {test.mcq_count} MCQ
                                         </span>
