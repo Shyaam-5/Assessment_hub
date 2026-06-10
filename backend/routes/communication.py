@@ -61,7 +61,6 @@ async def _insert_unified_proctor_event(
     attempt_id: str | None = None,
 ):
     pool = await get_pool()
-    primary_pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -1141,6 +1140,7 @@ async def set_comm_test_allocations(test_id: int, request: Request):
     student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
 
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -1157,26 +1157,26 @@ async def set_comm_test_allocations(test_id: int, request: Request):
                 async with primary_pool.acquire() as primary_conn:
                     async with primary_conn.cursor() as primary_cur:
                         await primary_cur.execute(
-                    f"""
-                    SELECT DISTINCT u.id
-                    FROM users u
-                    LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
-                    LEFT JOIN roles r ON r.id = ura.role_id
-                    WHERE u.id IN ({placeholders})
-                      AND (
-                        u.role = 'student'
-                        OR (
-                            u.role = 'org_user'
-                            AND (
-                                LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
-                                OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
+                            f"""
+                            SELECT DISTINCT u.id
+                            FROM users u
+                            LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+                            LEFT JOIN roles r ON r.id = ura.role_id
+                            WHERE u.id IN ({placeholders})
+                              AND (
+                                u.role = 'student'
+                                OR (
+                                    u.role = 'org_user'
+                                    AND (
+                                        LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
+                                        OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
+                                    )
+                                )
                             )
+                            """,
+                            student_ids,
                         )
-                      )
-                    """,
-                    student_ids,
-                )
-                allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
+                        allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
                 invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
                 if invalid_ids:
                     raise HTTPException(400, "Only student or exam-taker users can be allocated")

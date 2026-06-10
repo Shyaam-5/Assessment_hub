@@ -3,7 +3,6 @@ import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { LayoutDashboard, Users, Trophy, Award, List, Search, Send, Activity, CheckCircle, Check, TrendingUp, Clock, Globe, FileCode, Plus, X, Code, ChevronRight, Upload, AlertTriangle, Zap, Target, Sparkles, Bot, Wand2, Eye, FileText, BarChart2, RefreshCw, Calendar, HelpCircle, Trash2, Save, Brain, XCircle, Shield, Download, ClipboardList, Settings, Database, Mail, MessageSquare, Github, ExternalLink, BarChart3, Video, Mic, Maximize, Smartphone, Monitor, ScanFace } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts'
 import DashboardLayout from '../components/DashboardLayout'
-import { AIChatbot, AIFloatingButton } from '../components/AIChatbot'
 import AptitudeReportModal from '../components/AptitudeReportModal'
 import StudentReportModal from '../components/StudentReportModal'
 import TestCasesManager from '../components/TestCasesManager'
@@ -2768,13 +2767,20 @@ function GlobalProblems({ mode = 'all' }) {
     const [problems, setProblems] = useState([])
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
-    const [showAIChat, setShowAIChat] = useState(false)
     const [submittingProblem, setSubmittingProblem] = useState(false)
     const [uploading, setUploading] = useState(false)
     const csvInputRef = useRef(null)
     const forcedTab = mode === 'coding' || mode === 'sql' ? mode : null
     const [activeTab, setActiveTab] = useState(forcedTab || 'coding') // 'coding' or 'sql'
     const [selectedProblemForTestCases, setSelectedProblemForTestCases] = useState(null)
+    const [allocatingProblem, setAllocatingProblem] = useState(null)
+    const [orgStudents, setOrgStudents] = useState([])
+    const [selectedStudents, setSelectedStudents] = useState(new Set())
+    const [allocSearch, setAllocSearch] = useState('')
+    const [allocSaving, setAllocSaving] = useState(false)
+    const [isGeneratingProblem, setIsGeneratingProblem] = useState(false)
+    const [generatedProblemDraft, setGeneratedProblemDraft] = useState(null)
+    const [problemAiPrompt, setProblemAiPrompt] = useState({ topic: '', difficulty: 'Medium', language: 'Python' })
     const [problem, setProblem] = useState({
         title: '',
         type: 'Coding',
@@ -2811,8 +2817,7 @@ function GlobalProblems({ mode = 'all' }) {
         setActiveTab(forcedTab)
     }, [forcedTab])
 
-    // AI Chatbot handler - auto-fills the form
-    const handleAIGenerate = (generated) => {
+    const applyGeneratedProblemDraft = (generated) => {
         const isSQL = generated.type === 'SQL' || generated.language === 'SQL'
         setProblem({
             title: generated.title || '',
@@ -2840,8 +2845,47 @@ function GlobalProblems({ mode = 'all' }) {
             trackFaceLookaway: problem.trackFaceLookaway,
             autoSubmitOnViolation: problem.autoSubmitOnViolation
         })
-        setShowAIChat(false)
         setShowModal(true)
+    }
+
+    const generateProblemWithAI = async () => {
+        const targetIsSql = activeTab === 'sql' || isSQLProblem
+        if (!problemAiPrompt.topic.trim()) {
+            alert(`Please enter a topic for the ${targetIsSql ? 'SQL' : 'coding'} problem`)
+            return
+        }
+        setIsGeneratingProblem(true)
+        try {
+            const endpoint = targetIsSql ? 'generate-sql-problem' : 'generate-coding-problem'
+            const payload = targetIsSql
+                ? { topic: problemAiPrompt.topic, difficulty: problemAiPrompt.difficulty }
+                : { topic: problemAiPrompt.topic, difficulty: problemAiPrompt.difficulty, language: problemAiPrompt.language }
+            const res = await axios.post(`${API_BASE}/ai/${endpoint}`, payload)
+            const generated = res.data?.problem
+            if (!generated) throw new Error('No problem returned from AI')
+            const draft = targetIsSql ? {
+                title: generated.title || problemAiPrompt.topic,
+                type: 'SQL',
+                language: 'SQL',
+                difficulty: generated.difficulty || problemAiPrompt.difficulty,
+                description: generated.question || generated.description || `Write a SQL query for: ${problemAiPrompt.topic}`,
+                sqlSchema: generated.schema || generated.sqlSchema || '',
+                expectedQueryResult: generated.expectedOutput || generated.expectedQueryResult || '',
+            } : {
+                title: generated.title || problemAiPrompt.topic,
+                type: 'Coding',
+                language: generated.language || problemAiPrompt.language,
+                difficulty: generated.difficulty || problemAiPrompt.difficulty,
+                description: generated.question || generated.description || `Solve: ${problemAiPrompt.topic}`,
+                sampleInput: generated.testCases?.[0]?.input || '',
+                expectedOutput: generated.testCases?.[0]?.expected_output || generated.testCases?.[0]?.expectedOutput || '',
+            }
+            setGeneratedProblemDraft(draft)
+        } catch (e) {
+            alert(e.response?.data?.detail || e.message || 'AI generation failed')
+        } finally {
+            setIsGeneratingProblem(false)
+        }
     }
 
     const fetchProblems = () => {
@@ -2856,6 +2900,52 @@ function GlobalProblems({ mode = 'all' }) {
     useEffect(() => {
         fetchProblems()
     }, [])
+
+    const openAllocate = async (problemItem) => {
+        setAllocatingProblem(problemItem)
+        setAllocSearch('')
+        setAllocSaving(false)
+        try {
+            const [studentsRes, allocsRes] = await Promise.all([
+                axios.get(`${API_BASE}/global-tests/org-students`),
+                axios.get(`${API_BASE}/problems/${problemItem.id}/allocations`)
+            ])
+            const students = Array.isArray(studentsRes.data) ? studentsRes.data : []
+            const allocs = Array.isArray(allocsRes.data) ? allocsRes.data : []
+            setOrgStudents(students)
+            setSelectedStudents(new Set(allocs.map(a => String(a.studentId))))
+        } catch (error) {
+            setOrgStudents([])
+            setSelectedStudents(new Set())
+            alert(error.response?.data?.detail || error.response?.data?.error || 'Failed to load allocation data')
+        }
+    }
+
+    const toggleStudent = (id) => {
+        const sid = String(id)
+        setSelectedStudents(prev => {
+            const next = new Set(prev)
+            if (next.has(sid)) next.delete(sid)
+            else next.add(sid)
+            return next
+        })
+    }
+
+    const saveAllocations = async () => {
+        if (!allocatingProblem) return
+        setAllocSaving(true)
+        try {
+            await axios.post(`${API_BASE}/problems/${allocatingProblem.id}/allocations`, {
+                studentIds: Array.from(selectedStudents)
+            })
+            setAllocatingProblem(null)
+            fetchProblems()
+        } catch (error) {
+            alert(error.response?.data?.detail || error.response?.data?.error || 'Failed to save allocations')
+        } finally {
+            setAllocSaving(false)
+        }
+    }
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -3047,7 +3137,19 @@ function GlobalProblems({ mode = 'all' }) {
                             <Upload size={18} /> {uploading ? 'Uploading...' : 'CSV Upload'}
                         </button>
                         <button
-                            onClick={() => setShowAIChat(true)}
+                            onClick={() => {
+                                if (forcedTab === 'sql') {
+                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL' }))
+                                    setProblemAiPrompt(prev => ({ ...prev, language: 'SQL' }))
+                                } else {
+                                    setProblem(prev => ({
+                                        ...prev,
+                                        type: 'Coding',
+                                        language: prev.language === 'SQL' ? 'Python' : prev.language
+                                    }))
+                                }
+                                setShowModal(true)
+                            }}
                             className="btn-create-new premium-btn"
                             style={{
                                 padding: '0.75rem 1.25rem',
@@ -3097,18 +3199,27 @@ function GlobalProblems({ mode = 'all' }) {
             </div>
 
             {/* Stats Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
                 <div className="stat-card glass">
                     <div className="stat-icon" style={{ background: 'var(--primary-alpha)', color: 'var(--primary)' }}>
                         <FileCode size={24} />
                     </div>
                     <div className="stat-info">
-                        <span className="stat-label">Total Problems</span>
-                        <span className="stat-value">{problems.length}</span>
+                        <span className="stat-label">Coding Problems</span>
+                        <span className="stat-value">{codingProblems.length}</span>
                     </div>
                 </div>
                 <div className="stat-card glass">
                     <div className="stat-icon" style={{ background: 'var(--success-alpha)', color: 'var(--success)' }}>
+                        <Database size={24} />
+                    </div>
+                    <div className="stat-info">
+                        <span className="stat-label">SQL Problems</span>
+                        <span className="stat-value">{sqlProblems.length}</span>
+                    </div>
+                </div>
+                <div className="stat-card glass">
+                    <div className="stat-icon" style={{ background: 'var(--warning-alpha)', color: 'var(--warning)' }}>
                         <CheckCircle size={24} />
                     </div>
                     <div className="stat-info">
@@ -3141,7 +3252,100 @@ function GlobalProblems({ mode = 'all' }) {
                 </div>
             )}
 
-            {/* Problems Grid */}
+            <div className="card glass" style={{ padding: '1.5rem', borderRadius: '1.5rem', marginBottom: '2rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                    {activeTab === 'sql' ? <Database size={20} style={{ color: '#06b6d4' }} /> : <Code size={20} style={{ color: '#3b82f6' }} />}
+                    <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                        All {activeTab === 'sql' ? 'SQL' : 'Coding'} Problems
+                    </h3>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                    <table className="dashboard-table">
+                        <thead>
+                            <tr>
+                                <th>Problem Title</th>
+                                <th>Type</th>
+                                <th>Difficulty</th>
+                                <th>Language</th>
+                                <th>Allocated</th>
+                                <th>Solved</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {displayedProblems.length === 0 ? (
+                                <tr>
+                                    <td colSpan="8" style={{ textAlign: 'center', padding: '4rem', opacity: 0.6 }}>
+                                        No {activeTab === 'sql' ? 'SQL' : 'Coding'} problems yet.
+                                    </td>
+                                </tr>
+                            ) : (
+                                displayedProblems.map((p) => {
+                                    const isSqlProblem = p.language === 'SQL' || p.type === 'SQL'
+                                    return (
+                                        <tr key={`table-${p.id}`}>
+                                            <td>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                                    <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>{p.title}</span>
+                                                    <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                        {p.description}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td><span className="problem-badge">{p.type?.toUpperCase()}</span></td>
+                                            <td>
+                                                <span style={{ color: p.difficulty === 'Easy' ? '#10b981' : p.difficulty === 'Medium' ? '#f59e0b' : '#ef4444', fontWeight: 700 }}>
+                                                    {p.difficulty}
+                                                </span>
+                                            </td>
+                                            <td>{p.language}</td>
+                                            <td>{p.allocatedCount || 0}</td>
+                                            <td>{p.completedBy?.length || 0}</td>
+                                            <td><span className={`status-badge ${p.status || 'live'}`}>{p.status || 'live'}</span></td>
+                                            <td>
+                                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        onClick={() => openAllocate(p)}
+                                                        style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.25)', color: '#3b82f6', padding: '0.45rem 0.9rem', borderRadius: '0.55rem', cursor: 'pointer', fontSize: '0.8rem' }}
+                                                    >
+                                                        Allocate
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setSelectedProblemForTestCases(p)}
+                                                        disabled={isSqlProblem}
+                                                        title={isSqlProblem ? 'Test cases not available for SQL problems' : 'Manage Test Cases'}
+                                                        style={{
+                                                            background: isSqlProblem ? 'rgba(100, 116, 139, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                                            border: isSqlProblem ? '1px solid rgba(100, 116, 139, 0.2)' : '1px solid rgba(16, 185, 129, 0.25)',
+                                                            color: isSqlProblem ? '#64748b' : '#10b981',
+                                                            padding: '0.45rem 0.9rem',
+                                                            borderRadius: '0.55rem',
+                                                            cursor: isSqlProblem ? 'not-allowed' : 'pointer',
+                                                            fontSize: '0.8rem',
+                                                            opacity: isSqlProblem ? 0.5 : 1
+                                                        }}
+                                                    >
+                                                        Tests
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(p.id)}
+                                                        style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#ef4444', padding: '0.45rem 0.9rem', borderRadius: '0.55rem', cursor: 'pointer', fontSize: '0.8rem' }}
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {false && (
             <div className="problem-list-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))' }}>
                 {displayedProblems.length === 0 ? (
                     <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '4rem', opacity: 0.5 }}>
@@ -3168,6 +3372,17 @@ function GlobalProblems({ mode = 'all' }) {
                                         fontWeight: 700
                                     }}>GLOBAL</span>
                                     <span className="problem-badge">{p.type?.toUpperCase()}</span>
+                                    <span style={{
+                                        padding: '3px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '0.65rem',
+                                        fontWeight: 700,
+                                        background: 'rgba(99,102,241,0.18)',
+                                        color: '#c7d2fe',
+                                        border: '1px solid rgba(99,102,241,0.35)'
+                                    }}>
+                                        {p.allocatedCount || 0} allocated
+                                    </span>
                                     <span className={`status-badge ${p.status || 'live'}`} style={{ fontSize: '0.65rem' }}>{p.status || 'Active'}</span>
                                     {p.proctoring?.enabled && (
                                         <span style={{
@@ -3233,6 +3448,12 @@ function GlobalProblems({ mode = 'all' }) {
                                         <ClipboardList size={14} /> Tests
                                     </button>
                                     <button
+                                        onClick={() => openAllocate(p)}
+                                        style={{ background: 'rgba(59, 130, 246, 0.1)', border: 'none', color: '#3b82f6', padding: '0.5rem 0.9rem', borderRadius: '0.5rem', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    >
+                                        <Users size={14} /> Allocate
+                                    </button>
+                                    <button
                                         onClick={() => handleDelete(p.id)}
                                         style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', color: '#ef4444', padding: '0.5rem 1rem', borderRadius: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}
                                     >
@@ -3244,6 +3465,7 @@ function GlobalProblems({ mode = 'all' }) {
                     ))
                 )}
             </div>
+            )}
 
             {/* Create Modal */}
             {showModal && (
@@ -3269,6 +3491,63 @@ function GlobalProblems({ mode = 'all' }) {
                     <div className="premium-form" style={adminBuilderShellStyle}>
                             <form onSubmit={handleSubmit}>
                                 <div style={{ display: 'grid', gap: '14px', marginBottom: '1.5rem' }}>
+                                    <AdminCreateSectionCard
+                                        icon={<Sparkles size={16} />}
+                                        title="AI Problem Generator"
+                                        subtitle={activeTab === 'sql' ? 'Generate a SQL problem preview, then apply it to the form' : 'Generate a coding problem preview, then apply it to the form'}
+                                        color="#8b5cf6"
+                                    >
+                                        <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'sql' ? '1fr auto auto' : '1fr auto auto auto', gap: '0.75rem', alignItems: 'end' }}>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label className="form-label">Topic</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder={activeTab === 'sql' ? 'e.g., joins, aggregates, subqueries' : 'e.g., arrays, recursion, dynamic programming'}
+                                                    value={problemAiPrompt.topic}
+                                                    onChange={(e) => setProblemAiPrompt({ ...problemAiPrompt, topic: e.target.value })}
+                                                />
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label className="form-label">Difficulty</label>
+                                                <select value={problemAiPrompt.difficulty} onChange={(e) => setProblemAiPrompt({ ...problemAiPrompt, difficulty: e.target.value })}>
+                                                    <option value="Easy">Easy</option>
+                                                    <option value="Medium">Medium</option>
+                                                    <option value="Hard">Hard</option>
+                                                </select>
+                                            </div>
+                                            {activeTab !== 'sql' && (
+                                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                                    <label className="form-label">Language</label>
+                                                    <select value={problemAiPrompt.language} onChange={(e) => setProblemAiPrompt({ ...problemAiPrompt, language: e.target.value })}>
+                                                        <option value="Python">Python</option>
+                                                        <option value="JavaScript">JavaScript</option>
+                                                        <option value="Java">Java</option>
+                                                        <option value="C++">C++</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                            <button type="button" className="btn-create-new" onClick={generateProblemWithAI} disabled={isGeneratingProblem} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <Sparkles size={16} /> {isGeneratingProblem ? 'Generating...' : 'Generate'}
+                                            </button>
+                                        </div>
+                                        {generatedProblemDraft && (
+                                            <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(99, 102, 241, 0.08)', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.22)' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, color: '#c4b5fd' }}>{generatedProblemDraft.title || 'Generated draft'}</div>
+                                                        <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{generatedProblemDraft.difficulty} · {generatedProblemDraft.language || generatedProblemDraft.type}</div>
+                                                    </div>
+                                                    <button type="button" className="btn-create-new" onClick={() => applyGeneratedProblemDraft(generatedProblemDraft)} style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
+                                                        <Plus size={16} /> Apply to Form
+                                                    </button>
+                                                </div>
+                                                <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
+                                                    {(generatedProblemDraft.description || '').slice(0, 240)}{(generatedProblemDraft.description || '').length > 240 ? '…' : ''}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </AdminCreateSectionCard>
+
                                     <AdminCreateSectionCard
                                         icon={<Code size={16} />}
                                         title="Problem Setup"
@@ -3505,14 +3784,6 @@ function GlobalProblems({ mode = 'all' }) {
                 </div>
             )}
 
-            {/* AI Chatbot for Problem Generation */}
-            <AIChatbot
-                context="problem"
-                isOpen={showAIChat}
-                onClose={() => setShowAIChat(false)}
-                onGenerate={handleAIGenerate}
-            />
-
             {/* Test Cases Manager Modal */}
             {selectedProblemForTestCases && (
                 <TestCasesManager
@@ -3520,6 +3791,59 @@ function GlobalProblems({ mode = 'all' }) {
                     problemTitle={selectedProblemForTestCases.title}
                     onClose={() => setSelectedProblemForTestCases(null)}
                 />
+            )}
+
+            {allocatingProblem && (
+                <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '1rem', padding: '1.5rem', width: '100%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h3 style={{ margin: 0 }}>Allocate Students</h3>
+                                <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>{allocatingProblem.title}</p>
+                            </div>
+                            <button onClick={() => setAllocatingProblem(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
+                        </div>
+
+                        <input
+                            type="text"
+                            placeholder="Search students..."
+                            value={allocSearch}
+                            onChange={e => setAllocSearch(e.target.value)}
+                            style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text)', fontSize: '0.85rem' }}
+                        />
+
+                        <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
+                            <button onClick={() => setSelectedStudents(new Set(orgStudents.map(s => String(s.id))))} style={{ background: 'var(--primary-alpha)', border: '1px solid var(--primary)', color: 'var(--primary)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Select All</button>
+                            <button onClick={() => setSelectedStudents(new Set())} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Clear</button>
+                            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>{selectedStudents.size} selected</span>
+                        </div>
+
+                        <div style={{ overflowY: 'auto', flex: 1, border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                            {orgStudents.length === 0 ? (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No students found in this organization.</div>
+                            ) : (
+                                orgStudents
+                                    .filter(s => !allocSearch || s.name?.toLowerCase().includes(allocSearch.toLowerCase()) || s.email?.toLowerCase().includes(allocSearch.toLowerCase()))
+                                    .map(s => (
+                                        <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', background: selectedStudents.has(String(s.id)) ? 'var(--primary-alpha)' : 'transparent' }}>
+                                            <input type="checkbox" checked={selectedStudents.has(String(s.id))} onChange={() => toggleStudent(s.id)} style={{ accentColor: 'var(--primary)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{s.name}</div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.email}{s.batch ? ` · ${s.batch}` : ''}</div>
+                                            </div>
+                                        </label>
+                                    ))
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button onClick={() => setAllocatingProblem(null)} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
+                            <button onClick={saveAllocations} disabled={allocSaving} style={{ padding: '0.5rem 1.25rem', borderRadius: '6px', background: 'var(--primary)', color: 'white', border: 'none', cursor: allocSaving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                                {allocSaving ? 'Saving...' : 'Save Allocation'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )
@@ -4646,11 +4970,11 @@ function GlobalTestsAdmin() {
                                             {/* AI Coding Problem Generator */}
                                             <div className="card glass" style={{ marginBottom: '1.5rem', padding: '1.5rem', background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(6,182,212,0.05))', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '16px' }}>
                                                 <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 1rem', fontSize: '1.1rem', color: '#10b981' }}>
-                                                    <Bot size={20} /> AI Coding Problem Generator
+                                                    <Sparkles size={20} /> AI Question Generator
                                                 </h4>
                                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
                                                     <div className="form-group" style={{ marginBottom: 0 }}>
-                                                        <label className="form-label" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>TOPIC / CONCEPT</label>
+                                                        <label className="form-label" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>TOPIC</label>
                                                         <input type="text" placeholder="e.g., Two Sum, Binary Search, Linked Lists" value={codingAiPrompt.topic} onChange={e => setCodingAiPrompt({ ...codingAiPrompt, topic: e.target.value })} style={{ width: '100%' }} />
                                                     </div>
                                                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -4677,9 +5001,9 @@ function GlobalTestsAdmin() {
                                                 {generatedCodingProblems.length > 0 && (
                                                     <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(16,185,129,0.1)', borderRadius: '12px', border: '1px solid rgba(16,185,129,0.2)' }}>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                                                            <span style={{ fontWeight: 600, color: '#10b981' }}>✓ Generated {generatedCodingProblems.length} Problem(s)</span>
+                                                            <span style={{ fontWeight: 600, color: '#10b981' }}>✓ Generated {generatedCodingProblems.length} coding question(s)</span>
                                                             <button type="button" className="btn-create-new" onClick={addGeneratedCodingToSection} style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-                                                                <Plus size={16} /> Add to Section
+                                                                <Plus size={16} /> Add to Test
                                                             </button>
                                                         </div>
                                                         {generatedCodingProblems.map((p, i) => (
@@ -4695,7 +5019,7 @@ function GlobalTestsAdmin() {
                                             {/* Manual Entry Section */}
                                             <div style={{ padding: '1.5rem', background: 'var(--bg-secondary)', borderRadius: '16px', border: '1px solid var(--border-color)' }}>
                                                 <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 1rem', fontSize: '1rem', color: 'var(--text)' }}>
-                                                    <Code size={18} /> Manual Entry
+                                                    <Code size={18} /> Add Question Manually
                                                 </h4>
                                                 <div className="form-group" style={{ marginBottom: '1rem' }}>
                                                     <label className="form-label">Problem description</label>
@@ -4859,11 +5183,11 @@ function GlobalTestsAdmin() {
                                             {/* AI SQL Problem Generator */}
                                             <div className="card glass" style={{ marginBottom: '1.5rem', padding: '1.5rem', background: 'linear-gradient(135deg, rgba(6,182,212,0.1), rgba(139,92,246,0.05))', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '16px' }}>
                                                 <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 1rem', fontSize: '1.1rem', color: '#06b6d4' }}>
-                                                    <Bot size={20} /> AI SQL Problem Generator
+                                                    <Sparkles size={20} /> AI Question Generator
                                                 </h4>
                                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
                                                     <div className="form-group" style={{ marginBottom: 0 }}>
-                                                        <label className="form-label" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>TOPIC / CONCEPT</label>
+                                                        <label className="form-label" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>TOPIC</label>
                                                         <input type="text" placeholder="e.g., JOINs, Aggregate Functions, Subqueries" value={sqlAiPrompt.topic} onChange={e => setSqlAiPrompt({ ...sqlAiPrompt, topic: e.target.value })} style={{ width: '100%' }} />
                                                     </div>
                                                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -4881,9 +5205,9 @@ function GlobalTestsAdmin() {
                                                 {generatedSqlProblems.length > 0 && (
                                                     <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(6,182,212,0.1)', borderRadius: '12px', border: '1px solid rgba(6,182,212,0.2)' }}>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                                                            <span style={{ fontWeight: 600, color: '#06b6d4' }}>✓ Generated {generatedSqlProblems.length} Problem(s)</span>
+                                                            <span style={{ fontWeight: 600, color: '#06b6d4' }}>✓ Generated {generatedSqlProblems.length} SQL question(s)</span>
                                                             <button type="button" className="btn-create-new" onClick={addGeneratedSqlToSection} style={{ background: 'linear-gradient(135deg, #06b6d4, #0891b2)' }}>
-                                                                <Plus size={16} /> Add to Section
+                                                                <Plus size={16} /> Add to Test
                                                             </button>
                                                         </div>
                                                         {generatedSqlProblems.map((p, i) => (
@@ -4899,7 +5223,7 @@ function GlobalTestsAdmin() {
                                             {/* Manual Entry Section */}
                                             <div style={{ padding: '1.5rem', background: 'var(--bg-secondary)', borderRadius: '16px', border: '1px solid var(--border-color)' }}>
                                                 <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 1rem', fontSize: '1rem', color: 'var(--text)' }}>
-                                                    <Database size={18} /> Manual Entry
+                                                    <Database size={18} /> Add Question Manually
                                                 </h4>
                                                 <div className="form-group" style={{ marginBottom: '1rem' }}>
                                                     <label className="form-label">Question / instruction</label>
@@ -6884,3 +7208,4 @@ function ErrorMonitoringDashboard({ user }) {
 }
 
 export default AdminPortal
+

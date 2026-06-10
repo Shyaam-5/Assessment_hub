@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
-from database import get_pool
+from database import get_pool, get_primary_pool
 from routes.auth import _has_any_permission, assert_assessment_limit_for_actor
 from services.pagination import paginated_response
 from services.otp_delivery import send_exam_allocated_email
@@ -165,30 +165,33 @@ async def student_problems(student_id: str, request: Request):
         raise HTTPException(401, "Missing user context")
 
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
+
+    if actor_id != student_id:
+        async with primary_pool.acquire() as primary_conn:
+            async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                await primary_cur.execute("SELECT role FROM users WHERE id = %s", (actor_id,))
+                actor = await primary_cur.fetchone()
+                if not actor:
+                    raise HTTPException(401, "Invalid user context")
+
+                await primary_cur.execute("SELECT mentor_id FROM users WHERE id = %s", (student_id,))
+                stu = await primary_cur.fetchone()
+                if not stu:
+                    raise HTTPException(404, "Student not found")
+
+        actor_role = (actor.get("role") or "").lower()
+        can_view = await _has_any_permission(actor_id, ["tests.view"])
+        if can_view and actor_role in {"admin", "organization_admin"}:
+            pass
+        elif can_view and actor_role == "mentor":
+            if stu.get("mentor_id") != actor_id:
+                raise HTTPException(403, "Student is not allocated to this mentor")
+        else:
+            raise HTTPException(403, "Forbidden scope")
+
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-            await cur.execute("SELECT role FROM users WHERE id = %s", (actor_id,))
-            actor = await cur.fetchone()
-            if not actor:
-                raise HTTPException(401, "Invalid user context")
-
-            await cur.execute("SELECT mentor_id FROM users WHERE id = %s", (student_id,))
-            stu = await cur.fetchone()
-            if not stu:
-                raise HTTPException(404, "Student not found")
-
-            actor_role = (actor.get("role") or "").lower()
-            can_view = await _has_any_permission(actor_id, ["tests.view"])
-            if actor_id != student_id:
-                # Allow only privileged staff, and mentors only for their own students.
-                if can_view and actor_role in {"admin", "organization_admin"}:
-                    pass
-                elif can_view and actor_role == "mentor":
-                    if stu.get("mentor_id") != actor_id:
-                        raise HTTPException(403, "Student is not allocated to this mentor")
-                else:
-                    raise HTTPException(403, "Forbidden scope")
-
             await cur.execute(
                 """
                 SELECT p.* FROM problems p
@@ -309,17 +312,32 @@ async def get_problem_allocations(problem_id: str, request: Request):
     if not await _has_any_permission(actor_id, ["coding.assign", "coding.create"]):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(
-                """SELECT a.student_id, u.name, u.email
+                """SELECT a.student_id
                    FROM problem_student_allocations a
-                   JOIN users u ON u.id = a.student_id
-                   WHERE a.problem_id = %s ORDER BY u.name""",
+                   WHERE a.problem_id = %s""",
                 (problem_id,),
             )
             rows = await cur.fetchall()
-    return [{"studentId": r["student_id"], "name": r["name"], "email": r["email"]} for r in rows]
+    student_ids = [str(r["student_id"]) for r in (rows or []) if r.get("student_id")]
+    if not student_ids:
+        return []
+
+    async with primary_pool.acquire() as primary_conn:
+        async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+            placeholders = ",".join(["%s"] * len(student_ids))
+            await primary_cur.execute(
+                f"""SELECT id, name, email
+                    FROM users
+                    WHERE id IN ({placeholders})
+                    ORDER BY name""",
+                student_ids,
+            )
+            user_rows = await primary_cur.fetchall()
+    return [{"studentId": str(r["id"]), "name": r["name"], "email": r["email"]} for r in (user_rows or [])]
 
 
 @router.post("/problems/{problem_id}/allocations")
@@ -334,6 +352,7 @@ async def set_problem_allocations(problem_id: str, request: Request):
     student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
 
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT title FROM problems WHERE id = %s", (problem_id,))
@@ -344,26 +363,32 @@ async def set_problem_allocations(problem_id: str, request: Request):
 
             if student_ids:
                 placeholders = ",".join(["%s"] * len(student_ids))
-                await cur.execute(
-                    f"""
-                    SELECT DISTINCT u.id
-                    FROM users u
-                    JOIN user_role_assignments ura ON ura.user_id = u.id
-                    JOIN roles r ON r.id = ura.role_id
-                    WHERE u.id IN ({placeholders})
-                      AND u.role = 'org_user'
-                      AND ura.is_primary = 1
-                      AND (
-                        LOWER(TRIM(r.slug)) = 'exam-taker'
-                        OR LOWER(TRIM(r.name)) = 'exam taker'
-                      )
-                    """,
-                    student_ids,
-                )
-                allowed_ids = {str(r["id"]) for r in (await cur.fetchall() or [])}
+                async with primary_pool.acquire() as primary_conn:
+                    async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                        await primary_cur.execute(
+                            f"""
+                            SELECT DISTINCT u.id
+                            FROM users u
+                            LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+                            LEFT JOIN roles r ON r.id = ura.role_id
+                            WHERE u.id IN ({placeholders})
+                              AND (
+                                u.role = 'student'
+                                OR (
+                                    u.role = 'org_user'
+                                    AND (
+                                        LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
+                                        OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
+                                    )
+                                )
+                              )
+                            """,
+                            student_ids,
+                        )
+                        allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
                 invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
                 if invalid_ids:
-                    raise HTTPException(400, "Only users with Exam Taker role can be allocated")
+                    raise HTTPException(400, "Only student or exam-taker users can be allocated")
 
             await cur.execute(
                 "DELETE FROM problem_student_allocations WHERE problem_id = %s", (problem_id,)
@@ -378,14 +403,17 @@ async def set_problem_allocations(problem_id: str, request: Request):
             emails: list[tuple[str, str]] = []
             if student_ids:
                 placeholders = ",".join(["%s"] * len(student_ids))
-                await cur.execute(
-                    f"SELECT name, email FROM users WHERE id IN ({placeholders})", student_ids
-                )
-                emails = [
-                    (r.get("name") or "User", r.get("email") or "")
-                    for r in (await cur.fetchall() or [])
-                    if (r.get("email") or "").strip()
-                ]
+                async with primary_pool.acquire() as primary_conn:
+                    async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                        await primary_cur.execute(
+                            f"SELECT name, email FROM users WHERE id IN ({placeholders})",
+                            student_ids,
+                        )
+                        emails = [
+                            (r.get("name") or "User", r.get("email") or "")
+                            for r in (await primary_cur.fetchall() or [])
+                            if (r.get("email") or "").strip()
+                        ]
         await conn.commit()
 
     for name, email in emails:
