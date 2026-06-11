@@ -132,6 +132,25 @@ _ALLOC_TABLE_DDL = """
 def _sandbox_names(test_id: int) -> dict[str, str]:
     return {t: f"st{test_id}_{t}" for t in BASE_TABLES}
 
+
+def _rewrite_sql_to_sandbox(sql_query: str, sandbox_names: dict[str, str]) -> str:
+    rewritten = sql_query
+    for base_name, sandbox_name in sandbox_names.items():
+        rewritten = re.sub(rf"\b{re.escape(base_name)}\b", sandbox_name, rewritten, flags=re.IGNORECASE)
+    return rewritten
+
+
+def _normalize_sql_problem(problem: dict, sandbox_names: dict[str, str]) -> dict:
+    normalized = dict(problem or {})
+    for key, value in list(normalized.items()):
+        if not isinstance(value, str):
+            continue
+        updated = value
+        for base_name, sandbox_name in sandbox_names.items():
+            updated = re.sub(rf"\b{re.escape(sandbox_name)}\b", base_name, updated, flags=re.IGNORECASE)
+        normalized[key] = updated
+    return normalized
+
 def _safe_json(val: Any) -> Any:
     if val is None: return None
     return json.loads(val) if isinstance(val, str) else val
@@ -851,13 +870,17 @@ async def sql_start(attempt_id: int, request: Request):
         raise HTTPException(404, "Attempt not found")
     test_id = attempt.get("test_id") or attempt.get("tid")
     existing_subs = _safe_json(attempt.get("sql_submissions")) or {}
+    table_names = _sandbox_names(test_id)
     if attempt.get("sql_problems"):
-        return {"problems": _safe_json(attempt["sql_problems"]), "existing_submissions": existing_subs, "duration_minutes": attempt.get("sql_duration_minutes")}
+        problems = [
+            _normalize_sql_problem(problem, table_names)
+            for problem in (_safe_json(attempt["sql_problems"]) or [])
+        ]
+        return {"problems": problems, "existing_submissions": existing_subs, "duration_minutes": attempt.get("sql_duration_minutes")}
     try:
         await _create_sandbox(test_id)
     except Exception as e:
         print(f"Sandbox creation skipped: {e}")
-    table_names = _sandbox_names(test_id)
     skills = _safe_json(attempt.get("skills")) or []
     problems = await generate_sql_problems(skills, attempt.get("sql_count") or 3, table_names)
     pool = await get_pool()
@@ -865,7 +888,8 @@ async def sql_start(attempt_id: int, request: Request):
         async with conn.cursor() as cur:
             await cur.execute("UPDATE skill_test_attempts SET sql_problems=%s WHERE id=%s", (_json_str(problems), attempt_id))
         await conn.commit()
-    return {"problems": problems, "existing_submissions": {}, "duration_minutes": attempt.get("sql_duration_minutes")}
+    visible_problems = [_normalize_sql_problem(problem, table_names) for problem in problems]
+    return {"problems": visible_problems, "existing_submissions": {}, "duration_minutes": attempt.get("sql_duration_minutes")}
 
 @router.post("/sql/regenerate/{attempt_id}")
 async def sql_regenerate(attempt_id: int):
@@ -896,6 +920,7 @@ async def sql_run(request: Request, body: dict = Body(...)):
     if not sql_query.upper().startswith("SELECT"):
         return {"success": False, "error": "Only SELECT queries are allowed in this test environment."}
     allowed: list[str] = []
+    sandbox_names: dict[str, str] = {}
     if attempt_id:
         await _load_attempt_for_actor(request, int(attempt_id))
         pool = await get_pool()
@@ -904,10 +929,12 @@ async def sql_run(request: Request, body: dict = Body(...)):
                 await cur.execute("SELECT test_id FROM skill_test_attempts WHERE id=%s", (attempt_id,))
                 row = await cur.fetchone()
                 if row:
-                    allowed = list(_sandbox_names(row["test_id"]).values())
+                    sandbox_names = _sandbox_names(row["test_id"])
+                    allowed = list(sandbox_names.values())
     if not allowed:
         return {"success": False, "error": "Could not determine test context. Please refresh."}
-    referenced = [m.group(1).lower() for m in re.finditer(r"(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql_query, re.IGNORECASE)]
+    normalized_query = _rewrite_sql_to_sandbox(sql_query, sandbox_names)
+    referenced = [m.group(1).lower() for m in re.finditer(r"(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*)", normalized_query, re.IGNORECASE)]
     bad = [t for t in referenced if t not in allowed]
     if bad:
         return {"success": False, "error": f"Access denied. Allowed: {', '.join(allowed)}. Blocked: {', '.join(bad)}"}
@@ -915,7 +942,7 @@ async def sql_run(request: Request, body: dict = Body(...)):
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql_query)
+                await cur.execute(normalized_query)
                 rows = await cur.fetchall()
         columns = list(rows[0].keys()) if rows else []
         return {"success": True, "columns": columns, "rows": rows[:100], "message": "Query returned 0 rows" if not rows else None}
@@ -945,7 +972,9 @@ async def sql_evaluate_ep(request: Request, body: dict = Body(...)):
     problem = next((p for p in problems if str(p.get("id")) == str(problem_id)), None)
     if not problem:
         raise HTTPException(404, "Problem not found")
-    evaluation = await evaluate_sql_query(problem, sql_query)
+    test_id = attempt.get("test_id")
+    visible_problem = _normalize_sql_problem(problem, _sandbox_names(test_id)) if test_id else problem
+    evaluation = await evaluate_sql_query(visible_problem, sql_query)
     passed = evaluation.get("passed", False)
     feedback = evaluation.get("feedback", "âœ… Correct!" if passed else "âŒ Incorrect query.")
     subs = _safe_json(attempt.get("sql_submissions")) or {}

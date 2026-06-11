@@ -1,9 +1,3 @@
-import { useEffect } from 'react';
-
-export default function EnvironmentScanGate({ onApproved }) {
-  useEffect(() => {
-    onApproved?.();
-  }, [onApproved]);
-
+export default function EnvironmentScanGate() {
   return null;
 }

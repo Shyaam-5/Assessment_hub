@@ -1901,7 +1901,7 @@ function GlobalTests({ user }) {
         try {
             const res = await axios.get(`${API_BASE}/global-tests/${test.id}`)
             pendingTestRef.current = res.data
-            setScanGate({ test: res.data })
+            handleScanApproved()
         } catch (e) {
             alert(e.response?.data?.error || 'Failed to load test')
         }
@@ -2398,7 +2398,7 @@ function AptitudeTests({ user }) {
         try {
             const response = await axios.get(`${API_BASE}/aptitude/${test.id}`)
             pendingTestRef.current = response.data
-            setScanGate({ test: response.data })
+            handleScanApproved()
         } catch (error) {
             alert('Error loading test')
         }

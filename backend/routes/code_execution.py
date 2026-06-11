@@ -19,6 +19,57 @@ router = APIRouter(prefix="/api", tags=["code_execution"])
 logger = LogConfig.get_logger(__name__)
 audit_logger = get_audit_logger()
 
+DEFAULT_SQL_SCHEMA = (
+    "CREATE TABLE employees (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  department VARCHAR(100),\n"
+    "  salary DECIMAL(10,2),\n"
+    "  hire_date DATE,\n"
+    "  manager_id INT\n"
+    ");\n"
+    "INSERT INTO employees VALUES\n"
+    "(1,'Alice Johnson','Engineering',95000,'2020-03-15',NULL),\n"
+    "(2,'Bob Smith','Engineering',88000,'2021-07-01',1),\n"
+    "(3,'Carol Williams','Marketing',72000,'2019-11-20',NULL),\n"
+    "(4,'David Brown','Marketing',68000,'2022-01-10',3),\n"
+    "(5,'Eve Davis','Sales',76000,'2020-06-25',NULL);\n\n"
+    "CREATE TABLE departments (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  budget DECIMAL(12,2),\n"
+    "  location VARCHAR(100)\n"
+    ");\n"
+    "INSERT INTO departments VALUES\n"
+    "(1,'Engineering',500000,'New York'),\n"
+    "(2,'Marketing',300000,'San Francisco'),\n"
+    "(3,'Sales',350000,'Chicago');\n\n"
+    "CREATE TABLE projects (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  department_id INT,\n"
+    "  start_date DATE,\n"
+    "  end_date DATE,\n"
+    "  status VARCHAR(50)\n"
+    ");\n"
+    "INSERT INTO projects VALUES\n"
+    "(1,'Website Redesign',1,'2024-01-15','2024-06-30','completed'),\n"
+    "(2,'Mobile App',1,'2024-03-01','2024-12-31','in_progress'),\n"
+    "(3,'Q1 Campaign',2,'2024-01-01','2024-03-31','completed');\n\n"
+    "CREATE TABLE orders (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  customer_name VARCHAR(100),\n"
+    "  product VARCHAR(100),\n"
+    "  quantity INT,\n"
+    "  price DECIMAL(10,2),\n"
+    "  order_date DATE\n"
+    ");\n"
+    "INSERT INTO orders VALUES\n"
+    "(1,'John Doe','Laptop',2,1200,'2024-01-15'),\n"
+    "(2,'Jane Smith','Keyboard',5,75,'2024-01-20'),\n"
+    "(3,'Bob Johnson','Monitor',3,450,'2024-02-10');"
+)
+
 
 def _client_ip(request: Request) -> str:
     if "x-forwarded-for" in request.headers:
@@ -292,6 +343,15 @@ async def _load_problem(problem_id: str) -> dict | None:
             return await cur.fetchone()
 
 
+def _resolve_sql_schema(explicit_schema: str | None, problem: dict | None = None) -> str:
+    if explicit_schema and str(explicit_schema).strip():
+        return str(explicit_schema)
+    problem_schema = (problem or {}).get("sql_schema")
+    if problem_schema and str(problem_schema).strip():
+        return str(problem_schema)
+    return DEFAULT_SQL_SCHEMA
+
+
 async def _run_against_test_cases(language: str, code: str, sql_schema: str, test_cases: list[dict]) -> list[dict]:
     results = []
     for case in test_cases:
@@ -339,7 +399,7 @@ async def run_code(body: RunRequest, request: Request):
     try:
         # SQL execution: use DuckDB (in-memory, free)
         if lang_lower in ["sql", "duckdb", "sqlite3"]:
-            result = await _execute_sql_duckdb(body.sqlSchema, body.code)
+            result = await _execute_sql_duckdb(_resolve_sql_schema(body.sqlSchema), body.code)
             audit_logger.log_event(
                 AuditEventType.RESOURCE_ACCESSED,
                 user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
@@ -404,7 +464,7 @@ async def run_with_tests(body: RunWithTestsRequest, request: Request):
     if not test_cases:
         return {"success": False, "error": "No test cases configured for this problem", "testResults": []}
 
-    sql_schema = body.sqlSchema or problem.get("sql_schema") or ""
+    sql_schema = _resolve_sql_schema(body.sqlSchema, problem)
     test_results = await _run_against_test_cases(body.language, body.code, sql_schema, test_cases)
     passed = sum(1 for result in test_results if result.get("passed"))
     total = len(test_results)

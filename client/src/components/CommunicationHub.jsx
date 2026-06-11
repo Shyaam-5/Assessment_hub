@@ -845,7 +845,7 @@ export default function CommunicationHub({ user }) {
     // Start a test attempt — show scan gate first
     const startTest = (test) => {
         pendingTestRef.current = test
-        setScanGate(test)
+        handleScanApproved()
     }
 
     const _doStartTest = async (test) => {

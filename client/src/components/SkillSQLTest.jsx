@@ -75,17 +75,29 @@ export default function SkillSQLTest({ attemptId, attemptData, onComplete, onFai
     const runQuery = async () => {
         const p = problems[currentIdx];
         if (!p) return;
+        const query = (queries[p.id] || '').trim();
+        if (!query) {
+            setError('Enter a SQL query before running it.');
+            setRunResult(null);
+            return;
+        }
         setRunning(true);
+        setError('');
         setRunResult(null);
         setEvalResult(null);
         try {
             const { data } = await axios.post(`${API}/api/skill-tests/sql/run`, {
-                query: queries[p.id] || '',
+                query,
                 attemptId
             });
             setRunResult(data);
+            if (!data?.success) {
+                setError(data?.error || 'Failed to run query.');
+            }
         } catch (err) {
-            setRunResult({ success: false, error: err.message });
+            const msg = err.response?.data?.error || err.message || 'Failed to run query.';
+            setRunResult({ success: false, error: msg });
+            setError(msg);
         } finally {
             setRunning(false);
         }
@@ -94,32 +106,41 @@ export default function SkillSQLTest({ attemptId, attemptData, onComplete, onFai
     const evaluateQuery = async () => {
         const p = problems[currentIdx];
         if (!p) return;
+        const query = (queries[p.id] || '').trim();
+        if (!query) {
+            setError('Enter a SQL query before submitting it.');
+            setEvalResult(null);
+            return;
+        }
         setEvaluating(true);
+        setError('');
         setEvalResult(null);
         try {
             const { data } = await axios.post(`${API}/api/skill-tests/sql/evaluate`, {
-                attemptId, problemId: p.id, query: queries[p.id] || ''
+                attemptId, problemId: p.id, query
             });
             setEvalResult(data);
             if (data.passed) {
                 setSubmissions(prev => ({ ...prev, [String(p.id)]: { passed: true } }));
             }
         } catch (err) {
-            setError(err.response?.data?.error || err.message);
+            setError(err.response?.data?.error || err.message || 'Failed to submit query.');
         } finally {
             setEvaluating(false);
         }
     };
 
     const finishSQL = async () => {
+        if (finishing) return;
         setShowFinishConfirm(false);
         setFinishing(true);
+        setError('');
         try {
             const { data } = await axios.post(`${API}/api/skill-tests/sql/finish/${attemptId}`);
             setResult(data);
             setShowContinue(true);
         } catch (err) {
-            setError(err.response?.data?.error || err.message);
+            setError(err.response?.data?.error || err.message || 'Failed to finish SQL section.');
             setFinishing(false);
         }
     };

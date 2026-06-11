@@ -15,6 +15,57 @@ from audit_logger import get_audit_logger, AuditEventType
 router = APIRouter(prefix="/api", tags=["problems"])
 audit_logger = get_audit_logger()
 
+DEFAULT_SQL_SCHEMA = (
+    "CREATE TABLE employees (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  department VARCHAR(100),\n"
+    "  salary DECIMAL(10,2),\n"
+    "  hire_date DATE,\n"
+    "  manager_id INT\n"
+    ");\n"
+    "INSERT INTO employees VALUES\n"
+    "(1,'Alice Johnson','Engineering',95000,'2020-03-15',NULL),\n"
+    "(2,'Bob Smith','Engineering',88000,'2021-07-01',1),\n"
+    "(3,'Carol Williams','Marketing',72000,'2019-11-20',NULL),\n"
+    "(4,'David Brown','Marketing',68000,'2022-01-10',3),\n"
+    "(5,'Eve Davis','Sales',76000,'2020-06-25',NULL);\n\n"
+    "CREATE TABLE departments (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  budget DECIMAL(12,2),\n"
+    "  location VARCHAR(100)\n"
+    ");\n"
+    "INSERT INTO departments VALUES\n"
+    "(1,'Engineering',500000,'New York'),\n"
+    "(2,'Marketing',300000,'San Francisco'),\n"
+    "(3,'Sales',350000,'Chicago');\n\n"
+    "CREATE TABLE projects (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  department_id INT,\n"
+    "  start_date DATE,\n"
+    "  end_date DATE,\n"
+    "  status VARCHAR(50)\n"
+    ");\n"
+    "INSERT INTO projects VALUES\n"
+    "(1,'Website Redesign',1,'2024-01-15','2024-06-30','completed'),\n"
+    "(2,'Mobile App',1,'2024-03-01','2024-12-31','in_progress'),\n"
+    "(3,'Q1 Campaign',2,'2024-01-01','2024-03-31','completed');\n\n"
+    "CREATE TABLE orders (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  customer_name VARCHAR(100),\n"
+    "  product VARCHAR(100),\n"
+    "  quantity INT,\n"
+    "  price DECIMAL(10,2),\n"
+    "  order_date DATE\n"
+    ");\n"
+    "INSERT INTO orders VALUES\n"
+    "(1,'John Doe','Laptop',2,1200,'2024-01-15'),\n"
+    "(2,'Jane Smith','Keyboard',5,75,'2024-01-20'),\n"
+    "(3,'Bob Johnson','Monitor',3,450,'2024-02-10');"
+)
+
 
 def _client_ip(request: Request) -> str:
     if "x-forwarded-for" in request.headers:
@@ -68,6 +119,9 @@ def _enrich_problem(p: dict) -> dict:
         except Exception:
             raw_test_cases = []
     p["testCases"] = raw_test_cases if isinstance(raw_test_cases, list) else []
+    is_sql_problem = str(p.get("type") or "").upper() == "SQL" or str(p.get("language") or "").upper() == "SQL"
+    if is_sql_problem and not p["sqlSchema"]:
+        p["sqlSchema"] = DEFAULT_SQL_SCHEMA
     p["createdAt"] = str(p.pop("created_at", ""))
 
     # Proctoring settings mapped to what frontend expects for code editor
@@ -237,6 +291,9 @@ async def create_problem(body: ProblemCreate, request: Request):
     if not await _has_any_permission(actor_id, ["coding.create"]):
         raise HTTPException(status_code=403, detail="Permission denied")
     await assert_assessment_limit_for_actor(actor_id)
+    sql_schema = body.sqlSchema
+    if (body.type or "").upper() == "SQL" or (body.language or "").upper() == "SQL":
+        sql_schema = sql_schema or DEFAULT_SQL_SCHEMA
     problem_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     normalized_deadline = body.deadline or None
@@ -258,7 +315,7 @@ async def create_problem(body: ProblemCreate, request: Request):
                     problem_id, body.mentorId, body.title, body.description,
                     body.sampleInput, body.expectedOutput,
                     body.difficulty, body.type, body.language, body.status, normalized_deadline,
-                    body.sqlSchema, body.expectedQueryResult,
+                    sql_schema, body.expectedQueryResult,
                     str(body.enableProctoring).lower(),
                     str(body.enableVideoAudio).lower(),
                     str(body.enableMicrophone).lower(),
@@ -285,7 +342,9 @@ async def create_problem(body: ProblemCreate, request: Request):
         action="Problem created",
         details={"title": body.title, "type": body.type, "difficulty": body.difficulty, "mentorId": body.mentorId},
     )
-    return {"id": problem_id, **body.model_dump(), "completedBy": [], "createdAt": str(now)}
+    payload = body.model_dump()
+    payload["sqlSchema"] = sql_schema
+    return {"id": problem_id, **payload, "completedBy": [], "createdAt": str(now)}
 
 
 @router.delete("/problems/{problem_id}")

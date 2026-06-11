@@ -25,6 +25,10 @@ function SQLValidator({ query, schemaContext }) {
         init()
     }, [])
 
+    useEffect(() => {
+        setExecutionResult(null)
+    }, [query, schemaContext])
+
     const executeAndVisualize = async () => {
         if (!query?.trim() || !SQL) return
         setExecuting(true)

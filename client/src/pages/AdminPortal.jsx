@@ -31,6 +31,57 @@ const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/a
 const COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b']
 const ADMIN_ID = 'admin-001'
 const ASSESSMENT_IMPORT_ACCEPT = '.csv,.xlsx'
+const DEFAULT_SQL_SCHEMA = `CREATE TABLE employees (
+  id INT PRIMARY KEY,
+  name VARCHAR(100),
+  department VARCHAR(100),
+  salary DECIMAL(10,2),
+  hire_date DATE,
+  manager_id INT
+);
+INSERT INTO employees VALUES
+(1,'Alice Johnson','Engineering',95000,'2020-03-15',NULL),
+(2,'Bob Smith','Engineering',88000,'2021-07-01',1),
+(3,'Carol Williams','Marketing',72000,'2019-11-20',NULL),
+(4,'David Brown','Marketing',68000,'2022-01-10',3),
+(5,'Eve Davis','Sales',76000,'2020-06-25',NULL);
+
+CREATE TABLE departments (
+  id INT PRIMARY KEY,
+  name VARCHAR(100),
+  budget DECIMAL(12,2),
+  location VARCHAR(100)
+);
+INSERT INTO departments VALUES
+(1,'Engineering',500000,'New York'),
+(2,'Marketing',300000,'San Francisco'),
+(3,'Sales',350000,'Chicago');
+
+CREATE TABLE projects (
+  id INT PRIMARY KEY,
+  name VARCHAR(100),
+  department_id INT,
+  start_date DATE,
+  end_date DATE,
+  status VARCHAR(50)
+);
+INSERT INTO projects VALUES
+(1,'Website Redesign',1,'2024-01-15','2024-06-30','completed'),
+(2,'Mobile App',1,'2024-03-01','2024-12-31','in_progress'),
+(3,'Q1 Campaign',2,'2024-01-01','2024-03-31','completed');
+
+CREATE TABLE orders (
+  id INT PRIMARY KEY,
+  customer_name VARCHAR(100),
+  product VARCHAR(100),
+  quantity INT,
+  price DECIMAL(10,2),
+  order_date DATE
+);
+INSERT INTO orders VALUES
+(1,'John Doe','Laptop',2,1200,'2024-01-15'),
+(2,'Jane Smith','Keyboard',5,75,'2024-01-20'),
+(3,'Bob Johnson','Monitor',3,450,'2024-02-10');`
 
 const normalizeImportHeader = (header) => String(header || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '')
 
@@ -2793,7 +2844,7 @@ function GlobalProblems({ mode = 'all' }) {
         deadline: '',
         status: 'live',
         // SQL specific fields
-        sqlSchema: '',
+        sqlSchema: DEFAULT_SQL_SCHEMA,
         expectedQueryResult: '',
         enableProctoring: false,
         enableVideoAudio: false,
@@ -2833,7 +2884,7 @@ function GlobalProblems({ mode = 'all' }) {
             description: '',
             sampleInput: '',
             expectedOutput: '',
-            sqlSchema: '',
+            sqlSchema: activeTab === 'sql' ? DEFAULT_SQL_SCHEMA : '',
             expectedQueryResult: ''
         }))
     }, [activeTab])
@@ -2848,7 +2899,7 @@ function GlobalProblems({ mode = 'all' }) {
             description: generated.description || '',
             sampleInput: isSQL ? '' : (generated.sampleInput || ''),
             expectedOutput: isSQL ? '' : (generated.expectedOutput || ''),
-            sqlSchema: isSQL ? (generated.sqlSchema || generated.schema || '') : '',
+            sqlSchema: isSQL ? (generated.sqlSchema || generated.schema || DEFAULT_SQL_SCHEMA) : '',
             expectedQueryResult: isSQL ? (generated.expectedQueryResult || generated.expectedResult || '') : '',
             deadline: problem.deadline,
             status: generated.status || 'live',
@@ -2982,7 +3033,7 @@ function GlobalProblems({ mode = 'all' }) {
             setProblem({
                 title: '', type: 'Coding', language: 'Python', difficulty: 'Medium',
                 description: '', sampleInput: '', expectedOutput: '', deadline: '', status: 'live',
-                sqlSchema: '', expectedQueryResult: '',
+                sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '',
                 enableProctoring: false, enableVideoAudio: false, enableMicrophone: false, disableCopyPaste: false, trackTabSwitches: false, maxTabSwitches: 3,
                 detectPhoneUsage: false, detectCameraBlocking: false, enforceFullscreen: false,
                 enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, autoSubmitOnViolation: false
@@ -3167,7 +3218,7 @@ function GlobalProblems({ mode = 'all' }) {
                                     language: activeTab === 'sql' ? 'SQL' : 'Python'
                                 })
                                 if (activeTab === 'sql') {
-                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: '', expectedQueryResult: '' }))
+                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '' }))
                                 } else {
                                     setProblem(prev => ({
                                         ...prev,
@@ -3177,7 +3228,7 @@ function GlobalProblems({ mode = 'all' }) {
                                         description: '',
                                         sampleInput: '',
                                         expectedOutput: '',
-                                        sqlSchema: '',
+                                        sqlSchema: activeTab === 'sql' ? DEFAULT_SQL_SCHEMA : '',
                                         expectedQueryResult: ''
                                     }))
                                 }
@@ -3211,7 +3262,7 @@ function GlobalProblems({ mode = 'all' }) {
                                     language: activeTab === 'sql' ? 'SQL' : 'Python'
                                 })
                                 if (activeTab === 'sql') {
-                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: '', expectedQueryResult: '' }))
+                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '' }))
                                 } else {
                                     setProblem((prev) => ({
                                         ...prev,
@@ -3221,7 +3272,7 @@ function GlobalProblems({ mode = 'all' }) {
                                         description: '',
                                         sampleInput: '',
                                         expectedOutput: '',
-                                        sqlSchema: '',
+                                        sqlSchema: activeTab === 'sql' ? DEFAULT_SQL_SCHEMA : '',
                                         expectedQueryResult: '',
                                     }))
                                 }
