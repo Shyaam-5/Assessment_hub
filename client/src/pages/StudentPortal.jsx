@@ -24,6 +24,62 @@ import './Portal.css'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 
+const normalizeAssignedTime = (value) => {
+    if (!value) return null
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
+}
+
+async function fetchAssignedAssessments(studentId) {
+    const requests = [
+        axios.get(`${API_BASE}/global-tests`, { params: { status: 'live', studentId } }).then((res) => (res.data || []).map((test) => ({
+            id: `global-${test.id}`,
+            type: 'Global Test',
+            title: test.title,
+            start: normalizeAssignedTime(test.startTime || test.start_time),
+            deadline: normalizeAssignedTime(test.deadline),
+            path: '/student/global-tests',
+        }))),
+        axios.get(`${API_BASE}/aptitude`, { params: { status: 'live' } }).then((res) => (res.data || []).map((test) => ({
+            id: `aptitude-${test.id}`,
+            type: 'Aptitude',
+            title: test.title,
+            start: normalizeAssignedTime(test.startTime || test.start_time),
+            deadline: normalizeAssignedTime(test.deadline),
+            path: '/student/aptitude',
+        }))),
+        axios.get(`${API_BASE}/skill-tests/student/available`, { params: { studentId } }).then((res) => (res.data || []).map((test) => ({
+            id: `skill-${test.id}`,
+            type: 'Skill Test',
+            title: test.title,
+            start: normalizeAssignedTime(test.start_time || test.startTime),
+            deadline: normalizeAssignedTime(test.deadline),
+            path: '/student/skill-tests',
+        }))),
+        axios.get(`${API_BASE}/communication/tests/student/available`, { params: { studentId } }).then((res) => (res.data || []).map((test) => ({
+            id: `communication-${test.id}`,
+            type: 'Communication',
+            title: test.title,
+            start: normalizeAssignedTime(test.start_time || test.startTime),
+            deadline: normalizeAssignedTime(test.deadline),
+            path: '/student/communication',
+        }))),
+    ]
+    const settled = await Promise.allSettled(requests)
+    const now = new Date()
+    return settled
+        .filter((result) => result.status === 'fulfilled')
+        .flatMap((result) => result.value)
+        .filter((item) => item.title)
+        .map((item) => {
+            const due = item.deadline || item.start
+            const ms = due ? due.getTime() - now.getTime() : null
+            return { ...item, due, ms }
+        })
+        .filter((item) => item.ms === null || item.ms >= -86400000)
+        .sort((a, b) => (a.ms ?? Number.MAX_SAFE_INTEGER) - (b.ms ?? Number.MAX_SAFE_INTEGER))
+}
+
 const isResultLocked = (item) => item?.resultsVisible === false || item?.score === null || item?.overallPercentage === null
 const resultLockMessage = (item) => item?.resultVisibilityReason || 'Results are submitted and will be released by your organization.'
 const scoreText = (value) => (value === null || value === undefined ? 'Locked' : `${value}%`)
@@ -178,61 +234,9 @@ function UpcomingExamReminders({ user }) {
 
     useEffect(() => {
         let active = true
-        const normalizeTime = (value) => {
-            if (!value) return null
-            const date = new Date(value)
-            return Number.isNaN(date.getTime()) ? null : date
-        }
         const loadAssigned = async () => {
             setLoading(true)
-            const requests = [
-                axios.get(`${API_BASE}/global-tests`, { params: { status: 'live', studentId: user.id } }).then((res) => (res.data || []).map((test) => ({
-                    id: `global-${test.id}`,
-                    type: 'Global Test',
-                    title: test.title,
-                    start: normalizeTime(test.startTime || test.start_time),
-                    deadline: normalizeTime(test.deadline),
-                    path: '/student/global-tests',
-                }))),
-                axios.get(`${API_BASE}/aptitude`, { params: { status: 'live' } }).then((res) => (res.data || []).map((test) => ({
-                    id: `aptitude-${test.id}`,
-                    type: 'Aptitude',
-                    title: test.title,
-                    start: normalizeTime(test.startTime || test.start_time),
-                    deadline: normalizeTime(test.deadline),
-                    path: '/student/aptitude',
-                }))),
-                axios.get(`${API_BASE}/skill-tests/student/available`, { params: { studentId: user.id } }).then((res) => (res.data || []).map((test) => ({
-                    id: `skill-${test.id}`,
-                    type: 'Skill Test',
-                    title: test.title,
-                    start: normalizeTime(test.start_time || test.startTime),
-                    deadline: normalizeTime(test.deadline),
-                    path: '/student/skill-tests',
-                }))),
-                axios.get(`${API_BASE}/communication/tests/student/available`, { params: { studentId: user.id } }).then((res) => (res.data || []).map((test) => ({
-                    id: `communication-${test.id}`,
-                    type: 'Communication',
-                    title: test.title,
-                    start: normalizeTime(test.start_time || test.startTime),
-                    deadline: normalizeTime(test.deadline),
-                    path: '/student/communication',
-                }))),
-            ]
-            const settled = await Promise.allSettled(requests)
-            const now = new Date()
-            const exams = settled
-                .filter((result) => result.status === 'fulfilled')
-                .flatMap((result) => result.value)
-                .filter((item) => item.title)
-                .map((item) => {
-                    const due = item.deadline || item.start
-                    const ms = due ? due.getTime() - now.getTime() : null
-                    return { ...item, due, ms }
-                })
-                .filter((item) => item.ms === null || item.ms >= -86400000)
-                .sort((a, b) => (a.ms ?? Number.MAX_SAFE_INTEGER) - (b.ms ?? Number.MAX_SAFE_INTEGER))
-                .slice(0, 5)
+            const exams = (await fetchAssignedAssessments(user.id)).slice(0, 5)
             if (active) {
                 setItems(exams)
                 setLoading(false)
@@ -289,6 +293,7 @@ function UpcomingExamReminders({ user }) {
 function Dashboard({ user }) {
     const navigate = useNavigate()
     const [stats, setStats] = useState(null)
+    const [assignedAssessments, setAssignedAssessments] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
     const perms = Array.isArray(user?.permissions) ? user.permissions : []
@@ -300,9 +305,13 @@ function Dashboard({ user }) {
             setError('You do not have permission to view dashboard metrics.')
             return
         }
-        axios.get(`${API_BASE}/analytics/student/${user.id}`)
-            .then(res => {
-                setStats(res.data)
+        Promise.all([
+            axios.get(`${API_BASE}/analytics/student/${user.id}`),
+            fetchAssignedAssessments(user.id).catch(() => []),
+        ])
+            .then(([statsRes, assigned]) => {
+                setStats(statsRes.data)
+                setAssignedAssessments(Array.isArray(assigned) ? assigned : [])
                 setLoading(false)
             })
             .catch(err => {
@@ -312,7 +321,6 @@ function Dashboard({ user }) {
             })
     }, [user.id, canViewOwnDashboard])
 
-    // Format time ago
     const formatTimeAgo = (dateString) => {
         const date = new Date(dateString)
         const now = new Date()
@@ -332,242 +340,126 @@ function Dashboard({ user }) {
     if (error) return <div className="dashboard-panel">{error}</div>
     if (!stats) return <div className="dashboard-panel">No dashboard data available.</div>
 
-    const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
-    const deltaPct = (current, previous) => {
-        const c = toNum(current)
-        const p = toNum(previous)
-        if (p <= 0) return c > 0 ? 100 : 0
-        return ((c - p) / p) * 100
-    }
-    const fmtDelta = (value) => {
-        const rounded = Math.round(value * 10) / 10
-        if (rounded > 0) return `+${rounded}%`
-        if (rounded < 0) return `${rounded}%`
-        return '0.0%'
-    }
-
+    const toNum = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0)
     const recent = Array.isArray(stats.recentSubmissions) ? stats.recentSubmissions : []
-    const mid = Math.max(1, Math.floor(recent.length / 2))
-    const currentScores = recent.slice(0, mid).map((s) => toNum(s.score))
-    const previousScores = recent.slice(mid).map((s) => toNum(s.score))
-    const currentAvgScore = currentScores.length ? currentScores.reduce((a, b) => a + b, 0) / currentScores.length : toNum(stats.avgProblemScore)
-    const previousAvgScore = previousScores.length ? previousScores.reduce((a, b) => a + b, 0) / previousScores.length : Math.max(1, toNum(stats.avgProblemScore) - 5)
-    const solvedDelta = deltaPct(toNum(stats.completedProblems), Math.max(1, toNum(stats.totalProblems) - toNum(stats.completedProblems)))
-    const scoreDelta = deltaPct(currentAvgScore, previousAvgScore)
-    const aptitudeDelta = deltaPct(toNum(stats.completedAptitude), Math.max(1, toNum(stats.totalAptitude) - toNum(stats.completedAptitude)))
-    const tasksDelta = deltaPct(toNum(stats.completedTasks), Math.max(1, toNum(stats.totalTasks || 0) - toNum(stats.completedTasks)))
+    const completedItems = toNum(stats.completedTasks) + toNum(stats.completedProblems) + toNum(stats.completedAptitude)
+    const trackedWorkload = toNum(stats.totalTasks) + toNum(stats.totalProblems) + toNum(stats.totalAptitude)
+    const pendingItems = Math.max(0, trackedWorkload - completedItems)
+    const completionRate = trackedWorkload > 0 ? Math.round((completedItems / trackedWorkload) * 100) : 0
+    const scoreParts = []
+
+    if (toNum(stats.completedTasks) > 0) scoreParts.push(toNum(stats.avgTaskScore))
+    if (toNum(stats.completedProblems) > 0) scoreParts.push(toNum(stats.avgProblemScore))
+    if (toNum(stats.completedAptitude) > 0) scoreParts.push(toNum(stats.avgTaskScore))
+
+    const averageScore = scoreParts.length ? Math.round(scoreParts.reduce((sum, value) => sum + value, 0) / scoreParts.length) : 0
+    const bestRecentScore = recent.length ? Math.max(...recent.map((sub) => toNum(sub.score))) : 0
+    const urgentDeadlines = assignedAssessments.filter((item) => item.ms !== null && item.ms >= 0 && item.ms <= 86400000).length
 
     const kpiCards = [
-        { label: 'Task Completion Momentum', value: `${stats.completedTasks}`, delta: tasksDelta, meta: 'vs pending workload' },
-        { label: 'Problem Solving Momentum', value: `${stats.completedProblems}`, delta: solvedDelta, meta: 'completed vs remaining' },
-        { label: 'Score Improvement', value: `${Math.round(currentAvgScore)}%`, delta: scoreDelta, meta: 'recent attempts trend' },
-        { label: 'Aptitude Progress', value: `${stats.completedAptitude}`, delta: aptitudeDelta, meta: 'completed vs remaining' },
+        {
+            label: 'Assigned Assessments',
+            value: assignedAssessments.length,
+            meta: urgentDeadlines > 0 ? `${urgentDeadlines} urgent deadline${urgentDeadlines > 1 ? 's' : ''}` : 'No urgent deadlines',
+            icon: ClipboardList,
+            gradient: 'linear-gradient(135deg, #1e40af, #3b82f6)',
+        },
+        {
+            label: 'Completed',
+            value: completedItems,
+            meta: `${completionRate}% of tracked work finished`,
+            icon: CheckCircle,
+            gradient: 'linear-gradient(135deg, #047857, #10b981)',
+        },
+        {
+            label: 'Pending',
+            value: pendingItems,
+            meta: 'Tracked learning items still open',
+            icon: Clock,
+            gradient: 'linear-gradient(135deg, #b45309, #f59e0b)',
+        },
+        {
+            label: 'Average Score',
+            value: `${averageScore}%`,
+            meta: 'Combined task and problem performance',
+            icon: Award,
+            gradient: 'linear-gradient(135deg, #be185d, #ec4899)',
+        },
+        {
+            label: 'Best Recent Score',
+            value: `${bestRecentScore}%`,
+            meta: `${recent.length} recent submission${recent.length === 1 ? '' : 's'}`,
+            icon: Target,
+            gradient: 'linear-gradient(135deg, #6d28d9, #8b5cf6)',
+        },
     ]
 
     return (
         <div className="dashboard-container animate-fadeIn">
-            {/* Top Stats Row - 5 Cards */}
             <div className="dashboard-stats-grid">
-                {/* Tasks Completed */}
-                <div className="dashboard-stat-card stat-card-blue">
-                    <div className="stat-card-inner">
-                        <div className="stat-icon-box" style={{ background: 'linear-gradient(135deg, #1e40af, #3b82f6)' }}>
-                            <ClipboardList size={24} color="#fff" />
+                {kpiCards.map((card) => {
+                    const Icon = card.icon
+                    return (
+                        <div key={card.label} className="dashboard-stat-card">
+                            <div className="stat-card-inner">
+                                <div className="stat-icon-box" style={{ background: card.gradient }}>
+                                    <Icon size={24} color="#fff" />
+                                </div>
+                                <div className="stat-content">
+                                    <div className="stat-number">{card.value}</div>
+                                    <div className="stat-label-text">{card.label}</div>
+                                    <div className="stat-subtext">{card.meta}</div>
+                                </div>
+                            </div>
                         </div>
-                        <div className="stat-content">
-                            <div className="stat-number">{stats.completedTasks}</div>
-                            <div className="stat-label-text">Tasks Completed</div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Problems Solved */}
-                <div className="dashboard-stat-card stat-card-green">
-                    <div className="stat-card-inner">
-                        <div className="stat-icon-box" style={{ background: 'linear-gradient(135deg, #047857, #10b981)' }}>
-                            <Code size={24} color="#fff" />
-                        </div>
-                        <div className="stat-content">
-                            <div className="stat-number">{stats.completedProblems}</div>
-                            <div className="stat-label-text">Problems Solved</div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Avg Task Score */}
-                <div className="dashboard-stat-card stat-card-pink">
-                    <div className="stat-card-inner">
-                        <div className="stat-icon-box" style={{ background: 'linear-gradient(135deg, #be185d, #ec4899)' }}>
-                            <Award size={24} color="#fff" />
-                        </div>
-                        <div className="stat-content">
-                            <div className="stat-number">{stats.avgTaskScore}%</div>
-                            <div className="stat-label-text">Avg Task Score</div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Avg Problem Score */}
-                <div className="dashboard-stat-card stat-card-emerald">
-                    <div className="stat-card-inner">
-                        <div className="stat-icon-box" style={{ background: 'linear-gradient(135deg, #059669, #34d399)' }}>
-                            <Target size={24} color="#fff" />
-                        </div>
-                        <div className="stat-content">
-                            <div className="stat-number">{stats.avgProblemScore}%</div>
-                            <div className="stat-label-text">Avg Problem Score</div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Aptitude Taken */}
-                <div className="dashboard-stat-card stat-card-purple">
-                    <div className="stat-card-inner">
-                        <div className="stat-icon-box" style={{ background: 'linear-gradient(135deg, #6d28d9, #8b5cf6)' }}>
-                            <Brain size={24} color="#fff" />
-                        </div>
-                        <div className="stat-content">
-                            <div className="stat-number">{stats.completedAptitude}</div>
-                            <div className="stat-label-text">Aptitude Taken</div>
-                        </div>
-                    </div>
-                </div>
+                    )
+                })}
             </div>
 
             <UpcomingExamReminders user={user} />
 
-            <div className="kpi-trend-grid">
-                {kpiCards.map((kpi) => (
-                    <div key={kpi.label} className="kpi-trend-card">
-                        <div className="kpi-trend-label">{kpi.label}</div>
-                        <div className="kpi-trend-value">{kpi.value}</div>
-                        <div className="kpi-trend-meta">{kpi.meta}</div>
-                        <div className={`kpi-trend-delta ${kpi.delta > 0 ? 'up' : kpi.delta < 0 ? 'down' : 'flat'}`}>
-                            {fmtDelta(kpi.delta)}
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Three Column Layout */}
-            <div className="dashboard-main-grid">
-                {/* My Skill Profile */}
-                <div className="dashboard-panel">
-                    <h3 className="panel-title">
-                        <BarChart3 size={18} color="#8b5cf6" /> My Skill Profile
+            <div className="dashboard-panel">
+                <div className="panel-header">
+                    <h3 className="panel-title" style={{ margin: 0 }}>
+                        <Clock size={18} color="#3b82f6" /> Recent Submissions
                     </h3>
-
-                    <div className="skill-progress-container">
-
-                        {/* Coding Skills */}
-                        <div className="skill-item">
-                            <div className="skill-header">
-                                <span className="skill-name">Coding Problems</span>
-                                <span className="skill-count" style={{ color: '#10b981' }}>{stats.completedProblems}/{stats.totalProblems}</span>
-                            </div>
-                            <div className="skill-bar" style={{ background: 'rgba(16, 185, 129, 0.15)' }}>
-                                <div className="skill-fill" style={{
-                                    width: `${stats.totalProblems > 0 ? (stats.completedProblems / stats.totalProblems) * 100 : 0}%`,
-                                    background: 'linear-gradient(90deg, #059669, #10b981)'
-                                }} />
-                            </div>
-                        </div>
-
-                        {/* Aptitude Skills */}
-                        <div className="skill-item">
-                            <div className="skill-header">
-                                <span className="skill-name">Aptitude Tests</span>
-                                <span className="skill-count" style={{ color: '#8b5cf6' }}>{stats.completedAptitude}/{stats.totalAptitude}</span>
-                            </div>
-                            <div className="skill-bar" style={{ background: 'rgba(139, 92, 246, 0.15)' }}>
-                                <div className="skill-fill" style={{
-                                    width: `${stats.totalAptitude > 0 ? (stats.completedAptitude / stats.totalAptitude) * 100 : 0}%`,
-                                    background: 'linear-gradient(90deg, #7c3aed, #8b5cf6)'
-                                }} />
-                            </div>
-                        </div>
-                    </div>
+                    <button
+                        onClick={() => navigate('/student/submissions')}
+                        className="view-all-btn"
+                    >
+                        {'View All →'}
+                    </button>
                 </div>
 
-                {/* Recent Submissions */}
-                <div className="dashboard-panel">
-                    <div className="panel-header">
-                        <h3 className="panel-title" style={{ margin: 0 }}>
-                            <Clock size={18} color="#3b82f6" /> Recent Submissions
-                        </h3>
-                        <button
-                            onClick={() => navigate('/student/submissions')}
-                            className="view-all-btn"
-                        >
-                            View All →
-                        </button>
-                    </div>
-
-                    <div className="submissions-list">
-                        {stats.recentSubmissions && stats.recentSubmissions.length > 0 ? (
-                            stats.recentSubmissions.map((sub, idx) => (
-                                <div key={idx} className="submission-item">
-                                    <div className="submission-icon">
-                                        <Code size={20} color="#3b82f6" />
-                                    </div>
-                                    <div className="submission-info">
-                                        <div className="submission-title">{sub.title}</div>
-                                        <div className="submission-meta">
-                                            {formatTimeAgo(sub.time)} • Score: {sub.score}/100
-                                        </div>
-                                    </div>
-                                    <span className={`submission-status ${sub.status}`}>
-                                        {sub.status}
-                                    </span>
+                <div className="submissions-list">
+                    {recent.length > 0 ? (
+                        recent.map((sub, idx) => (
+                            <div key={idx} className="submission-item">
+                                <div className="submission-icon">
+                                    <Code size={20} color="#3b82f6" />
                                 </div>
-                            ))
-                        ) : (
-                            <div className="empty-state-small">
-                                <Code size={32} color="var(--text-muted)" />
-                                No submissions yet
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Leaderboard */}
-                <div className="dashboard-panel">
-                    <h3 className="panel-title">
-                        <Trophy size={18} color="#fbbf24" /> Leaderboard
-                    </h3>
-
-                    <div className="leaderboard-list">
-                        {stats.leaderboard && stats.leaderboard.length > 0 ? (
-                            stats.leaderboard.slice(0, 5).map((student, idx) => (
-                                <div key={idx} className={`leaderboard-item ${student.studentId === user.id ? 'current-user' : ''}`}>
-                                    <div className={`rank-badge rank-${idx + 1}`}>
-                                        {student.rank}
-                                    </div>
-                                    <div className="leaderboard-info">
-                                        <div className="leaderboard-name">{student.name}</div>
-                                        <div className="leaderboard-stats">
-                                            {student.taskCount} tasks • {student.codeCount} code • {student.aptitudeCount} aptitude
-                                        </div>
-                                    </div>
-                                    <div className={`leaderboard-score rank-${idx + 1}-score`}>
-                                        {student.avgScore}%
-                                        <span className="score-label">Avg Score</span>
+                                <div className="submission-info">
+                                    <div className="submission-title">{sub.title}</div>
+                                    <div className="submission-meta">
+                                        {formatTimeAgo(sub.time)} | Score: {sub.score}/100
                                     </div>
                                 </div>
-                            ))
-                        ) : (
-                            <div className="empty-state-small">
-                                <Trophy size={32} color="var(--text-muted)" />
-                                No leaderboard data
+                                <span className={`submission-status ${sub.status}`}>
+                                    {sub.status}
+                                </span>
                             </div>
-                        )}
-                    </div>
+                        ))
+                    ) : (
+                        <div className="empty-state-small">
+                            <Code size={32} color="var(--text-muted)" />
+                            No submissions yet
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
     )
 }
-
 
 
 
