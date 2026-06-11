@@ -31,45 +31,85 @@ const normalizeAssignedTime = (value) => {
 }
 
 async function fetchAssignedAssessments(studentId) {
-    const requests = [
-        axios.get(`${API_BASE}/global-tests`, { params: { status: 'live', studentId } }).then((res) => (res.data || []).map((test) => ({
+    const [
+        problemsRes,
+        globalTestsRes,
+        globalSubsRes,
+        aptitudeTestsRes,
+        aptitudeSubsRes,
+        skillTestsRes,
+        commTestsRes,
+    ] = await Promise.allSettled([
+        axios.get(`${API_BASE}/students/${studentId}/problems`),
+        axios.get(`${API_BASE}/global-tests`, { params: { status: 'live', studentId } }),
+        axios.get(`${API_BASE}/global-test-submissions`, { params: { studentId } }),
+        axios.get(`${API_BASE}/aptitude/allocated-to/${studentId}`),
+        axios.get(`${API_BASE}/aptitude-submissions`, { params: { studentId } }),
+        axios.get(`${API_BASE}/skill-tests/student/available`, { params: { studentId } }),
+        axios.get(`${API_BASE}/communication/tests/student/available`, { params: { studentId } }),
+    ])
+
+    const problems = problemsRes.status === 'fulfilled' ? (problemsRes.value.data || []) : []
+    const globalTests = globalTestsRes.status === 'fulfilled' ? (globalTestsRes.value.data || []) : []
+    const globalSubmissions = globalSubsRes.status === 'fulfilled' ? (globalSubsRes.value.data || []) : []
+    const aptitudeTests = aptitudeTestsRes.status === 'fulfilled' ? (aptitudeTestsRes.value.data || []) : []
+    const aptitudeSubmissions = aptitudeSubsRes.status === 'fulfilled' ? (aptitudeSubsRes.value.data || []) : []
+    const skillTests = skillTestsRes.status === 'fulfilled' ? (skillTestsRes.value.data || []) : []
+    const commTests = commTestsRes.status === 'fulfilled' ? (commTestsRes.value.data || []) : []
+
+    const globalCompleted = new Set(globalSubmissions.map((item) => String(item.testId)))
+    const aptitudeCompleted = new Set(aptitudeSubmissions.map((item) => String(item.testId)))
+
+    const items = [
+        ...problems.map((problem) => ({
+            id: `problem-${problem.id}`,
+            type: problem.language === 'SQL' || problem.type === 'SQL' ? 'SQL Problem' : 'Coding Problem',
+            title: problem.title,
+            start: normalizeAssignedTime(problem.created_at),
+            deadline: normalizeAssignedTime(problem.deadline),
+            path: problem.language === 'SQL' || problem.type === 'SQL' ? '/student/sql' : '/student/coding',
+            completed: Array.isArray(problem.completedBy) && problem.completedBy.includes(studentId),
+        })),
+        ...globalTests.map((test) => ({
             id: `global-${test.id}`,
             type: 'Global Test',
             title: test.title,
             start: normalizeAssignedTime(test.startTime || test.start_time),
             deadline: normalizeAssignedTime(test.deadline),
             path: '/student/global-tests',
-        }))),
-        axios.get(`${API_BASE}/aptitude`, { params: { status: 'live' } }).then((res) => (res.data || []).map((test) => ({
+            completed: globalCompleted.has(String(test.id)),
+        })),
+        ...aptitudeTests.map((test) => ({
             id: `aptitude-${test.id}`,
             type: 'Aptitude',
             title: test.title,
             start: normalizeAssignedTime(test.startTime || test.start_time),
             deadline: normalizeAssignedTime(test.deadline),
             path: '/student/aptitude',
-        }))),
-        axios.get(`${API_BASE}/skill-tests/student/available`, { params: { studentId } }).then((res) => (res.data || []).map((test) => ({
+            completed: aptitudeCompleted.has(String(test.id)),
+        })),
+        ...skillTests.map((test) => ({
             id: `skill-${test.id}`,
             type: 'Skill Test',
             title: test.title,
             start: normalizeAssignedTime(test.start_time || test.startTime),
             deadline: normalizeAssignedTime(test.deadline),
             path: '/student/skill-tests',
-        }))),
-        axios.get(`${API_BASE}/communication/tests/student/available`, { params: { studentId } }).then((res) => (res.data || []).map((test) => ({
+            completed: Array.isArray(test.my_attempts) && test.my_attempts.some((attempt) => ['completed', 'failed'].includes(String(attempt.overall_status || '').toLowerCase())),
+        })),
+        ...commTests.map((test) => ({
             id: `communication-${test.id}`,
             type: 'Communication',
             title: test.title,
             start: normalizeAssignedTime(test.start_time || test.startTime),
             deadline: normalizeAssignedTime(test.deadline),
             path: '/student/communication',
-        }))),
+            completed: Array.isArray(test.my_attempts) && test.my_attempts.some((attempt) => ['completed', 'failed', 'terminated'].includes(String(attempt.status || '').toLowerCase())),
+        })),
     ]
-    const settled = await Promise.allSettled(requests)
+
     const now = new Date()
-    return settled
-        .filter((result) => result.status === 'fulfilled')
-        .flatMap((result) => result.value)
+    return items
         .filter((item) => item.title)
         .map((item) => {
             const due = item.deadline || item.start
@@ -348,9 +388,9 @@ function Dashboard({ user }) {
 
     const toNum = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0)
     const recent = Array.isArray(stats.recentSubmissions) ? stats.recentSubmissions : []
-    const completedItems = toNum(stats.completedTasks) + toNum(stats.completedProblems) + toNum(stats.completedAptitude)
-    const trackedWorkload = toNum(stats.totalTasks) + toNum(stats.totalProblems) + toNum(stats.totalAptitude)
-    const pendingItems = Math.max(0, trackedWorkload - completedItems)
+    const completedItems = assignedAssessments.filter((item) => item.completed).length
+    const trackedWorkload = assignedAssessments.length
+    const pendingItems = assignedAssessments.filter((item) => !item.completed).length
     const completionRate = trackedWorkload > 0 ? Math.round((completedItems / trackedWorkload) * 100) : 0
     const scoreParts = []
 
