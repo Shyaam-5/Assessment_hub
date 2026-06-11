@@ -373,7 +373,7 @@ async def set_problem_allocations(problem_id: str, request: Request):
                             LEFT JOIN roles r ON r.id = ura.role_id
                             WHERE u.id IN ({placeholders})
                               AND (
-                                u.role = 'student'
+                                u.role IN ('student', 'learner')
                                 OR (
                                     u.role = 'org_user'
                                     AND (
@@ -383,12 +383,12 @@ async def set_problem_allocations(problem_id: str, request: Request):
                                 )
                               )
                             """,
-                            student_ids,
+                            tuple(student_ids),
                         )
                         allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
                 invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
                 if invalid_ids:
-                    raise HTTPException(400, "Only student or exam-taker users can be allocated")
+                    raise HTTPException(400, "Only student, learner, or exam-taker users can be allocated")
 
             await cur.execute(
                 "DELETE FROM problem_student_allocations WHERE problem_id = %s", (problem_id,)
@@ -407,7 +407,7 @@ async def set_problem_allocations(problem_id: str, request: Request):
                     async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
                         await primary_cur.execute(
                             f"SELECT name, email FROM users WHERE id IN ({placeholders})",
-                            student_ids,
+                            tuple(student_ids),
                         )
                         emails = [
                             (r.get("name") or "User", r.get("email") or "")

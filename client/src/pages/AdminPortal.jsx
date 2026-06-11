@@ -4023,7 +4023,7 @@ function GlobalTestsAdmin() {
             })
             setAllocatingTest(null)
         } catch (e) {
-            alert(e.response?.data?.error || 'Failed to save allocations')
+            alert(e.response?.data?.detail || e.response?.data?.error || 'Failed to save allocations')
         } finally {
             setAllocSaving(false)
         }

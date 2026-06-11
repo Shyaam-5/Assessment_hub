@@ -888,26 +888,32 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
             test_title = trow.get("title") or test_title
             test_deadline = trow["deadline"].strftime("%d %b %Y, %I:%M %p UTC") if trow.get("deadline") else None
             placeholders = ",".join(["%s"] * len(student_ids))
-            await cur.execute(
-                f"""
-                SELECT DISTINCT u.id
-                FROM users u
-                JOIN user_role_assignments ura ON ura.user_id = u.id
-                JOIN roles r ON r.id = ura.role_id
-                WHERE u.id IN ({placeholders})
-                  AND u.role = 'org_user'
-                  AND ura.is_primary = 1
-                  AND (
-                    LOWER(TRIM(r.slug)) = 'exam-taker'
-                    OR LOWER(TRIM(r.name)) = 'exam taker'
-                  )
-                """,
-                student_ids,
-            )
-            allowed_ids = {str(r["id"]) for r in (await cur.fetchall() or [])}
+            async with primary_pool.acquire() as primary_conn:
+                async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                    await primary_cur.execute(
+                        f"""
+                        SELECT DISTINCT u.id
+                        FROM users u
+                        LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+                        LEFT JOIN roles r ON r.id = ura.role_id
+                        WHERE u.id IN ({placeholders})
+                          AND (
+                            u.role IN ('student', 'learner')
+                            OR (
+                              u.role = 'org_user'
+                              AND (
+                                LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
+                                OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
+                              )
+                            )
+                          )
+                        """,
+                        tuple(student_ids),
+                    )
+                    allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
             invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
             if invalid_ids:
-                raise HTTPException(400, "Only users with Exam Taker role can be allocated")
+                raise HTTPException(400, "Only student, learner, or exam-taker users can be allocated")
             await cur.execute("DELETE FROM test_student_allocations WHERE test_id = %s", (test_id,))
 
             for sid in student_ids:
@@ -915,9 +921,14 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
                     "INSERT INTO test_student_allocations (id, test_id, student_id) VALUES (%s,%s,%s)",
                     (str(uuid.uuid4()), test_id, sid),
                 )
-            await cur.execute(f"SELECT name, email FROM users WHERE id IN ({placeholders})", student_ids)
-            rows = await cur.fetchall()
-            emails = [(r.get("name") or "User", r.get("email") or "") for r in (rows or []) if (r.get("email") or "").strip()]
+            async with primary_pool.acquire() as primary_conn:
+                async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                    await primary_cur.execute(
+                        f"SELECT name, email FROM users WHERE id IN ({placeholders})",
+                        tuple(student_ids),
+                    )
+                    rows = await primary_cur.fetchall()
+                    emails = [(r.get("name") or "User", r.get("email") or "") for r in (rows or []) if (r.get("email") or "").strip()]
 
         await conn.commit()
 

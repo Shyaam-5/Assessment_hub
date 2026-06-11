@@ -260,18 +260,30 @@ async def get_skill_test_allocations(test_id: int, request: Request):
     """List students currently allocated to a skill test."""
     await _require_skill_permission(request, ["coding.assign"])
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute(_ALLOC_TABLE_DDL)
             await cur.execute(
-                """SELECT a.student_id, u.name, u.email
+                """SELECT a.student_id
                    FROM skill_test_allocations a
-                   LEFT JOIN users u ON u.id = a.student_id
-                   WHERE a.test_id = %s ORDER BY u.name""",
+                   WHERE a.test_id = %s""",
                 (test_id,),
             )
             rows = await cur.fetchall()
-    return [{"studentId": r["student_id"], "name": r["name"], "email": r["email"]} for r in rows]
+    student_ids = [str(r["student_id"]) for r in (rows or []) if r.get("student_id")]
+    if not student_ids:
+        return []
+    placeholders = ",".join(["%s"] * len(student_ids))
+    async with primary_pool.acquire() as primary_conn:
+        async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+            await primary_cur.execute(
+                f"SELECT id, name, email FROM users WHERE id IN ({placeholders})",
+                tuple(student_ids),
+            )
+            users = await primary_cur.fetchall()
+    by_id = {str(row["id"]): row for row in (users or [])}
+    return [{"studentId": sid, "name": (by_id.get(sid) or {}).get("name"), "email": (by_id.get(sid) or {}).get("email")} for sid in student_ids]
 
 
 @router.post("/{test_id}/allocations")
@@ -292,7 +304,7 @@ async def set_skill_test_allocations(test_id: int, request: Request):
             if student_ids:
                 placeholders = ",".join(["%s"] * len(student_ids))
                 async with primary_pool.acquire() as primary_conn:
-                    async with primary_conn.cursor() as primary_cur:
+                    async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
                         await primary_cur.execute(
                             f"""
                             SELECT DISTINCT u.id
@@ -301,7 +313,7 @@ async def set_skill_test_allocations(test_id: int, request: Request):
                             LEFT JOIN roles r ON r.id = ura.role_id
                             WHERE u.id IN ({placeholders})
                               AND (
-                                u.role = 'student'
+                                u.role IN ('student', 'learner')
                                 OR (
                                     u.role = 'org_user'
                                     AND (
@@ -311,12 +323,12 @@ async def set_skill_test_allocations(test_id: int, request: Request):
                                 )
                             )
                             """,
-                            student_ids,
+                            tuple(student_ids),
                         )
                         allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
                 invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
                 if invalid_ids:
-                    raise HTTPException(400, "Only student or exam-taker users can be allocated")
+                    raise HTTPException(400, "Only student, learner, or exam-taker users can be allocated")
             await cur.execute("DELETE FROM skill_test_allocations WHERE test_id = %s", (test_id,))
             for sid in student_ids:
                 await cur.execute(
@@ -338,15 +350,18 @@ async def set_skill_test_allocations(test_id: int, request: Request):
     if student_ids:
         try:
             async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
+                async with conn.cursor(pymysql.cursors.DictCursor) as cur:
                     await cur.execute("SELECT title FROM skill_tests WHERE id = %s", (test_id,))
                     trow = await cur.fetchone()
                     test_title = (trow.get("title") if trow else None) or "Skill Test"
                     placeholders = ",".join(["%s"] * len(student_ids))
-                    await cur.execute(
-                        f"SELECT name, email FROM users WHERE id IN ({placeholders})", student_ids
+            async with primary_pool.acquire() as primary_conn:
+                async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                    await primary_cur.execute(
+                        f"SELECT name, email FROM users WHERE id IN ({placeholders})",
+                        tuple(student_ids),
                     )
-                    recipients = [(r.get("name") or "User", r.get("email") or "") for r in (await cur.fetchall() or []) if (r.get("email") or "").strip()]
+                    recipients = [(r.get("name") or "User", r.get("email") or "") for r in (await primary_cur.fetchall() or []) if (r.get("email") or "").strip()]
             for name, email in recipients:
                 try:
                     await asyncio.to_thread(send_exam_allocated_email, email, name, test_title, "Skill Test")
