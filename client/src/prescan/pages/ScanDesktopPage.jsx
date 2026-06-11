@@ -7,6 +7,7 @@ import ScanLivePreview from '../components/scan/desktop/ScanLivePreview';
 import ScanResultCard from '../components/scan/desktop/ScanResultCard';
 import ScanProgressBar from '../components/scan/mobile/ScanProgressBar';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import { resolveSocketBase } from '../utils/resolveSocketBase';
 
 function FullPageCenter({ children, bg = '#f8fafc' }) {
   return (
@@ -65,17 +66,7 @@ export default function ScanDesktopPage() {
   }, []);
 
   const sessionToken = session?.session_token ?? null;
-  const socketTarget = (() => {
-    const fromMobileUrl = (session?.mobile_url || '').trim();
-    if (fromMobileUrl) {
-      try {
-        return new URL(fromMobileUrl).origin;
-      } catch {
-        // Ignore malformed URLs and fall back
-      }
-    }
-    return null;
-  })();
+  const socketTarget = resolveSocketBase(session?.websocket_url || session?.mobile_url || null);
 
   const {
     connected,

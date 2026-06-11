@@ -6,6 +6,7 @@ import ScanResultCard from './scan/desktop/ScanResultCard';
 import ScanLivePreview from './scan/desktop/ScanLivePreview';
 import ScanProgressBar from './scan/mobile/ScanProgressBar';
 import LoadingSpinner from './common/LoadingSpinner';
+import { resolveSocketBase } from '../utils/resolveSocketBase';
 
 const MAX_RETRIES = 1;
 const DIRS = ['front', 'right', 'back', 'left'];
@@ -52,17 +53,7 @@ export default function EnvironmentScanGate({ userId, examTitle, onApproved, onC
   }, []);
 
   const sessionToken = session?.session_token ?? null;
-  const socketTarget = (() => {
-    const fromMobileUrl = (session?.mobile_url || '').trim();
-    if (fromMobileUrl) {
-      try {
-        return new URL(fromMobileUrl).origin;
-      } catch {
-        // Ignore malformed URLs and fall back
-      }
-    }
-    return null;
-  })();
+  const socketTarget = resolveSocketBase(session?.websocket_url || session?.mobile_url || null);
 
   const {
     connected,

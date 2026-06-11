@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { resolveSocketBase } from '../utils/resolveSocketBase';
 
 class PrescanSocketManager {
   constructor() {
@@ -7,12 +8,7 @@ class PrescanSocketManager {
   }
 
   connect(url) {
-    const fromEnv = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
-    const target =
-      url
-      || (fromEnv
-        || (typeof window !== 'undefined' && window.location?.origin)
-        || 'http://localhost:8000');
+    const target = resolveSocketBase(url);
 
     if (this.socket) {
       if (this.currentTarget === target) {

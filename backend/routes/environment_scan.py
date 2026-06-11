@@ -184,6 +184,7 @@ async def create_session(body: CreateSessionBody, request: Request):
     mobile_token = generate_mobile_token(session_token, settings.PRESCAN_SECRET_KEY)
     frontend_base = _public_app_base(request)
     mobile_url = f"{frontend_base}/scan/mobile?token={mobile_token}"
+    websocket_base = _public_app_base(request)
 
     logger.info(
         "Exam session created: id=%d candidate=%s exam=%d scan=%d",
@@ -204,6 +205,7 @@ async def create_session(body: CreateSessionBody, request: Request):
         "session_token": session_token,
         "mobile_token": mobile_token,
         "mobile_url": mobile_url,
+        "websocket_url": websocket_base,
         "room_scan_id": scan["id"],
         "status": session.get("status", "scanning"),
         "exam_title": dict(exam).get("title", ""),
