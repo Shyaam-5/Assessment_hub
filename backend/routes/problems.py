@@ -61,6 +61,13 @@ def _enrich_problem(p: dict) -> dict:
     p["expectedOutput"] = p.pop("expected_output", None)
     p["sqlSchema"] = p.pop("sql_schema", None)
     p["expectedQueryResult"] = p.pop("expected_query_result", None)
+    raw_test_cases = p.pop("test_cases", None)
+    if isinstance(raw_test_cases, str):
+        try:
+            raw_test_cases = __import__("json").loads(raw_test_cases)
+        except Exception:
+            raw_test_cases = []
+    p["testCases"] = raw_test_cases if isinstance(raw_test_cases, list) else []
     p["createdAt"] = str(p.pop("created_at", ""))
 
     # Proctoring settings mapped to what frontend expects for code editor

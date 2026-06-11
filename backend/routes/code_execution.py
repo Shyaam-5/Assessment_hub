@@ -11,7 +11,9 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 import duckdb
 import httpx
+import pymysql.cursors
 from audit_logger import get_audit_logger, AuditEventType
+from database import get_pool
 
 router = APIRouter(prefix="/api", tags=["code_execution"])
 logger = LogConfig.get_logger(__name__)
@@ -94,6 +96,14 @@ class RunRequest(BaseModel):
     problemId: str | None = None
 
 
+class RunWithTestsRequest(BaseModel):
+    language: str
+    code: str
+    problemId: str
+    sqlSchema: str | None = ""
+    isGlobalTest: bool | None = False
+
+
 async def _execute_with_judge0(language: str, code: str, stdin_data: str = "") -> dict:
     """Execute code using Judge0 API (free service)."""
     try:
@@ -132,7 +142,8 @@ async def _execute_with_judge0(language: str, code: str, stdin_data: str = "") -
         # Judge0 response format
         stdout = result.get("stdout", "")
         stderr = result.get("stderr", "")
-        status_id = result.get("status_id", 0)
+        status = result.get("status") or {}
+        status_id = result.get("status_id") or status.get("id", 0)
         compile_output = result.get("compile_output", "")
         
         # Status codes: 1=in queue, 2=processing, 3=accepted, 4=wrong answer, 5=time limit, 6=compilation error, 7=runtime error, 8=internal error
@@ -212,6 +223,99 @@ async def _execute_sql_duckdb(schema: str | None, query: str) -> dict:
         }
 
 
+def _normalize_output(value: str | None) -> str:
+    text = (value or "").replace("\r", "").strip()
+    return "\n".join(line.rstrip() for line in text.split("\n")).strip()
+
+
+def _normalize_sql_output(value: str | None) -> str:
+    rows = []
+    for line in _normalize_output(value).split("\n"):
+        stripped = line.strip()
+        if not stripped or re.fullmatch(r"[-+|=\s]+", stripped):
+            continue
+        rows.append(re.sub(r"\s*\|\s*", "|", stripped))
+    return "\n".join(rows)
+
+
+def _extract_sql_rows(value: str | None) -> list[str]:
+    rows = _normalize_sql_output(value).split("\n")
+    if len(rows) <= 1:
+        return [row for row in rows if row]
+    return [row for row in rows[1:] if row]
+
+
+def _outputs_match(actual: str, expected: str, language: str) -> bool:
+    if language.lower() in {"sql", "duckdb", "sqlite3"}:
+        actual_norm = _normalize_sql_output(actual)
+        expected_norm = _normalize_sql_output(expected)
+        return actual_norm == expected_norm or _extract_sql_rows(actual) == _extract_sql_rows(expected)
+    return _normalize_output(actual) == _normalize_output(expected)
+
+
+def _coerce_test_cases(raw_cases) -> list[dict]:
+    if isinstance(raw_cases, str):
+        try:
+            raw_cases = json.loads(raw_cases)
+        except json.JSONDecodeError:
+            raw_cases = []
+    if not isinstance(raw_cases, list):
+        return []
+
+    test_cases = []
+    for index, case in enumerate(raw_cases, start=1):
+        if not isinstance(case, dict):
+            continue
+        test_cases.append({
+            "index": index,
+            "input": str(case.get("input") or case.get("stdin") or ""),
+            "expectedOutput": str(case.get("expectedOutput") or case.get("expected_output") or case.get("output") or ""),
+            "isHidden": bool(case.get("isHidden") or case.get("is_hidden") or False),
+            "description": str(case.get("description") or ""),
+        })
+    return test_cases
+
+
+async def _load_problem(problem_id: str) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT id, sample_input, expected_output, sql_schema, expected_query_result, test_cases
+                FROM problems
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (problem_id,),
+            )
+            return await cur.fetchone()
+
+
+async def _run_against_test_cases(language: str, code: str, sql_schema: str, test_cases: list[dict]) -> list[dict]:
+    results = []
+    for case in test_cases:
+        if language.lower() in {"sql", "duckdb", "sqlite3"}:
+            execution = await _execute_sql_duckdb(sql_schema, code)
+        else:
+            execution = await _execute_with_judge0(language, code, case.get("input", ""))
+
+        actual_output = execution.get("output", "")
+        expected_output = case.get("expectedOutput", "")
+        passed = execution.get("exitCode") == 0 and _outputs_match(actual_output, expected_output, language)
+        results.append({
+            "index": case.get("index"),
+            "input": case.get("input", ""),
+            "actualOutput": actual_output,
+            "expectedOutput": expected_output,
+            "passed": passed,
+            "isHidden": bool(case.get("isHidden")),
+            "description": case.get("description", ""),
+            "error": execution.get("error", ""),
+        })
+    return results
+
+
 @router.post("/run")
 async def run_code(body: RunRequest, request: Request):
     """Execute code using Judge0 API or DuckDB for SQL."""
@@ -267,4 +371,61 @@ async def run_code(body: RunRequest, request: Request):
             "error": f"Execution error: {str(e)}",
             "exitCode": 1,
         }
+
+
+@router.post("/run-with-tests")
+async def run_with_tests(body: RunWithTestsRequest, request: Request):
+    lang_lower = body.language.lower()
+    safety_err = _check_code_safety(body.code, lang_lower)
+    if safety_err:
+        return {"success": False, "error": safety_err, "testResults": []}
+
+    problem = await _load_problem(body.problemId)
+    if not problem:
+        return {"success": False, "error": "Problem not found", "testResults": []}
+
+    test_cases = _coerce_test_cases(problem.get("test_cases"))
+    if not test_cases:
+        fallback_expected = (
+            problem.get("expected_query_result")
+            if lang_lower in {"sql", "duckdb", "sqlite3"}
+            else problem.get("expected_output")
+        ) or ""
+        fallback_input = "" if lang_lower in {"sql", "duckdb", "sqlite3"} else (problem.get("sample_input") or "")
+        if fallback_expected:
+            test_cases = [{
+                "index": 1,
+                "input": str(fallback_input),
+                "expectedOutput": str(fallback_expected),
+                "isHidden": False,
+                "description": "Default validation case",
+            }]
+
+    if not test_cases:
+        return {"success": False, "error": "No test cases configured for this problem", "testResults": []}
+
+    sql_schema = body.sqlSchema or problem.get("sql_schema") or ""
+    test_results = await _run_against_test_cases(body.language, body.code, sql_schema, test_cases)
+    passed = sum(1 for result in test_results if result.get("passed"))
+    total = len(test_results)
+
+    audit_logger.log_event(
+        AuditEventType.RESOURCE_ACCESSED,
+        user_id=getattr(request.state, "auth_user_id", None) or "anonymous",
+        ip_address=_client_ip(request),
+        resource_type="code_execution",
+        action="Code executed with tests",
+        details={"language": body.language, "problemId": body.problemId, "passed": passed, "total": total},
+        status="SUCCESS" if passed == total else "FAILURE",
+    )
+
+    return {
+        "success": True,
+        "testResults": test_results,
+        "summary": {
+            "passed": passed,
+            "total": total,
+            "percentage": round((passed / total) * 100) if total else 0,
+        },
+    }
 
