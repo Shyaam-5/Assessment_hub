@@ -89,7 +89,7 @@
 /* Dashboard Stats Grid */
 .dashboard-stats-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 1.25rem;
     margin-bottom: 2rem;
 }
@@ -177,14 +177,18 @@
 
 /* Dashboard Stat Cards */
 .dashboard-stat-card {
-    background: var(--bg-card);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)), var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 1.5rem;
+    border-radius: 20px;
+    padding: 1.25rem;
     position: relative;
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 10px 24px -16px rgba(0, 0, 0, 0.45);
+    min-height: 188px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
 }
 
 .dashboard-stat-card::before {
@@ -192,8 +196,8 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: 100px;
-    height: 100px;
+    width: 140px;
+    height: 140px;
     background: radial-gradient(circle at top right, var(--stat-glow, rgba(59, 130, 246, 0.1)), transparent 70%);
     pointer-events: none;
 }
@@ -210,6 +214,19 @@
     gap: 1rem;
     position: relative;
     z-index: 1;
+}
+
+.stat-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    position: relative;
+    z-index: 1;
+}
+
+.stat-card-copy {
+    min-width: 0;
 }
 
 .stat-icon-box {
@@ -242,18 +259,91 @@
 }
 
 .stat-number {
-    font-size: 2rem;
+    font-size: 2.35rem;
     font-weight: 800;
     color: var(--text);
     line-height: 1.1;
     letter-spacing: -0.02em;
+    margin-top: 0.35rem;
 }
 
 .stat-label-text {
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     color: var(--text-muted);
-    font-weight: 500;
-    letter-spacing: 0.01em;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.stat-subtext {
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    position: relative;
+    z-index: 1;
+    max-width: 24ch;
+}
+
+.stat-chip {
+    width: fit-content;
+    border-radius: 999px;
+    padding: 0.32rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin: 0.9rem 0 0.7rem;
+    position: relative;
+    z-index: 1;
+    border: 1px solid transparent;
+}
+
+.stat-chip-blue {
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+.stat-chip-green {
+    color: #86efac;
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.stat-chip-amber {
+    color: #fcd34d;
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+
+.stat-chip-pink {
+    color: #f9a8d4;
+    background: rgba(236, 72, 153, 0.12);
+    border-color: rgba(236, 72, 153, 0.25);
+}
+
+.stat-chip-purple {
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.25);
+}
+
+.stat-tone-blue {
+    --stat-glow: rgba(59, 130, 246, 0.16);
+}
+
+.stat-tone-green {
+    --stat-glow: rgba(16, 185, 129, 0.16);
+}
+
+.stat-tone-amber {
+    --stat-glow: rgba(245, 158, 11, 0.16);
+}
+
+.stat-tone-pink {
+    --stat-glow: rgba(236, 72, 153, 0.16);
+}
+
+.stat-tone-purple {
+    --stat-glow: rgba(139, 92, 246, 0.16);
 }
 
 /* Dashboard Main Grid */
@@ -3069,27 +3159,64 @@ textarea:focus {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 1rem;
+    gap: 1.25rem;
     width: 100%;
-    padding: 0.9rem 1rem;
-    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    border-radius: 16px;
     border: 1px solid var(--border-color);
-    background: var(--bg-card);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent), var(--bg-card);
     color: var(--text-main);
     text-align: left;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
     font-family: inherit;
 }
 
 .exam-reminder-btn:hover {
     background: var(--bg-secondary);
     border-color: var(--primary);
+    transform: translateY(-1px);
+}
+
+.exam-reminder-main {
+    min-width: 0;
+}
+
+.exam-reminder-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.45rem;
+    flex-wrap: wrap;
+}
+
+.exam-reminder-type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.22rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.22);
+}
+
+.exam-reminder-meta-note {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.exam-reminder-side {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-muted);
 }
 
 .exam-reminder-title {
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .exam-reminder-type {
@@ -3100,14 +3227,20 @@ textarea:focus {
 
 .exam-reminder-due {
     color: var(--text-muted);
-    font-weight: 600;
-    font-size: 0.85rem;
+    font-weight: 700;
+    font-size: 0.8rem;
     white-space: nowrap;
     flex-shrink: 0;
+    border-radius: 999px;
+    padding: 0.32rem 0.65rem;
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .exam-reminder-due.urgent {
     color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.24);
 }
 
 /* ── Problem card helpers ────────────────────────────────── */

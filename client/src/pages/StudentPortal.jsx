@@ -275,12 +275,18 @@ function UpcomingExamReminders({ user }) {
                             onClick={() => navigate(item.path)}
                             className="exam-reminder-btn"
                         >
-                            <div>
+                            <div className="exam-reminder-main">
                                 <div className="exam-reminder-title">{item.title}</div>
-                                <div className="exam-reminder-type">{item.type}</div>
+                                <div className="exam-reminder-meta-row">
+                                    <span className="exam-reminder-type-badge">{item.type}</span>
+                                    {!item.due && <span className="exam-reminder-meta-note">No schedule set</span>}
+                                </div>
                             </div>
-                            <div className={`exam-reminder-due${item.ms !== null && item.ms <= 86400000 ? ' urgent' : ''}`}>
-                                {labelFor(item)}
+                            <div className="exam-reminder-side">
+                                <div className={`exam-reminder-due${item.ms !== null && item.ms <= 86400000 ? ' urgent' : ''}`}>
+                                    {labelFor(item)}
+                                </div>
+                                <ChevronRight size={18} />
                             </div>
                         </button>
                     ))}
@@ -360,37 +366,47 @@ function Dashboard({ user }) {
         {
             label: 'Assigned Assessments',
             value: assignedAssessments.length,
+            chip: `${assignedAssessments.length} active`,
             meta: urgentDeadlines > 0 ? `${urgentDeadlines} urgent deadline${urgentDeadlines > 1 ? 's' : ''}` : 'No urgent deadlines',
             icon: ClipboardList,
             gradient: 'linear-gradient(135deg, #1e40af, #3b82f6)',
+            tone: 'blue',
         },
         {
             label: 'Completed',
             value: completedItems,
-            meta: `${completionRate}% of tracked work finished`,
+            chip: `${completionRate}% done`,
+            meta: trackedWorkload > 0 ? `${completedItems} of ${trackedWorkload} items finished` : 'No tracked work yet',
             icon: CheckCircle,
             gradient: 'linear-gradient(135deg, #047857, #10b981)',
+            tone: 'green',
         },
         {
             label: 'Pending',
             value: pendingItems,
-            meta: 'Tracked learning items still open',
+            chip: pendingItems > 0 ? 'Needs attention' : 'All clear',
+            meta: pendingItems > 0 ? `${pendingItems} items still open` : 'No pending items right now',
             icon: Clock,
             gradient: 'linear-gradient(135deg, #b45309, #f59e0b)',
+            tone: 'amber',
         },
         {
             label: 'Average Score',
-            value: `${averageScore}%`,
-            meta: 'Combined task and problem performance',
+            value: scoreParts.length ? `${averageScore}%` : '--',
+            chip: scoreParts.length ? 'Performance' : 'Awaiting attempts',
+            meta: scoreParts.length ? 'Across completed tasks and problems' : 'Complete an assessment to see trends',
             icon: Award,
             gradient: 'linear-gradient(135deg, #be185d, #ec4899)',
+            tone: 'pink',
         },
         {
             label: 'Best Recent Score',
-            value: `${bestRecentScore}%`,
-            meta: `${recent.length} recent submission${recent.length === 1 ? '' : 's'}`,
+            value: recent.length ? `${bestRecentScore}%` : '--',
+            chip: recent.length ? 'Recent peak' : 'No attempts yet',
+            meta: recent.length ? `${recent.length} recent submission${recent.length === 1 ? '' : 's'}` : 'Your best score appears here',
             icon: Target,
             gradient: 'linear-gradient(135deg, #6d28d9, #8b5cf6)',
+            tone: 'purple',
         },
     ]
 
@@ -400,17 +416,18 @@ function Dashboard({ user }) {
                 {kpiCards.map((card) => {
                     const Icon = card.icon
                     return (
-                        <div key={card.label} className="dashboard-stat-card">
-                            <div className="stat-card-inner">
+                        <div key={card.label} className={`dashboard-stat-card stat-tone-${card.tone}`}>
+                            <div className="stat-card-top">
+                                <div className="stat-card-copy">
+                                    <div className="stat-label-text">{card.label}</div>
+                                    <div className="stat-number">{card.value}</div>
+                                </div>
                                 <div className="stat-icon-box" style={{ background: card.gradient }}>
                                     <Icon size={24} color="#fff" />
                                 </div>
-                                <div className="stat-content">
-                                    <div className="stat-number">{card.value}</div>
-                                    <div className="stat-label-text">{card.label}</div>
-                                    <div className="stat-subtext">{card.meta}</div>
-                                </div>
                             </div>
+                            <div className={`stat-chip stat-chip-${card.tone}`}>{card.chip}</div>
+                            <div className="stat-subtext">{card.meta}</div>
                         </div>
                     )
                 })}
