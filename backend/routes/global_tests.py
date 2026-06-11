@@ -799,6 +799,8 @@ async def set_test_allocations(test_id: str, request: Request):
             details={"studentCount": len(student_ids)},
         )
         return {"allocated": len(student_ids)}
+    except HTTPException:
+        raise
     except Exception as e:
         if "doesn't exist" in str(e):
             raise HTTPException(503, "Global tests not set up.")

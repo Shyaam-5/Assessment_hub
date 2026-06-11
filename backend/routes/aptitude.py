@@ -44,6 +44,7 @@ async def _insert_unified_proctor_event(
     details: str,
 ):
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -313,6 +314,7 @@ async def list_aptitude_tests(
     if not (can_manage or can_attempt):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
     query = "SELECT * FROM aptitude_tests WHERE 1=1"
     params: list = []
 
@@ -876,6 +878,7 @@ async def allocate_students(test_id: str, body: AllocateStudents, request: Reque
         raise HTTPException(400, "studentIds must be a non-empty array")
 
     pool = await get_pool()
+    primary_pool = await get_primary_pool()
 
     test_title = "Aptitude Test"
     emails: list[tuple[str, str]] = []
