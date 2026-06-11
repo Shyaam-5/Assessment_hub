@@ -668,42 +668,36 @@ async def get_test_allocations(test_id: str, request: Request):
         raise HTTPException(403, "Permission denied")
     pool = await get_pool()
     primary_pool = await get_primary_pool()
-    try:
-        student_ids: list[str] = []
-        async with pool.acquire() as conn:
-            async with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                await cur.execute(_ALLOC_TABLE_DDL)
-                await cur.execute(
-                    """SELECT a.student_id
-                       FROM global_test_allocations a
-                       WHERE a.test_id = %s""",
-                    (test_id,),
-                )
-                rows = await cur.fetchall()
-                student_ids = [str(r["student_id"]) for r in (rows or []) if r.get("student_id")]
-        if not student_ids:
-            return []
-        placeholders = ",".join(["%s"] * len(student_ids))
-        async with primary_pool.acquire() as primary_conn:
-            async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
-                await primary_cur.execute(
-                    f"SELECT id, name, email FROM users WHERE id IN ({placeholders})",
-                    tuple(student_ids),
-                )
-                users = await primary_cur.fetchall()
-        by_id = {str(row["id"]): row for row in (users or [])}
-        return [
-            {
-                "studentId": sid,
-                "name": (by_id.get(sid) or {}).get("name"),
-                "email": (by_id.get(sid) or {}).get("email"),
-            }
-            for sid in student_ids
-        ]
-    except Exception as e:
-        if "doesn't exist" in str(e):
-            return []
-        raise HTTPException(500, "Failed to fetch allocations")
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await _ensure_global_test_tables(cur)
+            await cur.execute(
+                """SELECT a.student_id
+                   FROM global_test_allocations a
+                   WHERE a.test_id = %s""",
+                (test_id,),
+            )
+            rows = await cur.fetchall()
+    student_ids = [str(r["student_id"]) for r in (rows or []) if r.get("student_id")]
+    if not student_ids:
+        return []
+    placeholders = ",".join(["%s"] * len(student_ids))
+    async with primary_pool.acquire() as primary_conn:
+        async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+            await primary_cur.execute(
+                f"SELECT id, name, email FROM users WHERE id IN ({placeholders})",
+                tuple(student_ids),
+            )
+            users = await primary_cur.fetchall()
+    by_id = {str(row["id"]): row for row in (users or [])}
+    return [
+        {
+            "studentId": sid,
+            "name": (by_id.get(sid) or {}).get("name"),
+            "email": (by_id.get(sid) or {}).get("email"),
+        }
+        for sid in student_ids
+    ]
 
 
 @router.post("/global-tests/{test_id}/allocations")
@@ -719,92 +713,87 @@ async def set_test_allocations(test_id: str, request: Request):
     student_ids = [str(sid or "").strip() for sid in student_ids if str(sid or "").strip()]
     pool = await get_pool()
     primary_pool = await get_primary_pool()
-    try:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await _ensure_global_test_tables(cur)
-                await cur.execute(_ALLOC_TABLE_DDL)
-                if student_ids:
-                    placeholders = ",".join(["%s"] * len(student_ids))
-                    async with primary_pool.acquire() as primary_conn:
-                        async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
-                            await primary_cur.execute(
-                                f"""
-                                SELECT DISTINCT u.id
-                                FROM users u
-                                LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
-                                LEFT JOIN roles r ON r.id = ura.role_id
-                                WHERE u.id IN ({placeholders})
+    emails: list[tuple[str, str]] = []
+    test_title = "Global Assessment"
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await _ensure_global_test_tables(cur)
+            if student_ids:
+                placeholders = ",".join(["%s"] * len(student_ids))
+                async with primary_pool.acquire() as primary_conn:
+                    async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                        await primary_cur.execute(
+                            f"""
+                            SELECT DISTINCT u.id
+                            FROM users u
+                            LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+                            LEFT JOIN roles r ON r.id = ura.role_id
+                            WHERE u.id IN ({placeholders})
+                              AND (
+                                u.role IN ('student', 'learner')
+                                OR (
+                                  u.role = 'org_user'
                                   AND (
-                                    u.role IN ('student', 'learner')
-                                    OR (
-                                      u.role = 'org_user'
-                                      AND (
-                                        LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
-                                        OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
-                                      )
-                                    )
+                                    LOWER(TRIM(COALESCE(r.slug, ''))) = 'exam-taker'
+                                    OR LOWER(TRIM(COALESCE(r.name, ''))) = 'exam taker'
                                   )
-                                """,
-                                tuple(student_ids),
-                            )
-                            allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
-                    invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
-                    if invalid_ids:
-                        raise HTTPException(400, "Only student, learner, or exam-taker users can be allocated")
-                await cur.execute("SELECT title FROM global_tests WHERE id = %s", (test_id,))
-                test_row = await cur.fetchone()
-                test_title = (test_row[0] if test_row else None) or "Global Assessment"
+                                )
+                              )
+                            """,
+                            tuple(student_ids),
+                        )
+                        allowed_ids = {str(r["id"]) for r in (await primary_cur.fetchall() or [])}
+                invalid_ids = [sid for sid in student_ids if sid not in allowed_ids]
+                if invalid_ids:
+                    raise HTTPException(400, "Only student, learner, or exam-taker users can be allocated")
 
-                await cur.execute("DELETE FROM global_test_allocations WHERE test_id = %s", (test_id,))
-                for sid in student_ids:
-                    await cur.execute(
-                        "INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
-                        (str(uuid.uuid4()), test_id, sid),
-                    )
+            await cur.execute("SELECT title FROM global_tests WHERE id = %s", (test_id,))
+            test_row = await cur.fetchone()
+            if not test_row:
+                raise HTTPException(404, "Global test not found")
+            test_title = test_row.get("title") or test_title
 
-                emails: list[tuple[str, str]] = []
-                if student_ids:
-                    placeholders2 = ",".join(["%s"] * len(student_ids))
-                    async with primary_pool.acquire() as primary_conn:
-                        async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
-                            await primary_cur.execute(
-                                f"SELECT name, email FROM users WHERE id IN ({placeholders2})",
-                                tuple(student_ids),
-                            )
-                            email_rows = await primary_cur.fetchall()
-                            emails = [
-                                (r.get("name") or "User", r.get("email") or "")
-                                for r in (email_rows or [])
-                                if (r.get("email") or "").strip()
-                            ]
-            await conn.commit()
-
-        for name, email in emails:
-            try:
-                await asyncio.to_thread(
-                    send_exam_allocated_email,
-                    email, name, test_title, "Global Assessment",
+            await cur.execute("DELETE FROM global_test_allocations WHERE test_id = %s", (test_id,))
+            for sid in student_ids:
+                await cur.execute(
+                    "INSERT IGNORE INTO global_test_allocations (id, test_id, student_id) VALUES (%s, %s, %s)",
+                    (str(uuid.uuid4()), test_id, sid),
                 )
-            except Exception:
-                pass
+        await conn.commit()
 
-        audit_logger.log_event(
-            AuditEventType.ADMIN_TEST_MODIFIED,
-            user_id=actor,
-            ip_address=_client_ip(request),
-            resource_id=test_id,
-            resource_type="global_test",
-            action="Global test allocations updated",
-            details={"studentCount": len(student_ids)},
-        )
-        return {"allocated": len(student_ids)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        if "doesn't exist" in str(e):
-            raise HTTPException(503, "Global tests not set up.")
-        raise HTTPException(500, "Failed to save allocations")
+    if student_ids:
+        try:
+            placeholders = ",".join(["%s"] * len(student_ids))
+            async with primary_pool.acquire() as primary_conn:
+                async with primary_conn.cursor(pymysql.cursors.DictCursor) as primary_cur:
+                    await primary_cur.execute(
+                        f"SELECT name, email FROM users WHERE id IN ({placeholders})",
+                        tuple(student_ids),
+                    )
+                    email_rows = await primary_cur.fetchall()
+                    emails = [
+                        (r.get("name") or "User", r.get("email") or "")
+                        for r in (email_rows or [])
+                        if (r.get("email") or "").strip()
+                    ]
+            for name, email in emails:
+                try:
+                    await asyncio.to_thread(send_exam_allocated_email, email, name, test_title, "Global Assessment")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    audit_logger.log_event(
+        AuditEventType.ADMIN_TEST_MODIFIED,
+        user_id=actor,
+        ip_address=_client_ip(request),
+        resource_id=test_id,
+        resource_type="global_test",
+        action="Global test allocations updated",
+        details={"studentCount": len(student_ids)},
+    )
+    return {"allocated": len(student_ids)}
 
 
 @router.get("/global-tests")

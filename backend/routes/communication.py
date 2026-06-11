@@ -17,6 +17,8 @@ import os
 import random
 import uuid as _uuid
 
+import pymysql.cursors
+
 from fastapi import APIRouter, HTTPException, Request, Body, Depends
 from fastapi.responses import JSONResponse
 
