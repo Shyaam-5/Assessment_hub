@@ -27,6 +27,12 @@ const DEFAULT_PROCTOR_CONFIG = {
     camera_block_detect: true,
     multiple_people_detect: true,
     auto_submit_on_violation: true,
+    excluded_violation_types: ['window_blur'],
+}
+
+const isViolationExcludedFromAutoSubmit = (config = {}, eventType = '') => {
+    const excluded = Array.isArray(config?.excluded_violation_types) ? config.excluded_violation_types : []
+    return excluded.includes(eventType)
 }
 
 function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTOR_CONFIG, onAutoTerminate = null) {
@@ -91,12 +97,14 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
 
     const logViolation = useCallback(async (eventType, severity = 'low', details = '') => {
         if (terminatedRef.current) return
-        addViolation(1)
+        const countsTowardAutoSubmit = !isViolationExcludedFromAutoSubmit(cfg, eventType)
+        if (countsTowardAutoSubmit) addViolation(1)
         // Emit to Socket.IO for real-time admin live monitoring
         socketService.emitProctoringViolation(userId, '', eventType, severity, null)
         try {
             await axios.post(`${API_BASE}/proctoring/log`, {
-                userId, sessionId, eventType, severity, details
+                userId, sessionId, eventType, severity, details,
+                excludedEventTypes: cfg.excluded_violation_types || []
             })
             await axios.post(`${BACKEND_BASE}/api/behavior/log-events`, {
                 session_id: `beh_${sessionId}`,
@@ -110,7 +118,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
                 }],
             })
         } catch { /* silent */ }
-    }, [userId, sessionId, addViolation])
+    }, [userId, sessionId, addViolation, cfg])
 
     const showWarning = useCallback((title, message, severity = 'medium') => {
         setViolationWarning({ title, message, severity })
@@ -157,7 +165,7 @@ function useProctoring(userId, sessionId, active = true, config = DEFAULT_PROCTO
                 setTabSwitchCount(prev => {
                     const nc = prev + 1
                     logViolation('tab_switch', nc >= 2 ? 'high' : 'medium', `Tab switch #${nc}`)
-                    if (cfg.auto_submit_on_violation && nc > (cfg.max_tab_switches || 3) && !terminatedRef.current) {
+                    if (!isViolationExcludedFromAutoSubmit(cfg, 'tab_switch') && cfg.auto_submit_on_violation && nc > (cfg.max_tab_switches || 3) && !terminatedRef.current) {
                         terminatedRef.current = true
                         setAutoTerminated(true)
                         if (onAutoTerminateRef.current) onAutoTerminateRef.current()

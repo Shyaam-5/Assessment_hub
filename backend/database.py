@@ -112,6 +112,7 @@ _CORE_DOMAIN_TABLES_SQL = [
         detect_multiple_faces VARCHAR(10) NULL,
         track_face_lookaway VARCHAR(10) NULL,
         auto_submit_on_violation VARCHAR(10) NULL,
+        excluded_violation_types TEXT NULL,
         attempt_limit INT NULL,
         max_attempts INT NULL,
         deadline DATETIME NULL,
@@ -1039,6 +1040,7 @@ async def ensure_core_domain_tables(pool: "PyMySQLPool | None" = None) -> None:
                 ("detect_camera_blocking", "VARCHAR(10) NULL"),
                 ("enforce_fullscreen", "VARCHAR(10) NULL"),
                 ("auto_submit_on_violation", "VARCHAR(10) NULL"),
+                ("excluded_violation_types", "TEXT NULL"),
             ]
             for column_name, definition in _problem_migrations:
                 await cur.execute(

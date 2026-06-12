@@ -6,6 +6,14 @@ import { useCamera, useObjectDetection, useFaceDetection } from '@/hooks/useProc
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 const EMPTY_QUESTIONS = []
+const DEFAULT_EXCLUDED_VIOLATION_TYPES = ['window_blur']
+
+const isViolationExcludedFromAutoSubmit = (proctoring = {}, eventType = '') => {
+    const excluded = Array.isArray(proctoring?.excludedViolationTypes)
+        ? proctoring.excludedViolationTypes
+        : DEFAULT_EXCLUDED_VIOLATION_TYPES
+    return excluded.includes(eventType)
+}
 
 // Seeded random shuffle - ensures same student gets same order on refresh
 function seededShuffle(array, seed) {
@@ -55,6 +63,9 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
         detectMultipleFaces: test.proctoringConfig?.detectMultipleFaces ?? true,
         autoSubmitOnViolation: test.proctoringConfig?.autoSubmitOnViolation ?? false,
         multiMonitorDetection: test.proctoringConfig?.multiMonitorDetection ?? false,
+        excludedViolationTypes: Array.isArray(test.proctoringConfig?.excludedViolationTypes)
+            ? test.proctoringConfig.excludedViolationTypes
+            : DEFAULT_EXCLUDED_VIOLATION_TYPES,
     }), [test])
     const shouldUseVideo = proctoring.enabled && (
         proctoring.enableVideoAudio ||
@@ -204,7 +215,8 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
     // ── Unified violation recorder ──
     const recordViolation = useCallback((eventType = 'unknown', severity = 'low') => {
         if (terminatedRef.current) return
-        totalViolationsRef.current += 1
+        const countsTowardAutoSubmit = !isViolationExcludedFromAutoSubmit(proctoring, eventType)
+        if (countsTowardAutoSubmit) totalViolationsRef.current += 1
         const count = totalViolationsRef.current
         setTotalViolations(count)
         behaviorEventsBuffer.current.push({
@@ -220,12 +232,13 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             testId: test.id,
             eventType,
             severity,
-            details: `Violation ${count}/${MAX_VIOLATIONS}`
+            details: `Violation ${count}/${MAX_VIOLATIONS}`,
+            excludedEventTypes: proctoring.excludedViolationTypes || []
         }).catch(() => {})
-        if (count >= MAX_VIOLATIONS) {
+        if (countsTowardAutoSubmit && count >= MAX_VIOLATIONS) {
             autoTerminateTest(`Maximum proctoring violations reached (${count}/${MAX_VIOLATIONS}). Your test has been automatically terminated.`)
         }
-    }, [autoTerminateTest, user.id, test.id])
+    }, [autoTerminateTest, user.id, test.id, proctoring])
 
     const flushBehaviorEvents = useCallback(async () => {
         if (behaviorEventsBuffer.current.length === 0) return

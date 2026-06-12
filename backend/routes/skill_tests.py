@@ -158,6 +158,20 @@ def _safe_json(val: Any) -> Any:
 def _json_str(val: Any) -> str:
     return json.dumps(val, default=str)
 
+
+def _normalize_excluded_violation_types(config: Any) -> list[str]:
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except Exception:
+            config = {}
+    if not isinstance(config, dict):
+        return ["window_blur"]
+    excluded = config.get("excluded_violation_types")
+    if not isinstance(excluded, list):
+        return ["window_blur"]
+    return [str(item).strip() for item in excluded if str(item).strip()]
+
 async def _create_sandbox(test_id: int):
     t = _sandbox_names(test_id)
     pool = await get_pool()
@@ -414,6 +428,7 @@ async def create_test(request: Request, body: dict = Body(...)):
         "multiple_people_detect": True,
         "multi_monitor_detect": True,
         "auto_submit_on_violation": True,
+        "excluded_violation_types": ["window_blur"],
     }
     total_questions = mcq_count + coding_count + sql_count + interview_count
     if total_questions <= 0:
@@ -1116,7 +1131,29 @@ async def _maybe_trigger_skill_agent(attempt_id: str, severity: str, user_id: st
     """Fire-and-forget agent analysis on skill test proctoring events."""
     try:
         from services.proctor_agent import agent_analyze_session, save_analysis
-        result = await agent_analyze_session(str(attempt_id), "skill", user_id=user_id)
+        excluded_event_types: list[str] = ["window_blur"]
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT t.proctoring_config
+                    FROM skill_test_attempts a
+                    JOIN skill_tests t ON t.id = a.test_id
+                    WHERE a.id = %s
+                    LIMIT 1
+                    """,
+                    (attempt_id,),
+                )
+                row = await cur.fetchone()
+                if row:
+                    excluded_event_types = _normalize_excluded_violation_types(row.get("proctoring_config"))
+        result = await agent_analyze_session(
+            str(attempt_id),
+            "skill",
+            user_id=user_id,
+            excluded_event_types=excluded_event_types,
+        )
         if result.get("fraud_score", 0) > 0:
             await save_analysis({**result, "source": "skill"})
             if result.get("fraud_score", 0) >= 35:

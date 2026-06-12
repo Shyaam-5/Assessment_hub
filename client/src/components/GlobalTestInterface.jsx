@@ -13,6 +13,14 @@ import proctoringSocketAdapter from '@/services/proctoringSocketAdapter'
 import { useFaceDetection } from '@/hooks/useProctoring'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
+const DEFAULT_EXCLUDED_VIOLATION_TYPES = ['window_blur']
+
+const isViolationExcludedFromAutoSubmit = (proctoring = {}, eventType = '') => {
+    const excluded = Array.isArray(proctoring?.excludedViolationTypes)
+        ? proctoring.excludedViolationTypes
+        : DEFAULT_EXCLUDED_VIOLATION_TYPES
+    return excluded.includes(eventType)
+}
 
 
 
@@ -101,6 +109,9 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
 
     // Enhanced Proctoring State
     const proctoring = test.proctoring || {}
+    if (!Array.isArray(proctoring.excludedViolationTypes)) {
+        proctoring.excludedViolationTypes = DEFAULT_EXCLUDED_VIOLATION_TYPES
+    }
     const shouldUseVideo = proctoring.enabled && (
         proctoring.enableVideoAudio ||
         proctoring.detectCameraBlocking ||
@@ -239,7 +250,8 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
     // ── Unified violation recorder (logs to backend + checks threshold) ──
     const recordViolation = useCallback((eventType = 'unknown', severity = 'low') => {
         if (terminatedRef.current) return
-        totalViolationsRef.current += 1
+        const countsTowardAutoSubmit = !isViolationExcludedFromAutoSubmit(proctoring, eventType)
+        if (countsTowardAutoSubmit) totalViolationsRef.current += 1
         const count = totalViolationsRef.current
         setTotalViolations(count)
         axios.post(`${API_BASE}/global-tests/proctoring/log`, {
@@ -248,9 +260,10 @@ export default function GlobalTestInterface({ test, user, onClose, onComplete })
             testId: test.id,
             eventType,
             severity,
-            details: `Violation ${count}/${MAX_VIOLATIONS}`
+            details: `Violation ${count}/${MAX_VIOLATIONS}`,
+            excludedEventTypes: proctoring.excludedViolationTypes || []
         }).catch(() => {})
-        if (count >= MAX_VIOLATIONS && proctoring.autoSubmitOnViolation) {
+        if (countsTowardAutoSubmit && count >= MAX_VIOLATIONS && proctoring.autoSubmitOnViolation) {
             autoTerminateTest(`Maximum proctoring violations reached (${count}/${MAX_VIOLATIONS}). Your test has been automatically terminated.`)
         }
     }, [autoTerminateTest, proctoring.autoSubmitOnViolation, user.id])

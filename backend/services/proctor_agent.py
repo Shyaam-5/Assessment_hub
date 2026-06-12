@@ -379,6 +379,7 @@ async def agent_analyze_session(
     *,
     user_id: str = "",
     exam_title: str = "",
+    excluded_event_types: list[str] | None = None,
 ) -> dict:
     """Run the ReAct agent on a single session's proctoring data.
 
@@ -386,7 +387,28 @@ async def agent_analyze_session(
     """
     # â"€â"€ Step 1: Observe - gather all data â"€â"€
     events = await tool_get_event_timeline(session_id, source)
-    summary = await tool_get_event_summary(session_id, source)
+    excluded = {str(item).strip() for item in (excluded_event_types or []) if str(item).strip()}
+    if excluded:
+        events = [event for event in events if str(event.get("event_type", "")).strip() not in excluded]
+
+    if events:
+        by_type: dict[str, int] = {}
+        by_severity: dict[str, int] = {}
+        for event in events:
+            et = event.get("event_type", "unknown")
+            sv = event.get("severity", "low")
+            by_type[et] = by_type.get(et, 0) + 1
+            by_severity[sv] = by_severity.get(sv, 0) + 1
+        summary = {
+            "total_events": len(events),
+            "by_type": by_type,
+            "by_severity": by_severity,
+            "first_event": events[0].get("created_at", ""),
+            "last_event": events[-1].get("created_at", ""),
+            "timeline_minutes": _minutes_between(events[0].get("created_at", ""), events[-1].get("created_at", "")),
+        }
+    else:
+        summary = {"total_events": 0, "by_type": {}, "by_severity": {}, "timeline_minutes": 0}
 
     if not events:
         return {
@@ -396,7 +418,7 @@ async def agent_analyze_session(
             "patterns": [],
             "ai_reasoning": None,
             "recommended_action": "monitor",
-            "message": "No proctoring events recorded for this session.",
+            "message": "No proctoring events recorded for this session after exclusions.",
         }
 
     # â"€â"€ Step 2: Correlate - detect compound patterns â"€â"€

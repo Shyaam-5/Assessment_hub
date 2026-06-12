@@ -448,11 +448,16 @@ _AGENT_TRIGGER_INTERVAL = 5  # run agent every N events
 _AGENT_TRIGGER_SEVERITIES = {"high", "critical"}  # always trigger on these
 
 
-async def _maybe_trigger_agent(session_id: str, severity: str, user_id: str = ""):
+async def _maybe_trigger_agent(session_id: str, severity: str, user_id: str = "", excluded_event_types: list[str] | None = None):
     """Fire-and-forget agent analysis on accumulated events."""
     try:
         from services.proctor_agent import agent_analyze_session, save_analysis
-        result = await agent_analyze_session(session_id, "comm", user_id=user_id)
+        result = await agent_analyze_session(
+            session_id,
+            "comm",
+            user_id=user_id,
+            excluded_event_types=excluded_event_types or ["window_blur"],
+        )
         if result.get("fraud_score", 0) > 0:
             await save_analysis({**result, "source": "comm"})
             # Emit real-time alert to admins if score is concerning
@@ -515,6 +520,7 @@ async def proctoring_log(request: Request):
     event_type = data.get("eventType", "unknown")
     severity = data.get("severity", "low")
     details = data.get("details", "")
+    excluded_event_types = data.get("excludedEventTypes") or data.get("excluded_event_types") or ["window_blur"]
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -549,7 +555,7 @@ async def proctoring_log(request: Request):
         or _agent_event_counter[session_id] % _AGENT_TRIGGER_INTERVAL == 0
     )
     if should_trigger:
-        task = asyncio.create_task(_maybe_trigger_agent(session_id, severity, user_id))
+        task = asyncio.create_task(_maybe_trigger_agent(session_id, severity, user_id, excluded_event_types))
         task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
 
     audit_logger.log_event(
@@ -874,6 +880,7 @@ async def create_comm_test(request: Request):
         "camera_block_detect": True,
         "multiple_people_detect": True,
         "auto_submit_on_violation": True,
+        "excluded_violation_types": ["window_blur"],
     })
 
     pool = await get_pool()
@@ -1058,6 +1065,7 @@ async def update_comm_test(test_id: int, request: Request):
         "camera_block_detect": True,
         "multiple_people_detect": True,
         "auto_submit_on_violation": True,
+        "excluded_violation_types": ["window_blur"],
     })
 
     pool = await get_pool()

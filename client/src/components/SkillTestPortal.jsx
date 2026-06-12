@@ -22,12 +22,21 @@ const DEFAULT_SKILL_PROCTORING_CONFIG = {
     multiple_people_detect: true,
     multi_monitor_detect: true,
     auto_submit_on_violation: true,
+    excluded_violation_types: ['window_blur'],
 };
 
 const normalizeSkillProctoring = (config = {}) => ({
     ...DEFAULT_SKILL_PROCTORING_CONFIG,
-    ...(config || {})
+    ...(config || {}),
+    excluded_violation_types: Array.isArray(config?.excluded_violation_types)
+        ? config.excluded_violation_types
+        : DEFAULT_SKILL_PROCTORING_CONFIG.excluded_violation_types,
 });
+
+const isViolationExcludedFromAutoSubmit = (config = {}, eventType = '') => {
+    const excluded = Array.isArray(config?.excluded_violation_types) ? config.excluded_violation_types : [];
+    return excluded.includes(eventType);
+};
 const getSkillProctoringRules = (config = {}) => {
     const cfg = normalizeSkillProctoring(config);
     return [
@@ -225,20 +234,32 @@ export default function SkillTestPortal({ user }) {
                 eventType, severity, null
             );
             setProctoringStats(prev => {
+                const countsTowardAutoSubmit = !isViolationExcludedFromAutoSubmit(activeProctoringConfig, eventType);
                 const nextTabSwitchCount = eventType === 'tab_switch' ? prev.tabSwitchCount + 1 : prev.tabSwitchCount;
                 const next = {
                     ...prev,
-                    violationCount: prev.violationCount + 1,
+                    violationCount: prev.violationCount + (countsTowardAutoSubmit ? 1 : 0),
                     tabSwitchCount: nextTabSwitchCount,
                     fullscreenExits: eventType === 'fullscreen_exit' ? prev.fullscreenExits + 1 : prev.fullscreenExits,
                     phoneDetections: eventType === 'phone_detected' ? prev.phoneDetections + 1 : prev.phoneDetections,
                     cameraBlocks: eventType === 'camera_blocked' ? prev.cameraBlocks + 1 : prev.cameraBlocks,
                 };
-                if (eventType === 'tab_switch' && activeProctoringConfig.auto_submit_on_violation && nextTabSwitchCount > (activeProctoringConfig.max_tab_switches || 3) && !terminatedRef.current) {
+                if (
+                    eventType === 'tab_switch' &&
+                    countsTowardAutoSubmit &&
+                    activeProctoringConfig.auto_submit_on_violation &&
+                    nextTabSwitchCount > (activeProctoringConfig.max_tab_switches || 3) &&
+                    !terminatedRef.current
+                ) {
                     terminateAttempt(`Maximum tab switches exceeded (${nextTabSwitchCount}/${activeProctoringConfig.max_tab_switches || 3}).`);
                 }
                 // Auto-terminate at MAX_VIOLATIONS
-                if (activeProctoringConfig.auto_submit_on_violation && next.violationCount >= MAX_VIOLATIONS && !terminatedRef.current) {
+                if (
+                    countsTowardAutoSubmit &&
+                    activeProctoringConfig.auto_submit_on_violation &&
+                    next.violationCount >= MAX_VIOLATIONS &&
+                    !terminatedRef.current
+                ) {
                     terminateAttempt(`Maximum proctoring violations reached (${next.violationCount}/${MAX_VIOLATIONS}). Your test has been automatically terminated.`);
                 }
                 return next;

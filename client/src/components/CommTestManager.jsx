@@ -21,6 +21,7 @@ const DEFAULT_COMM_PROCTORING_CONFIG = {
     camera_block_detect: true,
     multiple_people_detect: true,
     auto_submit_on_violation: true,
+    excluded_violation_types: ['window_blur'],
 };
 
 // Reusable section card

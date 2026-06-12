@@ -293,7 +293,8 @@ const SHARED_PROCTORING_DEFAULTS = Object.freeze({
     detectCameraBlocking: true,
     enableFaceDetection: true,
     detectMultipleFaces: true,
-    autoSubmitOnViolation: false
+    autoSubmitOnViolation: false,
+    excludedViolationTypes: ['window_blur']
 })
 
 const createSharedProctoringSettings = (overrides = {}) => ({
@@ -403,6 +404,18 @@ function AdminUnifiedProctoringSection({ value, onChange, color = '#ef4444' }) {
                             />
                         </div>
                     )}
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#94a3b8' }}>
+                        <input
+                            type="checkbox"
+                            checked={Array.isArray(value.excludedViolationTypes) && value.excludedViolationTypes.includes('window_blur')}
+                            onChange={(event) => updateField(
+                                'excludedViolationTypes',
+                                event.target.checked ? ['window_blur'] : []
+                            )}
+                        />
+                        Exclude `window_blur` from auto-submit counting
+                    </label>
                 </>
             )}
 
@@ -2858,7 +2871,8 @@ function GlobalProblems({ mode = 'all' }) {
         enableFaceDetection: false,
         detectMultipleFaces: false,
         trackFaceLookaway: false,
-        autoSubmitOnViolation: false
+    autoSubmitOnViolation: false,
+    excludedViolationTypes: ['window_blur']
     })
 
     // Check if SQL is selected
@@ -2915,7 +2929,8 @@ function GlobalProblems({ mode = 'all' }) {
             enableFaceDetection: problem.enableFaceDetection,
             detectMultipleFaces: problem.detectMultipleFaces,
             trackFaceLookaway: problem.trackFaceLookaway,
-            autoSubmitOnViolation: problem.autoSubmitOnViolation
+            autoSubmitOnViolation: problem.autoSubmitOnViolation,
+            excludedViolationTypes: problem.excludedViolationTypes || ['window_blur']
         })
         setShowModal(true)
     }
@@ -3036,7 +3051,7 @@ function GlobalProblems({ mode = 'all' }) {
                 sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '',
                 enableProctoring: false, enableVideoAudio: false, enableMicrophone: false, disableCopyPaste: false, trackTabSwitches: false, maxTabSwitches: 3,
                 detectPhoneUsage: false, detectCameraBlocking: false, enforceFullscreen: false,
-                enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, autoSubmitOnViolation: false
+                enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, autoSubmitOnViolation: false, excludedViolationTypes: ['window_blur']
             })
             fetchProblems()
         } catch (error) {
@@ -3862,7 +3877,8 @@ function GlobalProblems({ mode = 'all' }) {
                                         detectCameraBlocking: problem.detectCameraBlocking,
                                         enableFaceDetection: problem.enableFaceDetection,
                                         detectMultipleFaces: problem.detectMultipleFaces,
-                                        autoSubmitOnViolation: problem.autoSubmitOnViolation
+                                        autoSubmitOnViolation: problem.autoSubmitOnViolation,
+                                        excludedViolationTypes: problem.excludedViolationTypes || ['window_blur']
                                     }}
                                     onChange={(next) => setProblem({
                                         ...problem,
@@ -3877,7 +3893,8 @@ function GlobalProblems({ mode = 'all' }) {
                                         detectCameraBlocking: next.detectCameraBlocking,
                                         enableFaceDetection: next.enableFaceDetection,
                                         detectMultipleFaces: next.detectMultipleFaces,
-                                        autoSubmitOnViolation: next.autoSubmitOnViolation
+                                        autoSubmitOnViolation: next.autoSubmitOnViolation,
+                                        excludedViolationTypes: next.excludedViolationTypes || ['window_blur']
                                     })}
                                     color="#ef4444"
                                 />

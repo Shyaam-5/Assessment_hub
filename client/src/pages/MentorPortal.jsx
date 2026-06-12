@@ -463,7 +463,8 @@ function UploadProblems({ user }) {
         maxTabSwitches: 3,
         enableFaceDetection: false,
         detectMultipleFaces: false,
-        trackFaceLookaway: false
+        trackFaceLookaway: false,
+        excludedViolationTypes: ['window_blur']
     })
 
     // Check if SQL is selected
@@ -491,7 +492,8 @@ function UploadProblems({ user }) {
             maxTabSwitches: problem.maxTabSwitches,
             enableFaceDetection: problem.enableFaceDetection,
             detectMultipleFaces: problem.detectMultipleFaces,
-            trackFaceLookaway: problem.trackFaceLookaway
+            trackFaceLookaway: problem.trackFaceLookaway,
+            excludedViolationTypes: problem.excludedViolationTypes || ['window_blur']
         })
         setShowAIChat(false)
         setShowModal(true)
@@ -614,7 +616,7 @@ function UploadProblems({ user }) {
                 description: '', testInput: '', expectedOutput: '', deadline: '', status: 'live',
                 enableProctoring: false, enableVideoAudio: false, disableCopyPaste: false,
                 trackTabSwitches: false, maxTabSwitches: 3,
-                enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false
+                enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, excludedViolationTypes: ['window_blur']
             })
             fetchData()
         } catch (error) {
@@ -968,6 +970,22 @@ function UploadProblems({ user }) {
                                                     />
                                                 </div>
                                             )}
+
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    id="excludeWindowBlur"
+                                                    checked={Array.isArray(problem.excludedViolationTypes) && problem.excludedViolationTypes.includes('window_blur')}
+                                                    onChange={(e) => setProblem({
+                                                        ...problem,
+                                                        excludedViolationTypes: e.target.checked ? ['window_blur'] : []
+                                                    })}
+                                                    style={{ width: '16px', height: '16px', accentColor: '#22c55e' }}
+                                                />
+                                                <label htmlFor="excludeWindowBlur" style={{ cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                                    Exclude window blur from auto-submit counting
+                                                </label>
+                                            </div>
 
                                             <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(139, 92, 246, 0.2)' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>

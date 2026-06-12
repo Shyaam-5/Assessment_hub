@@ -58,10 +58,15 @@ async def _insert_unified_proctor_event(
         await conn.commit()
 
 
-async def _maybe_trigger_aptitude_agent(session_id: str, user_id: str = ""):
+async def _maybe_trigger_aptitude_agent(session_id: str, user_id: str = "", excluded_event_types: list[str] | None = None):
     try:
         from services.proctor_agent import agent_analyze_session, save_analysis
-        result = await agent_analyze_session(session_id, "aptitude", user_id=user_id)
+        result = await agent_analyze_session(
+            session_id,
+            "aptitude",
+            user_id=user_id,
+            excluded_event_types=excluded_event_types or ["window_blur"],
+        )
         if result.get("fraud_score", 0) > 0:
             await save_analysis({**result, "source": "aptitude"})
             if result.get("recommended_action") == "terminate" or result.get("risk_level") == "terminate":
@@ -242,6 +247,7 @@ def _normalize_proctoring_config(raw: Any, fallback_max_tab: int = 3) -> dict:
         "enableFaceDetection": _to_bool(cfg.get("enableFaceDetection", True), True) if enabled else False,
         "detectMultipleFaces": _to_bool(cfg.get("detectMultipleFaces", True), True) if enabled else False,
         "autoSubmitOnViolation": _to_bool(cfg.get("autoSubmitOnViolation", False), False) if enabled else False,
+        "excludedViolationTypes": cfg.get("excludedViolationTypes") if isinstance(cfg.get("excludedViolationTypes"), list) else ["window_blur"],
     }
 
 
@@ -1004,6 +1010,7 @@ async def aptitude_proctoring_log(request: Request, body: dict = Body(...)):
     severity = str(body.get("severity") or "low")
     details = body.get("details", "")
     test_id = str(body.get("testId") or body.get("test_id") or "")
+    excluded_event_types = body.get("excludedEventTypes") or body.get("excluded_event_types") or ["window_blur"]
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1032,7 +1039,7 @@ async def aptitude_proctoring_log(request: Request, body: dict = Body(...)):
             _aptitude_agent_counter.pop(k, None)
     _aptitude_agent_counter[session_id] = _aptitude_agent_counter.get(session_id, 0) + 1
     if severity in ("high", "critical") or _aptitude_agent_counter[session_id] % _APT_AGENT_INTERVAL == 0:
-        task = asyncio.create_task(_maybe_trigger_aptitude_agent(session_id, user_id))
+        task = asyncio.create_task(_maybe_trigger_aptitude_agent(session_id, user_id, excluded_event_types))
         task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
 
     audit_logger.log_event(

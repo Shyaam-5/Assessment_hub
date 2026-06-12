@@ -60,10 +60,15 @@ async def _insert_unified_proctor_event(
         await conn.commit()
 
 
-async def _maybe_trigger_global_agent(session_id: str, user_id: str = ""):
+async def _maybe_trigger_global_agent(session_id: str, user_id: str = "", excluded_event_types: list[str] | None = None):
     try:
         from services.proctor_agent import agent_analyze_session, save_analysis
-        result = await agent_analyze_session(session_id, "global", user_id=user_id)
+        result = await agent_analyze_session(
+            session_id,
+            "global",
+            user_id=user_id,
+            excluded_event_types=excluded_event_types or ["window_blur"],
+        )
         if result.get("fraud_score", 0) > 0:
             await save_analysis({**result, "source": "global"})
             if result.get("recommended_action") == "terminate" or result.get("risk_level") == "terminate":
@@ -278,6 +283,7 @@ def _normalize_proctoring_config(raw: Any, fallback_max_tab: int = 3) -> dict:
         "enableFaceDetection": enable_face,
         "detectMultipleFaces": detect_multiple,
         "autoSubmitOnViolation": auto_submit,
+        "excludedViolationTypes": cfg.get("excludedViolationTypes") if isinstance(cfg.get("excludedViolationTypes"), list) else ["window_blur"],
         # Compatibility keys for consumers that still use problem-style naming.
         "videoAudio": enable_video,
         "multiplePeopleDetection": detect_multiple,
@@ -1305,6 +1311,7 @@ async def global_proctoring_log(request: Request):
     severity = str(data.get("severity") or "low")
     details = data.get("details", "")
     test_id = str(data.get("testId") or data.get("test_id") or "")
+    excluded_event_types = data.get("excludedEventTypes") or data.get("excluded_event_types") or ["window_blur"]
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1333,7 +1340,7 @@ async def global_proctoring_log(request: Request):
             _global_agent_counter.pop(k, None)
     _global_agent_counter[session_id] = _global_agent_counter.get(session_id, 0) + 1
     if severity in ("high", "critical") or _global_agent_counter[session_id] % _GLOBAL_AGENT_INTERVAL == 0:
-        task = asyncio.create_task(_maybe_trigger_global_agent(session_id, user_id))
+        task = asyncio.create_task(_maybe_trigger_global_agent(session_id, user_id, excluded_event_types))
         task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
 
     audit_logger.log_event(

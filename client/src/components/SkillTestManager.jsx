@@ -45,6 +45,7 @@ const DEFAULT_SKILL_PROCTORING_CONFIG = {
     multiple_people_detect: true,
     multi_monitor_detect: true,
     auto_submit_on_violation: true,
+    excluded_violation_types: ['window_blur'],
 };
 
 // Section card helper

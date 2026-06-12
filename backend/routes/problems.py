@@ -1,6 +1,7 @@
 ﻿"""Problem CRUD routes with proctoring settings."""
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -103,6 +104,7 @@ class ProblemCreate(BaseModel):
     detectMultipleFaces: bool | None = False
     trackFaceLookaway: bool | None = False
     autoSubmitOnViolation: bool | None = False
+    excludedViolationTypes: list[str] | None = None
 
 
 def _enrich_problem(p: dict) -> dict:
@@ -126,6 +128,13 @@ def _enrich_problem(p: dict) -> dict:
 
     # Proctoring settings mapped to what frontend expects for code editor
     enable_proc = p.pop("enable_proctoring", None) == "true"
+    raw_excluded = p.pop("excluded_violation_types", None)
+    try:
+        excluded_violation_types = json.loads(raw_excluded) if isinstance(raw_excluded, str) and raw_excluded else ["window_blur"]
+    except Exception:
+        excluded_violation_types = ["window_blur"]
+    if not isinstance(excluded_violation_types, list):
+        excluded_violation_types = ["window_blur"]
     p["proctoring"] = {
         "enabled": enable_proc,
         "videoAudio": p.pop("enable_video_audio", None) == "true",
@@ -140,6 +149,7 @@ def _enrich_problem(p: dict) -> dict:
         "detectMultipleFaces": p.pop("detect_multiple_faces", None) == "true",
         "trackFaceLookaway": p.pop("track_face_lookaway", None) == "true",
         "autoSubmitOnViolation": p.pop("auto_submit_on_violation", None) == "true",
+        "excludedViolationTypes": excluded_violation_types,
     }
     return p
 
@@ -308,9 +318,9 @@ async def create_problem(body: ProblemCreate, request: Request):
                     enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
                     track_tab_switches, max_tab_switches,
                     detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
-                    enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation,
+                    enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation, excluded_violation_types,
                     created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     problem_id, body.mentorId, body.title, body.description,
                     body.sampleInput, body.expectedOutput,
@@ -328,6 +338,7 @@ async def create_problem(body: ProblemCreate, request: Request):
                     str(body.detectMultipleFaces).lower(),
                     str(body.trackFaceLookaway).lower(),
                     str(body.autoSubmitOnViolation).lower(),
+                    json.dumps(body.excludedViolationTypes if isinstance(body.excludedViolationTypes, list) else ["window_blur"]),
                     now,
                 ),
             )

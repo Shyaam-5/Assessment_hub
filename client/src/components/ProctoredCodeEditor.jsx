@@ -8,6 +8,14 @@ import * as blazeface from '@tensorflow-models/blazeface'
 import socketService from '../services/socketService'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
+const DEFAULT_EXCLUDED_VIOLATION_TYPES = ['window_blur']
+
+const isViolationExcludedFromAutoSubmit = (proctoring = {}, eventType = '') => {
+    const excluded = Array.isArray(proctoring?.excludedViolationTypes)
+        ? proctoring.excludedViolationTypes
+        : DEFAULT_EXCLUDED_VIOLATION_TYPES
+    return excluded.includes(eventType)
+}
 
 // Language configurations
 const LANGUAGE_CONFIG = {
@@ -85,6 +93,9 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
     const faceDetectedRef = useRef(true)
 
     const proctoring = problem.proctoring || {}
+    if (!Array.isArray(proctoring.excludedViolationTypes)) {
+        proctoring.excludedViolationTypes = DEFAULT_EXCLUDED_VIOLATION_TYPES
+    }
     const shouldUseVideo = proctoring.enabled && (
         proctoring.videoAudio ||
         proctoring.detectCameraBlocking ||
@@ -273,7 +284,8 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
     // ── Record a proctoring violation and auto-terminate at MAX_VIOLATIONS ──
     const recordViolation = useCallback((eventType = 'unknown', severity = 'low') => {
         if (terminatedRef.current) return
-        totalViolationsRef.current += 1
+        const countsTowardAutoSubmit = !isViolationExcludedFromAutoSubmit(proctoring, eventType)
+        if (countsTowardAutoSubmit) totalViolationsRef.current += 1
         const count = totalViolationsRef.current
         setTotalViolations(count)
         // Log to backend for Proctor Intelligence Agent analysis
@@ -282,9 +294,10 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
             sessionId: behaviorSessionId.current,
             eventType,
             severity,
-            details: `Violation ${count}/${MAX_VIOLATIONS}`
+            details: `Violation ${count}/${MAX_VIOLATIONS}`,
+            excludedEventTypes: proctoring.excludedViolationTypes || []
         }).catch(() => {})
-        if (count >= MAX_VIOLATIONS && proctoring.autoSubmitOnViolation) {
+        if (countsTowardAutoSubmit && count >= MAX_VIOLATIONS && proctoring.autoSubmitOnViolation) {
             autoTerminateTest(`Maximum proctoring violations reached (${count}/${MAX_VIOLATIONS}). Your test has been automatically terminated and submitted.`)
         }
     }, [autoTerminateTest, proctoring.autoSubmitOnViolation, user.id])

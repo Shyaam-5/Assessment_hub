@@ -134,6 +134,22 @@ const LANGUAGE_CONFIG = {
     'SQL': { monacoLang: 'sql', ext: '.sql', defaultCode: `-- Write your SQL query here\nSELECT * FROM table_name;` }
 }
 
+const DEFAULT_LEGACY_PROCTORING_CONFIG = {
+    enabled: true,
+    enforceFullscreen: true,
+    trackTabSwitches: true,
+    maxTabSwitches: 3,
+    autoSubmitOnViolation: true,
+    excludedViolationTypes: ['window_blur'],
+}
+
+const isViolationExcludedFromAutoSubmit = (proctoring = {}, eventType = '') => {
+    const excluded = Array.isArray(proctoring?.excludedViolationTypes)
+        ? proctoring.excludedViolationTypes
+        : DEFAULT_LEGACY_PROCTORING_CONFIG.excludedViolationTypes
+    return excluded.includes(eventType)
+}
+
 function StudentPortal() {
     const { user } = useAuth()
     const { t } = useI18n()
@@ -676,6 +692,7 @@ function Assignments({ user, mode = 'all' }) {
 
 // ==================== CODE EDITOR MODAL WITH FULL PROCTORED MODE ====================
 function CodeEditorModal({ problem, user, onClose }) {
+    const proctoring = { ...DEFAULT_LEGACY_PROCTORING_CONFIG, ...(problem.proctoring || {}) }
     const langConfig = LANGUAGE_CONFIG[problem.language] || LANGUAGE_CONFIG['Python']
     const [code, setCode] = useState(langConfig.defaultCode)
     const [selectedLang, setSelectedLang] = useState(problem.language || 'Python')
@@ -697,7 +714,7 @@ function CodeEditorModal({ problem, user, onClose }) {
     useEffect(() => {
         const enterFullscreen = async () => {
             try {
-                if (containerRef.current && document.fullscreenEnabled) {
+                if (proctoring.enforceFullscreen && containerRef.current && document.fullscreenEnabled) {
                     await containerRef.current.requestFullscreen()
                     setIsFullscreen(true)
                 }
@@ -707,19 +724,47 @@ function CodeEditorModal({ problem, user, onClose }) {
         }
         const timer = setTimeout(enterFullscreen, 100)
         return () => clearTimeout(timer)
-    }, [])
+    }, [proctoring.enforceFullscreen])
 
     // Handle fullscreen changes
     useEffect(() => {
         const handleFullscreenChange = () => {
             const isNowFullscreen = !!document.fullscreenElement
             setIsFullscreen(isNowFullscreen)
-            if (!isNowFullscreen && !result) {
+            if (proctoring.enforceFullscreen && !isNowFullscreen && !result) {
                 setWarningMessage('⚠️ You exited fullscreen mode! This action has been recorded.')
                 setShowWarning(true)
-                setTabSwitches(prev => prev + 1)
+                setTabSwitches(prev => {
+                    const shouldCount = !isViolationExcludedFromAutoSubmit(proctoring, 'fullscreen_exit')
+                    const newCount = prev + (shouldCount ? 1 : 0)
+                    const limit = proctoring.maxTabSwitches || 3
+                    if (shouldCount && proctoring.autoSubmitOnViolation && newCount >= limit) {
+                        setWarningMessage(`🚫 DISQUALIFIED! You exceeded the allowed violations (${newCount}/${limit}). Session terminated.`)
+                        setShowWarning(true)
+                        setForceExit(true)
+                        setTimeout(async () => {
+                            try {
+                                await axios.post(`${API_BASE}/submissions`, {
+                                    studentId: user.id,
+                                    problemId: problem.id,
+                                    language: selectedLang,
+                                    code: code,
+                                    submissionType: 'editor',
+                                    tabSwitches: newCount
+                                })
+                            } catch (e) {
+                                console.error('Auto-submit failed:', e)
+                            }
+                            if (document.fullscreenElement) {
+                                document.exitFullscreen()
+                            }
+                            onClose()
+                        }, 3000)
+                    }
+                    return newCount
+                })
                 setTimeout(async () => {
-                    if (containerRef.current && document.fullscreenEnabled) {
+                    if (proctoring.enforceFullscreen && containerRef.current && document.fullscreenEnabled) {
                         try { await containerRef.current.requestFullscreen() } catch (e) { }
                     }
                 }, 500)
@@ -727,20 +772,22 @@ function CodeEditorModal({ problem, user, onClose }) {
         }
         document.addEventListener('fullscreenchange', handleFullscreenChange)
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-    }, [result])
+    }, [result, proctoring, user.id, problem.id, selectedLang, code, onClose])
 
-    // Track tab visibility changes - AUTO EXIT AFTER 3 VIOLATIONS
+    // Track tab visibility changes - config-aware auto exit
     const [forceExit, setForceExit] = useState(false)
 
     useEffect(() => {
         const handleVisibilityChange = () => {
-            if (document.hidden && !result && !forceExit) {
+            if (proctoring.trackTabSwitches && document.hidden && !result && !forceExit) {
                 setTabSwitches(prev => {
-                    const newCount = prev + 1
+                    const shouldCount = !isViolationExcludedFromAutoSubmit(proctoring, 'tab_switch')
+                    const newCount = prev + (shouldCount ? 1 : 0)
+                    const limit = proctoring.maxTabSwitches || 3
 
-                    if (newCount >= 3) {
-                        // 3rd violation - Force exit
-                        setWarningMessage(`🚫 DISQUALIFIED! You have exceeded the maximum allowed tab switches (${newCount}/3). Session terminated.`)
+                    if (shouldCount && proctoring.autoSubmitOnViolation && newCount >= limit) {
+                        // Threshold violation - force exit
+                        setWarningMessage(`🚫 DISQUALIFIED! You have exceeded the maximum allowed tab switches (${newCount}/${limit}). Session terminated.`)
                         setShowWarning(true)
                         setForceExit(true)
 
@@ -766,7 +813,11 @@ function CodeEditorModal({ problem, user, onClose }) {
                             onClose()
                         }, 3000)
                     } else {
-                        setWarningMessage(`⚠️ Tab switch detected! (${newCount}/3 violations) ${3 - newCount} more will disqualify you!`)
+                        if (shouldCount) {
+                            setWarningMessage(`⚠️ Tab switch detected! (${newCount}/${limit} violations) ${Math.max(limit - newCount, 0)} more will disqualify you!`)
+                        } else {
+                            setWarningMessage('⚠️ Tab switch detected! This action has been recorded.')
+                        }
                         setShowWarning(true)
                     }
 
@@ -776,7 +827,7 @@ function CodeEditorModal({ problem, user, onClose }) {
         }
         document.addEventListener('visibilitychange', handleVisibilityChange)
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }, [result, forceExit, user.id, problem.id, selectedLang, code, onClose])
+    }, [result, forceExit, user.id, problem.id, selectedLang, code, onClose, proctoring])
 
     // Auto-hide warning
     useEffect(() => {
