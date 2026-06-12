@@ -486,7 +486,7 @@ function UploadProblems({ user }) {
             expectedOutput: isSQL ? '' : (generated.expectedOutput || ''),
             testCases: isSQL ? [] : (Array.isArray(generated.testCases) ? generated.testCases : []),
             sqlSchema: isSQL ? (generated.sqlSchema || generated.schema || DEFAULT_SQL_SCHEMA) : '',
-            expectedQueryResult: isSQL ? (generated.expectedQueryResult || generated.expectedResult || '') : '',
+            expectedQueryResult: isSQL ? (generated.expectedOutput || generated.expectedQueryResult || generated.expectedResult || '') : '',
             deadline: problem.deadline,
             status: generated.status || 'live',
             enableProctoring: problem.enableProctoring,

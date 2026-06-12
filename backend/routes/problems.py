@@ -11,10 +11,12 @@ from routes.auth import _has_any_permission, assert_assessment_limit_for_actor
 from services.pagination import paginated_response
 from services.otp_delivery import send_exam_allocated_email
 import pymysql.cursors
+import pymysql.err
 from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api", tags=["problems"])
 audit_logger = get_audit_logger()
+_problem_test_cases_column_available: bool | None = None
 
 DEFAULT_SQL_SCHEMA = (
     "CREATE TABLE employees (\n"
@@ -143,6 +145,35 @@ def _normalize_test_cases(raw_cases) -> list[dict]:
 
 def _problem_sample_input(body: ProblemCreate) -> str | None:
     return body.sampleInput if body.sampleInput is not None else body.testInput
+
+
+async def _ensure_problem_test_cases_column(conn) -> bool:
+    global _problem_test_cases_column_available
+    if _problem_test_cases_column_available is True:
+        return True
+
+    async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+        await cur.execute("SHOW COLUMNS FROM problems LIKE 'test_cases'")
+        row = await cur.fetchone()
+        if row:
+            _problem_test_cases_column_available = True
+            return True
+
+        # Production may still be on the older schema. Self-heal by adding
+        # the column lazily the first time test cases are needed.
+        await cur.execute("ALTER TABLE problems ADD COLUMN test_cases LONGTEXT NULL")
+        await conn.commit()
+        _problem_test_cases_column_available = True
+        return True
+
+
+def _is_unknown_column(exc: Exception, column_name: str) -> bool:
+    return (
+        isinstance(exc, pymysql.err.OperationalError)
+        and len(exc.args) >= 2
+        and int(exc.args[0]) == 1054
+        and column_name in str(exc.args[1])
+    )
 
 
 def _enrich_problem(p: dict) -> dict:
@@ -344,39 +375,114 @@ async def create_problem(body: ProblemCreate, request: Request):
     normalized_deadline = body.deadline or None
     pool = await get_pool()
     async with pool.acquire() as conn:
+        test_cases_supported = await _ensure_problem_test_cases_column(conn)
         async with conn.cursor() as cur:
-            await cur.execute(
-                """INSERT INTO problems (
-                    id, mentor_id, title, description, sample_input, expected_output,
-                    difficulty, type, language, status, deadline,
-                    sql_schema, expected_query_result, test_cases,
-                    enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
-                    track_tab_switches, max_tab_switches,
-                    detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
-                    enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation, excluded_violation_types,
-                    created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (
-                    problem_id, body.mentorId, body.title, body.description,
-                    sample_input, body.expectedOutput,
-                    body.difficulty, body.type, body.language, body.status, normalized_deadline,
-                    sql_schema, body.expectedQueryResult, json.dumps(test_cases),
-                    str(body.enableProctoring).lower(),
-                    str(body.enableVideoAudio).lower(),
-                    str(body.enableMicrophone).lower(),
-                    str(body.disableCopyPaste).lower(),
-                    str(body.trackTabSwitches).lower(), body.maxTabSwitches,
-                    str(body.detectPhoneUsage).lower(),
-                    str(body.detectCameraBlocking).lower(),
-                    str(body.enforceFullscreen).lower(),
-                    str(body.enableFaceDetection).lower(),
-                    str(body.detectMultipleFaces).lower(),
-                    str(body.trackFaceLookaway).lower(),
-                    str(body.autoSubmitOnViolation).lower(),
-                    json.dumps(body.excludedViolationTypes if isinstance(body.excludedViolationTypes, list) else ["window_blur"]),
-                    now,
-                ),
-            )
+            try:
+                if test_cases_supported:
+                    await cur.execute(
+                        """INSERT INTO problems (
+                            id, mentor_id, title, description, sample_input, expected_output,
+                            difficulty, type, language, status, deadline,
+                            sql_schema, expected_query_result, test_cases,
+                            enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
+                            track_tab_switches, max_tab_switches,
+                            detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
+                            enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation, excluded_violation_types,
+                            created_at
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (
+                            problem_id, body.mentorId, body.title, body.description,
+                            sample_input, body.expectedOutput,
+                            body.difficulty, body.type, body.language, body.status, normalized_deadline,
+                            sql_schema, body.expectedQueryResult, json.dumps(test_cases),
+                            str(body.enableProctoring).lower(),
+                            str(body.enableVideoAudio).lower(),
+                            str(body.enableMicrophone).lower(),
+                            str(body.disableCopyPaste).lower(),
+                            str(body.trackTabSwitches).lower(), body.maxTabSwitches,
+                            str(body.detectPhoneUsage).lower(),
+                            str(body.detectCameraBlocking).lower(),
+                            str(body.enforceFullscreen).lower(),
+                            str(body.enableFaceDetection).lower(),
+                            str(body.detectMultipleFaces).lower(),
+                            str(body.trackFaceLookaway).lower(),
+                            str(body.autoSubmitOnViolation).lower(),
+                            json.dumps(body.excludedViolationTypes if isinstance(body.excludedViolationTypes, list) else ["window_blur"]),
+                            now,
+                        ),
+                    )
+                else:
+                    await cur.execute(
+                        """INSERT INTO problems (
+                            id, mentor_id, title, description, sample_input, expected_output,
+                            difficulty, type, language, status, deadline,
+                            sql_schema, expected_query_result,
+                            enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
+                            track_tab_switches, max_tab_switches,
+                            detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
+                            enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation, excluded_violation_types,
+                            created_at
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (
+                            problem_id, body.mentorId, body.title, body.description,
+                            sample_input, body.expectedOutput,
+                            body.difficulty, body.type, body.language, body.status, normalized_deadline,
+                            sql_schema, body.expectedQueryResult,
+                            str(body.enableProctoring).lower(),
+                            str(body.enableVideoAudio).lower(),
+                            str(body.enableMicrophone).lower(),
+                            str(body.disableCopyPaste).lower(),
+                            str(body.trackTabSwitches).lower(), body.maxTabSwitches,
+                            str(body.detectPhoneUsage).lower(),
+                            str(body.detectCameraBlocking).lower(),
+                            str(body.enforceFullscreen).lower(),
+                            str(body.enableFaceDetection).lower(),
+                            str(body.detectMultipleFaces).lower(),
+                            str(body.trackFaceLookaway).lower(),
+                            str(body.autoSubmitOnViolation).lower(),
+                            json.dumps(body.excludedViolationTypes if isinstance(body.excludedViolationTypes, list) else ["window_blur"]),
+                            now,
+                        ),
+                    )
+            except Exception as exc:
+                if _is_unknown_column(exc, "test_cases"):
+                    global _problem_test_cases_column_available
+                    _problem_test_cases_column_available = None
+                    await _ensure_problem_test_cases_column(conn)
+                    await cur.execute(
+                        """INSERT INTO problems (
+                            id, mentor_id, title, description, sample_input, expected_output,
+                            difficulty, type, language, status, deadline,
+                            sql_schema, expected_query_result, test_cases,
+                            enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
+                            track_tab_switches, max_tab_switches,
+                            detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
+                            enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation, excluded_violation_types,
+                            created_at
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (
+                            problem_id, body.mentorId, body.title, body.description,
+                            sample_input, body.expectedOutput,
+                            body.difficulty, body.type, body.language, body.status, normalized_deadline,
+                            sql_schema, body.expectedQueryResult, json.dumps(test_cases),
+                            str(body.enableProctoring).lower(),
+                            str(body.enableVideoAudio).lower(),
+                            str(body.enableMicrophone).lower(),
+                            str(body.disableCopyPaste).lower(),
+                            str(body.trackTabSwitches).lower(), body.maxTabSwitches,
+                            str(body.detectPhoneUsage).lower(),
+                            str(body.detectCameraBlocking).lower(),
+                            str(body.enforceFullscreen).lower(),
+                            str(body.enableFaceDetection).lower(),
+                            str(body.detectMultipleFaces).lower(),
+                            str(body.trackFaceLookaway).lower(),
+                            str(body.autoSubmitOnViolation).lower(),
+                            json.dumps(body.excludedViolationTypes if isinstance(body.excludedViolationTypes, list) else ["window_blur"]),
+                            now,
+                        ),
+                    )
+                else:
+                    raise
         await conn.commit()
 
     audit_logger.log_event(
@@ -403,6 +509,9 @@ async def get_problem_test_cases(problem_id: str, request: Request):
         raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
+        supported = await _ensure_problem_test_cases_column(conn)
+        if not supported:
+            return []
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT test_cases FROM problems WHERE id = %s LIMIT 1", (problem_id,))
             row = await cur.fetchone()
@@ -418,6 +527,7 @@ async def add_problem_test_case(problem_id: str, body: TestCasePayload, request:
         raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await _ensure_problem_test_cases_column(conn)
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT test_cases FROM problems WHERE id = %s LIMIT 1", (problem_id,))
             row = await cur.fetchone()
@@ -441,6 +551,7 @@ async def update_problem_test_case(test_case_id: str, body: TestCasePayload, req
         raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await _ensure_problem_test_cases_column(conn)
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT id, test_cases FROM problems")
             rows = await cur.fetchall()
@@ -467,6 +578,7 @@ async def delete_problem_test_case(test_case_id: str, request: Request):
         raise HTTPException(status_code=403, detail="Permission denied")
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await _ensure_problem_test_cases_column(conn)
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             await cur.execute("SELECT id, test_cases FROM problems")
             rows = await cur.fetchall()
