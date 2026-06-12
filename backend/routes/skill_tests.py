@@ -7,6 +7,7 @@ proctoring, reports, and admin operations (28 endpoints total).
 from __future__ import annotations
 import asyncio, json, re, datetime as _dt, uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 import pymysql.err
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
@@ -157,6 +158,116 @@ def _safe_json(val: Any) -> Any:
 
 def _json_str(val: Any) -> str:
     return json.dumps(val, default=str)
+
+
+def _normalize_sql_value(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, Decimal):
+        return format(value, "f").rstrip("0").rstrip(".") or "0"
+    if isinstance(value, float):
+        return format(value, ".12g")
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return str(value).strip()
+
+
+def _normalize_sql_columns(columns: list[str] | tuple[str, ...] | None) -> list[str]:
+    return [str(column).strip().lower() for column in (columns or [])]
+
+
+def _normalize_sql_rows(rows: list[tuple[Any, ...]] | list[list[Any]] | None) -> list[tuple[str, ...]]:
+    normalized_rows = []
+    for row in rows or []:
+        normalized_rows.append(tuple(_normalize_sql_value(cell) for cell in row))
+    return normalized_rows
+
+
+def _query_has_order_by(sql_query: str) -> bool:
+    return bool(re.search(r"\border\s+by\b", sql_query or "", re.IGNORECASE))
+
+
+def _results_match(
+    expected_columns: list[str] | tuple[str, ...] | None,
+    expected_rows: list[tuple[Any, ...]] | list[list[Any]] | None,
+    actual_columns: list[str] | tuple[str, ...] | None,
+    actual_rows: list[tuple[Any, ...]] | list[list[Any]] | None,
+    *,
+    enforce_order: bool,
+) -> bool:
+    normalized_expected_columns = _normalize_sql_columns(expected_columns)
+    normalized_actual_columns = _normalize_sql_columns(actual_columns)
+    if normalized_expected_columns != normalized_actual_columns:
+        return False
+
+    normalized_expected_rows = _normalize_sql_rows(expected_rows)
+    normalized_actual_rows = _normalize_sql_rows(actual_rows)
+    if enforce_order:
+        return normalized_expected_rows == normalized_actual_rows
+    return sorted(normalized_expected_rows) == sorted(normalized_actual_rows)
+
+
+async def _execute_sql_result(query: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(query)
+            rows = await cur.fetchall()
+            columns = [desc[0] for desc in (cur.description or [])]
+
+    serialized_rows: list[tuple[Any, ...]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            serialized_rows.append(tuple(row.get(column) for column in columns))
+        elif isinstance(row, (list, tuple)):
+            serialized_rows.append(tuple(row))
+        else:
+            serialized_rows.append((row,))
+    return columns, serialized_rows
+
+
+async def _evaluate_sql_against_reference(problem: dict, student_query: str, sandbox_names: dict[str, str]) -> dict:
+    reference_query = (problem.get("reference_query") or "").strip()
+    if not reference_query:
+        return await evaluate_sql_query(problem, student_query)
+
+    rewritten_student_query = _rewrite_sql_to_sandbox(student_query, sandbox_names)
+    enforce_order = _query_has_order_by(reference_query) or _query_has_order_by(rewritten_student_query)
+
+    try:
+        expected_columns, expected_rows = await _execute_sql_result(reference_query)
+        actual_columns, actual_rows = await _execute_sql_result(rewritten_student_query)
+    except Exception as exc:
+        return {"passed": False, "feedback": f"SQL execution failed: {exc}", "score": 0}
+
+    if _results_match(expected_columns, expected_rows, actual_columns, actual_rows, enforce_order=enforce_order):
+        feedback = "Correct query. Your result matches the expected output."
+        if not enforce_order:
+            feedback += " Row order was ignored for comparison."
+        return {"passed": True, "feedback": feedback, "score": 100}
+
+    mismatches = []
+    if _normalize_sql_columns(expected_columns) != _normalize_sql_columns(actual_columns):
+        mismatches.append(
+            f"expected columns {expected_columns}, got {actual_columns}"
+        )
+    elif len(expected_rows) != len(actual_rows):
+        mismatches.append(
+            f"expected {len(expected_rows)} row(s), got {len(actual_rows)}"
+        )
+    else:
+        mismatches.append("result rows do not match the expected output")
+    if not enforce_order:
+        mismatches.append("comparison ignored row order")
+
+    return {
+        "passed": False,
+        "feedback": "Incorrect query: " + "; ".join(mismatches) + ".",
+        "score": 0,
+    }
 
 
 def _normalize_excluded_violation_types(config: Any) -> list[str]:
@@ -988,8 +1099,9 @@ async def sql_evaluate_ep(request: Request, body: dict = Body(...)):
     if not problem:
         raise HTTPException(404, "Problem not found")
     test_id = attempt.get("test_id")
-    visible_problem = _normalize_sql_problem(problem, _sandbox_names(test_id)) if test_id else problem
-    evaluation = await evaluate_sql_query(visible_problem, sql_query)
+    sandbox_names = _sandbox_names(test_id) if test_id else {}
+    visible_problem = _normalize_sql_problem(problem, sandbox_names) if test_id else problem
+    evaluation = await _evaluate_sql_against_reference(problem, sql_query, sandbox_names) if test_id else await evaluate_sql_query(visible_problem, sql_query)
     passed = evaluation.get("passed", False)
     feedback = evaluation.get("feedback", "âœ… Correct!" if passed else "âŒ Incorrect query.")
     subs = _safe_json(attempt.get("sql_submissions")) or {}
