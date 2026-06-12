@@ -16,10 +16,39 @@ from audit_logger import get_audit_logger, AuditEventType
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 audit_logger = get_audit_logger()
+_submission_plagiarism_filter_cache: str | None = None
 
 
 def _is_missing_table_error(exc: Exception) -> bool:
     return isinstance(exc, pymysql.err.ProgrammingError) and len(exc.args) > 0 and exc.args[0] == 1146
+
+
+async def _resolve_submission_plagiarism_filter(conn) -> str:
+    global _submission_plagiarism_filter_cache
+    if _submission_plagiarism_filter_cache:
+        return _submission_plagiarism_filter_cache
+
+    async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+        await cur.execute("SHOW COLUMNS FROM submissions")
+        rows = await cur.fetchall()
+
+    columns = {str(row.get("Field") or "").strip().lower() for row in (rows or [])}
+    has_flagged_submission = "flagged_submission" in columns
+    has_plagiarism_detected = "plagiarism_detected" in columns
+
+    filters: list[str] = []
+    if has_flagged_submission:
+        filters.append("s.flagged_submission = 1")
+    if has_plagiarism_detected:
+        filters.append("LOWER(COALESCE(s.plagiarism_detected,''))='true'")
+
+    if not filters:
+        _submission_plagiarism_filter_cache = "1=0"
+    elif len(filters) == 1:
+        _submission_plagiarism_filter_cache = filters[0]
+    else:
+        _submission_plagiarism_filter_cache = "(" + " OR ".join(filters) + ")"
+    return _submission_plagiarism_filter_cache
 
 
 def _client_ip(request: Request) -> str:
@@ -968,14 +997,6 @@ async def topic_analysis(
     }
 
 
-_PLAGIARISM_FILTER = (
-    # The schema has both `flagged_submission` (newer pipeline) and
-    # `plagiarism_detected` (older string column "true"/"false") â€” accept
-    # either so we don't miss legacy rows.
-    "(s.flagged_submission = 1 OR LOWER(COALESCE(s.plagiarism_detected,''))='true')"
-)
-
-
 @router.get("/plagiarism")
 async def plagiarism_analytics(
     request: Request,
@@ -997,6 +1018,7 @@ async def plagiarism_analytics(
 
     pool = await get_pool()
     async with pool.acquire() as conn:
+        plagiarism_filter = await _resolve_submission_plagiarism_filter(conn)
         async with conn.cursor(pymysql.cursors.DictCursor) as cur:
             scope_sql = ""
             params: list = []
@@ -1022,7 +1044,7 @@ async def plagiarism_analytics(
             total_subs = (await cur.fetchone())["cnt"]
             await cur.execute(
                 f"SELECT COUNT(*) AS cnt FROM submissions s "
-                f"WHERE {_PLAGIARISM_FILTER} {scope_sql}",
+                f"WHERE {plagiarism_filter} {scope_sql}",
                 params,
             )
             plag_count = (await cur.fetchone())["cnt"]
@@ -1036,10 +1058,10 @@ async def plagiarism_analytics(
             await cur.execute(
                 f"""SELECT u.id, u.name, COUNT(*) AS count,
                           GROUP_CONCAT(DISTINCT p.title) AS copiedFrom
-                     FROM submissions s
+                    FROM submissions s
                      JOIN users u    ON u.id = s.student_id
                 LEFT JOIN problems p ON p.id = s.problem_id
-                    WHERE {_PLAGIARISM_FILTER} {scope_sql}
+                    WHERE {plagiarism_filter} {scope_sql}
                     GROUP BY u.id, u.name
                     ORDER BY count DESC
                     LIMIT 10""",
@@ -1062,7 +1084,7 @@ async def plagiarism_analytics(
                           COUNT(*) AS flaggedCount
                      FROM submissions s
                      JOIN problems p ON p.id = s.problem_id
-                    WHERE {_PLAGIARISM_FILTER} {scope_sql}
+                    WHERE {plagiarism_filter} {scope_sql}
                     GROUP BY p.id, p.title
                     ORDER BY flaggedCount DESC
                     LIMIT 10""",
@@ -1086,7 +1108,7 @@ async def plagiarism_analytics(
                      FROM submissions s
                      JOIN users u    ON u.id = s.student_id
                 LEFT JOIN problems p ON p.id = s.problem_id
-                    WHERE {_PLAGIARISM_FILTER} {scope_sql}
+                    WHERE {plagiarism_filter} {scope_sql}
                     ORDER BY s.submitted_at DESC
                     LIMIT 50""",
                 params,

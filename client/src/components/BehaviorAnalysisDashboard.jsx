@@ -36,6 +36,8 @@ const formatUserIdentity = (user, userId) => {
     return userId || '—'
 }
 
+const formatBehaviorTestName = (examTitle) => examTitle || 'Not provided'
+
 function UserIdentity({ userId, userDirectory }) {
     const user = userDirectory[userId]
     if (!userId) return <span style={{ color: '#94a3b8' }}>—</span>
@@ -514,7 +516,7 @@ function DashboardTab({ dashboard, analyses, onViewDetail, onRefresh, userDirect
                                 <div>
                                     <span style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 }}>{formatSessionId(s.session_id, s.user_id)}</span>
                                     <div style={{ marginTop: 4 }}><UserIdentity userId={s.user_id} userDirectory={userDirectory} /></div>
-                                    {s.exam_title && <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: 8 }}>{s.exam_title}</span>}
+                                    <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: 8 }}>Test Name: {formatBehaviorTestName(s.exam_title)}</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     <span style={{ fontWeight: 700, color: s.trust_score < 40 ? '#ef4444' : '#f97316' }}>{s.trust_score}</span>
@@ -623,7 +625,7 @@ function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunPr
                 <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                     <input placeholder="Session ID" value={form.session_id} onChange={e => setForm({ ...form, session_id: e.target.value })} className="um-input" title="Or select from Available Sessions above" />
                     <input placeholder="User ID (optional)" value={form.user_id} onChange={e => setForm({ ...form, user_id: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
-                    <input placeholder="Exam Title (optional)" value={form.exam_title} onChange={e => setForm({ ...form, exam_title: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
+                    <input placeholder="Test Name (optional)" value={form.exam_title} onChange={e => setForm({ ...form, exam_title: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
                     <select value={form.problem_difficulty} onChange={e => setForm({ ...form, problem_difficulty: e.target.value })} style={{ ...inputStyle, flex: 0.4 }}>
                         <option value="easy">Easy</option>
                         <option value="medium">Medium</option>
@@ -663,6 +665,9 @@ function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunPr
                                 </span>
                                 <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
                                     {formatUserIdentity(userDirectory[result.user_id], result.user_id)}
+                                </span>
+                                <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
+                                    Test Name: {formatBehaviorTestName(result.exam_title)}
                                 </span>
                             </div>
 
@@ -831,7 +836,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessi
                     <input placeholder="Session ID" value={form.session_id} onChange={e => setForm({ ...form, session_id: e.target.value })} className="um-input" title="Or select from Available Sessions above" />
                     <input placeholder="User ID" value={form.user_id} onChange={e => setForm({ ...form, user_id: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
                     <input placeholder="Candidate Name" value={form.candidate_name} onChange={e => setForm({ ...form, candidate_name: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
-                    <input placeholder="Exam Title" value={form.exam_title} onChange={e => setForm({ ...form, exam_title: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
+                    <input placeholder="Test Name" value={form.exam_title} onChange={e => setForm({ ...form, exam_title: e.target.value })} style={{ ...inputStyle, flex: 0.7 }} />
                 </div>
                 <button onClick={onGenerate} disabled={loading || !form.session_id} style={{
                     ...btnStyle, background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: 'white',
@@ -848,7 +853,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessi
                         <div>
                             <TrustBadge level={result.trust_level} />
                             <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: 4 }}>
-                                {result.candidate_name || formatUserIdentity(userDirectory[result.user_id], result.user_id)} • {result.exam_title || 'Assessment'}
+                                {result.candidate_name || formatUserIdentity(userDirectory[result.user_id], result.user_id)} • Test Name: {formatBehaviorTestName(result.exam_title)}
                             </div>
                         </div>
                     </div>
@@ -912,7 +917,7 @@ function DetailModal({ data, onClose, userDirectory }) {
                             Session: {data.session_id}
                         </div>
                         <div style={{ color: '#64748b', fontSize: '0.75rem' }}>
-                            {formatUserIdentity(userDirectory[data.user_id], data.user_id)} • {data.exam_title || 'N/A'} • {data.created_at}
+                            {formatUserIdentity(userDirectory[data.user_id], data.user_id)} • Test Name: {formatBehaviorTestName(data.exam_title)} • {data.created_at}
                         </div>
                     </div>
                 </div>

@@ -142,6 +142,12 @@ const proctorSourceOptions = [
     { value: 'aptitude', label: 'Aptitude Tests' },
 ]
 
+const formatSourceLabel = (source) => {
+    return proctorSourceOptions.find((option) => option.value === source)?.label || source || 'Unknown'
+}
+
+const formatTestName = (examTitle) => examTitle || 'Not provided'
+
 // ═══════════════════════════════════════════════════════════════
 //  Main Component
 // ═══════════════════════════════════════════════════════════════
@@ -512,7 +518,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate, userDi
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid #1e293b' }}>
-                                    {['Session', 'User', 'Exam', 'Fraud Score', 'Risk', 'Action', 'Time', ''].map(h => (
+                                    {['Session', 'User', 'Test Name', 'Fraud Score', 'Risk', 'Action', 'Time', ''].map(h => (
                                         <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 500 }}>{h}</th>
                                     ))}
                                 </tr>
@@ -524,7 +530,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate, userDi
                                             {formatSessionId(r.session_id, r.user_id)}
                                         </td>
                                         <td style={{ padding: '8px 10px' }}><UserIdentity userId={r.user_id} userDirectory={userDirectory} /></td>
-                                        <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{r.exam_title || '—'}</td>
+                                        <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{formatTestName(r.exam_title)}</td>
                                         <td style={{ padding: '8px 10px' }}><FraudScoreBar score={r.fraud_score} /></td>
                                         <td style={{ padding: '8px 10px' }}><RiskBadge level={r.risk_level} /></td>
                                         <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{r.recommended_action || '—'}</td>
@@ -562,7 +568,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate, userDi
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid #1e293b' }}>
-                                    {['#', 'Session', 'Source', 'User', 'Score', 'Risk', 'Action', 'Time', ''].map(h => (
+                                    {['#', 'Session', 'Test Type', 'User', 'Score', 'Risk', 'Action', 'Time', ''].map(h => (
                                         <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 500 }}>{h}</th>
                                     ))}
                                 </tr>
@@ -574,7 +580,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate, userDi
                                         <td style={{ padding: '8px 10px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.75rem' }}>
                                             {formatSessionId(a.session_id, a.user_id)}
                                         </td>
-                                        <td style={{ padding: '8px 10px', color: '#94a3b8', textTransform: 'capitalize' }}>{a.source}</td>
+                                        <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{formatSourceLabel(a.source)}</td>
                                         <td style={{ padding: '8px 10px' }}><UserIdentity userId={a.user_id} userDirectory={userDirectory} /></td>
                                         <td style={{ padding: '8px 10px' }}><FraudScoreBar score={a.fraud_score} /></td>
                                         <td style={{ padding: '8px 10px' }}><RiskBadge level={a.risk_level} /></td>
@@ -626,7 +632,7 @@ function AnalyzeTab({ form, setForm, onRun, result, loading, userDirectory }) {
                         <input value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} className="um-input" placeholder="e.g. abc123-def456" />
                     </div>
                     <div>
-                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Source</label>
+                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Test Type</label>
                         <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="um-input">
                             {proctorSourceOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -638,7 +644,7 @@ function AnalyzeTab({ form, setForm, onRun, result, loading, userDirectory }) {
                         <input value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))} className="um-input" placeholder="student-001" />
                     </div>
                     <div>
-                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Exam Title (optional)</label>
+                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Test Name (optional)</label>
                         <input value={form.exam_title} onChange={e => setForm(f => ({ ...f, exam_title: e.target.value }))} className="um-input" placeholder="Final Exam 2025" />
                     </div>
                 </div>
@@ -704,6 +710,7 @@ function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onV
                                         <td style={{ padding: '8px 10px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.75rem' }}>
                                             <div>{formatSessionId(a.session_id, a.user_id)}</div>
                                             {a.user_id && <div style={{ marginTop: 4, fontFamily: 'inherit' }}><UserIdentity userId={a.user_id} userDirectory={userDirectory} /></div>}
+                                            <div style={{ marginTop: 4, fontFamily: 'inherit', color: '#64748b' }}>Test Type: {formatSourceLabel(source)}</div>
                                         </td>
                                         <td style={{ padding: '8px 10px' }}>
                                             {a.error ? <span style={{ color: '#ef4444' }}>Error</span> : <FraudScoreBar score={a.fraud_score} />}
@@ -753,7 +760,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, userDirectory }
                         <input value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} className="um-input" placeholder="session-id" />
                     </div>
                     <div>
-                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Source</label>
+                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Test Type</label>
                         <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="um-input">
                             {proctorSourceOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -765,7 +772,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, userDirectory }
                         <input value={form.candidate_name} onChange={e => setForm(f => ({ ...f, candidate_name: e.target.value }))} className="um-input" placeholder="John Doe" />
                     </div>
                     <div>
-                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Exam Title</label>
+                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Test Name</label>
                         <input value={form.exam_title} onChange={e => setForm(f => ({ ...f, exam_title: e.target.value }))} className="um-input" placeholder="Final Assessment" />
                     </div>
                 </div>
@@ -989,7 +996,8 @@ function IntegrityReportCard({ data, userDirectory }) {
             `Generated: ${data.generated_at ? new Date(data.generated_at).toLocaleString() : new Date().toLocaleString()}`,
             `Session: ${data.session_id || '—'}`,
             `Candidate: ${data.candidate_name || formatUserIdentity(resolvedUser, data.user_id)}`,
-            `Exam: ${data.exam_title || '—'}`,
+            `Test Type: ${formatSourceLabel(data.source)}`,
+            `Test Name: ${formatTestName(data.exam_title)}`,
             `Fraud Score: ${data.fraud_score}/100`,
             `Risk Level: ${data.risk_level}`,
             `Verdict: ${report.overall_verdict || '—'}`,
@@ -1027,7 +1035,8 @@ function IntegrityReportCard({ data, userDirectory }) {
 
             <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', fontSize: '0.8rem', color: '#94a3b8' }}>
                 {(data.candidate_name || data.user_id) && <span>Candidate: <strong style={{ color: '#e2e8f0' }}>{data.candidate_name || formatUserIdentity(resolvedUser, data.user_id)}</strong></span>}
-                {data.exam_title && <span>| Exam: <strong style={{ color: '#e2e8f0' }}>{data.exam_title}</strong></span>}
+                <span>| Test Type: <strong style={{ color: '#e2e8f0' }}>{formatSourceLabel(data.source)}</strong></span>
+                <span>| Test Name: <strong style={{ color: '#e2e8f0' }}>{formatTestName(data.exam_title)}</strong></span>
                 {report.overall_verdict && <span>| Verdict: <strong style={{ color: riskColors[report.overall_verdict] || '#e2e8f0' }}>{report.overall_verdict}</strong></span>}
             </div>
 
@@ -1074,9 +1083,9 @@ function AnalysisDetailModal({ data, onClose, onTerminate, userDirectory }) {
                 {/* Basic info */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16, fontSize: '0.8rem' }}>
                     <div style={{ color: '#64748b' }}>Session: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{data.session_id}</span></div>
-                    <div style={{ color: '#64748b' }}>Source: <span style={{ color: '#e2e8f0' }}>{data.source}</span></div>
+                    <div style={{ color: '#64748b' }}>Test Type: <span style={{ color: '#e2e8f0' }}>{formatSourceLabel(data.source)}</span></div>
                     <div style={{ color: '#64748b' }}>User: <span style={{ color: '#e2e8f0' }}>{formatUserIdentity(resolvedUser, data.user_id)}</span></div>
-                    <div style={{ color: '#64748b' }}>Exam: <span style={{ color: '#e2e8f0' }}>{data.exam_title || '—'}</span></div>
+                    <div style={{ color: '#64748b' }}>Test Name: <span style={{ color: '#e2e8f0' }}>{formatTestName(data.exam_title)}</span></div>
                 </div>
 
                 {/* Score + risk */}
