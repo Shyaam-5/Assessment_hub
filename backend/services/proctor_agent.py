@@ -135,16 +135,26 @@ THRESHOLD_TERMINATE = 65
 #  Tools - standalone functions the agent can call
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+PROCTOR_EVENT_SOURCE_MAP = {
+    "comm": ("comm_proctoring_logs", "session_id"),
+    "skill": ("skill_proctoring_logs", "attempt_id"),
+    "global": ("global_proctoring_logs", "session_id"),
+    "aptitude": ("aptitude_proctoring_logs", "session_id"),
+}
+
+
+def _resolve_proctor_event_source(source: str) -> tuple[str, str]:
+    normalized_source = str(source or "comm").strip().lower()
+    resolved = PROCTOR_EVENT_SOURCE_MAP.get(normalized_source)
+    if not resolved:
+        allowed = "', '".join(PROCTOR_EVENT_SOURCE_MAP.keys())
+        raise ValueError(f"Invalid source: {source}. Must be '{allowed}'.")
+    return resolved
+
+
 async def tool_get_event_timeline(session_id: str, source: str = "comm") -> list[dict]:
     """Fetch all proctoring events for a session, ordered by time."""
-    if source not in ("comm", "skill", "global"):
-        raise ValueError(f"Invalid source: {source}. Must be 'comm', 'skill', or 'global'.")
-    table_map = {
-        "comm": ("comm_proctoring_logs", "session_id"),
-        "skill": ("skill_proctoring_logs", "attempt_id"),
-        "global": ("global_proctoring_logs", "session_id"),
-    }
-    table, id_col = table_map[source]
+    table, id_col = _resolve_proctor_event_source(source)
 
     pool = await get_pool()
     async with pool.acquire() as conn:

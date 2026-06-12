@@ -57,6 +57,24 @@ const formatSessionId = (session_id, user_id) => {
     return user_id ? `${user_id} (${last4})` : (session_id || '').slice(-12)
 }
 
+const formatUserIdentity = (user, userId) => {
+    if (user?.name && user?.email) return `${user.name} (${user.email})`
+    if (user?.name) return user.name
+    if (user?.email) return user.email
+    return userId || '—'
+}
+
+function UserIdentity({ userId, userDirectory }) {
+    const user = userDirectory[userId]
+    if (!userId) return <span style={{ color: '#94a3b8' }}>—</span>
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{user?.name || userId}</span>
+            <span style={{ color: '#64748b', fontSize: '0.72rem' }}>{user?.email || userId}</span>
+        </div>
+    )
+}
+
 function RiskBadge({ level }) {
     const color = riskColors[level] || '#6b7280'
     const label = riskLabels[level] || level
@@ -117,6 +135,13 @@ const inputStyle = {
     background: '#1e293b', color: '#e2e8f0', fontSize: '0.85rem', flex: 1
 }
 
+const proctorSourceOptions = [
+    { value: 'comm', label: 'Communication Tests' },
+    { value: 'skill', label: 'Skill Tests' },
+    { value: 'global', label: 'Global Tests' },
+    { value: 'aptitude', label: 'Aptitude Tests' },
+]
+
 // ═══════════════════════════════════════════════════════════════
 //  Main Component
 // ═══════════════════════════════════════════════════════════════
@@ -128,6 +153,7 @@ export default function ProctorAgentDashboard() {
     const [loading, setLoading] = useState(false)
     const [selectedAnalysis, setSelectedAnalysis] = useState(null)
     const [selectedReport, setSelectedReport] = useState(null)
+    const [userDirectory, setUserDirectory] = useState({})
 
     // Single analysis form
     const [analyzeForm, setAnalyzeForm] = useState({ session_id: '', source: 'comm', user_id: '', exam_title: '' })
@@ -165,6 +191,40 @@ export default function ProctorAgentDashboard() {
     }, [])
 
     useEffect(() => { fetchDashboard() }, [fetchDashboard])
+
+    const hydrateUsers = useCallback(async (userIds) => {
+        const ids = [...new Set((userIds || []).map((id) => String(id || '').trim()).filter(Boolean))]
+        const unresolved = ids.filter((id) => !userDirectory[id])
+        if (!unresolved.length) return
+        const responses = await Promise.allSettled(
+            unresolved.map((id) => axios.get(`${API_BASE}/users/${encodeURIComponent(id)}`))
+        )
+        const resolvedUsers = {}
+        responses.forEach((response, index) => {
+            if (response.status !== 'fulfilled') return
+            const data = response.value?.data || {}
+            resolvedUsers[unresolved[index]] = {
+                id: data.id || unresolved[index],
+                name: data.name || '',
+                email: data.email || '',
+            }
+        })
+        if (Object.keys(resolvedUsers).length) {
+            setUserDirectory((prev) => ({ ...prev, ...resolvedUsers }))
+        }
+    }, [userDirectory])
+
+    useEffect(() => {
+        hydrateUsers([
+            ...(dashboard?.recent_flagged || []).map((item) => item.user_id),
+            ...analyses.map((item) => item.user_id),
+            ...((batchResults?.analyses || []).map((item) => item.user_id)),
+            analyzeResult?.user_id,
+            selectedAnalysis?.user_id,
+            reportResult?.user_id,
+            reportResult?.raw_analysis?.user_id,
+        ])
+    }, [dashboard, analyses, batchResults, analyzeResult, selectedAnalysis, reportResult, hydrateUsers])
 
     // ── Real-time agent alerts via Socket.io ──
     const [liveAlerts, setLiveAlerts] = useState([])
@@ -355,16 +415,16 @@ export default function ProctorAgentDashboard() {
             )}
 
             {/* Tab content */}
-            {tab === 'dashboard' && <DashboardTab dashboard={dashboard} analyses={analyses} onViewAnalysis={viewAnalysis} onTerminate={terminateSession} />}
+            {tab === 'dashboard' && <DashboardTab dashboard={dashboard} analyses={analyses} onViewAnalysis={viewAnalysis} onTerminate={terminateSession} userDirectory={userDirectory} />}
             {tab === 'analyze' && (
-                <AnalyzeTab form={analyzeForm} setForm={setAnalyzeForm} onRun={runAnalysis} result={analyzeResult} loading={loading} />
+                <AnalyzeTab form={analyzeForm} setForm={setAnalyzeForm} onRun={runAnalysis} result={analyzeResult} loading={loading} userDirectory={userDirectory} />
             )}
             {tab === 'batch' && (
                 <BatchTab ids={batchIds} setIds={setBatchIds} source={batchSource} setSource={setBatchSource}
-                    onRun={runBatch} results={batchResults} loading={loading} onViewAnalysis={viewAnalysis} />
+                    onRun={runBatch} results={batchResults} loading={loading} onViewAnalysis={viewAnalysis} userDirectory={userDirectory} />
             )}
             {tab === 'report' && (
-                <ReportTab form={reportForm} setForm={setReportForm} onGenerate={generateReport} result={reportResult} loading={loading} />
+                <ReportTab form={reportForm} setForm={setReportForm} onGenerate={generateReport} result={reportResult} loading={loading} userDirectory={userDirectory} />
             )}
             {tab === 'collusion' && (
                 <CollusionTab ids={collusionIds} setIds={setCollusionIds} source={collusionSource}
@@ -373,12 +433,12 @@ export default function ProctorAgentDashboard() {
 
             {/* Analysis detail modal */}
             {selectedAnalysis && (
-                <AnalysisDetailModal data={selectedAnalysis} onClose={() => setSelectedAnalysis(null)} onTerminate={terminateSession} />
+                <AnalysisDetailModal data={selectedAnalysis} onClose={() => setSelectedAnalysis(null)} onTerminate={terminateSession} userDirectory={userDirectory} />
             )}
 
             {/* Report detail modal */}
             {selectedReport && (
-                <ReportDetailModal data={selectedReport} onClose={() => setSelectedReport(null)} />
+                <ReportDetailModal data={selectedReport} onClose={() => setSelectedReport(null)} userDirectory={userDirectory} />
             )}
         </div>
     )
@@ -389,7 +449,7 @@ export default function ProctorAgentDashboard() {
 //  Dashboard Tab
 // ═══════════════════════════════════════════════════════════════
 
-function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
+function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate, userDirectory }) {
     if (!dashboard) return <div className="page-loading"><div className="loading-spinner" /></div>
 
     const { total_analyses, average_fraud_score, risk_distribution, recent_flagged } = dashboard
@@ -463,7 +523,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
                                         <td style={{ padding: '8px 10px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.75rem' }}>
                                             {formatSessionId(r.session_id, r.user_id)}
                                         </td>
-                                        <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{r.user_id || '—'}</td>
+                                        <td style={{ padding: '8px 10px' }}><UserIdentity userId={r.user_id} userDirectory={userDirectory} /></td>
                                         <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{r.exam_title || '—'}</td>
                                         <td style={{ padding: '8px 10px' }}><FraudScoreBar score={r.fraud_score} /></td>
                                         <td style={{ padding: '8px 10px' }}><RiskBadge level={r.risk_level} /></td>
@@ -515,7 +575,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
                                             {formatSessionId(a.session_id, a.user_id)}
                                         </td>
                                         <td style={{ padding: '8px 10px', color: '#94a3b8', textTransform: 'capitalize' }}>{a.source}</td>
-                                        <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{a.user_id || '—'}</td>
+                                        <td style={{ padding: '8px 10px' }}><UserIdentity userId={a.user_id} userDirectory={userDirectory} /></td>
                                         <td style={{ padding: '8px 10px' }}><FraudScoreBar score={a.fraud_score} /></td>
                                         <td style={{ padding: '8px 10px' }}><RiskBadge level={a.risk_level} /></td>
                                         <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{a.recommended_action || '—'}</td>
@@ -549,7 +609,7 @@ function DashboardTab({ dashboard, analyses, onViewAnalysis, onTerminate }) {
 //  Analyze Single Session Tab
 // ═══════════════════════════════════════════════════════════════
 
-function AnalyzeTab({ form, setForm, onRun, result, loading }) {
+function AnalyzeTab({ form, setForm, onRun, result, loading, userDirectory }) {
     return (
         <div>
             <div className="um-card">
@@ -568,8 +628,9 @@ function AnalyzeTab({ form, setForm, onRun, result, loading }) {
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Source</label>
                         <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="um-input">
-                            <option value="comm">Communication Tests</option>
-                            <option value="skill">Skill Tests</option>
+                            {proctorSourceOptions.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
                         </select>
                     </div>
                     <div>
@@ -586,7 +647,7 @@ function AnalyzeTab({ form, setForm, onRun, result, loading }) {
                 </button>
             </div>
 
-            {result && <AnalysisResultCard result={result} />}
+            {result && <AnalysisResultCard result={result} userDirectory={userDirectory} />}
         </div>
     )
 }
@@ -596,7 +657,7 @@ function AnalyzeTab({ form, setForm, onRun, result, loading }) {
 //  Batch Analysis Tab
 // ═══════════════════════════════════════════════════════════════
 
-function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onViewAnalysis }) {
+function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onViewAnalysis, userDirectory }) {
     return (
         <div>
             <div className="um-card">
@@ -613,8 +674,9 @@ function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onV
                 />
                 <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center' }}>
                     <select value={source} onChange={e => setSource(e.target.value)} style={{ ...inputStyle, flex: 'none', width: 180 }}>
-                        <option value="comm">Communication Tests</option>
-                        <option value="skill">Skill Tests</option>
+                        {proctorSourceOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                     </select>
                     <button onClick={onRun} style={btnPrimary} disabled={loading || !ids.trim()}>
                         {loading ? <RefreshCw size={14} className="spin" /> : <Zap size={14} />} Analyze All
@@ -640,7 +702,8 @@ function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onV
                                 {(results.analyses || []).map(a => (
                                     <tr key={a.session_id || a.error} style={{ borderBottom: '1px solid #1e293b22' }}>
                                         <td style={{ padding: '8px 10px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                                            {formatSessionId(a.session_id, a.user_id)}
+                                            <div>{formatSessionId(a.session_id, a.user_id)}</div>
+                                            {a.user_id && <div style={{ marginTop: 4, fontFamily: 'inherit' }}><UserIdentity userId={a.user_id} userDirectory={userDirectory} /></div>}
                                         </td>
                                         <td style={{ padding: '8px 10px' }}>
                                             {a.error ? <span style={{ color: '#ef4444' }}>Error</span> : <FraudScoreBar score={a.fraud_score} />}
@@ -673,7 +736,7 @@ function BatchTab({ ids, setIds, source, setSource, onRun, results, loading, onV
 //  Integrity Report Tab
 // ═══════════════════════════════════════════════════════════════
 
-function ReportTab({ form, setForm, onGenerate, result, loading }) {
+function ReportTab({ form, setForm, onGenerate, result, loading, userDirectory }) {
     return (
         <div>
             <div className="um-card">
@@ -692,8 +755,9 @@ function ReportTab({ form, setForm, onGenerate, result, loading }) {
                     <div>
                         <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: 4 }}>Source</label>
                         <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="um-input">
-                            <option value="comm">Communication Tests</option>
-                            <option value="skill">Skill Tests</option>
+                            {proctorSourceOptions.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
                         </select>
                     </div>
                     <div>
@@ -710,7 +774,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading }) {
                 </button>
             </div>
 
-            {result && <IntegrityReportCard data={result} />}
+            {result && <IntegrityReportCard data={result} userDirectory={userDirectory} />}
         </div>
     )
 }
@@ -737,8 +801,9 @@ function CollusionTab({ ids, setIds, source, setSource, onRun, result, loading }
                 />
                 <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center' }}>
                     <select value={source} onChange={e => setSource(e.target.value)} style={{ ...inputStyle, flex: 'none', width: 180 }}>
-                        <option value="comm">Communication Tests</option>
-                        <option value="skill">Skill Tests</option>
+                        {proctorSourceOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                     </select>
                     <button onClick={onRun} style={{ ...btnPrimary, background: 'linear-gradient(135deg, #f97316, #ea580c)' }} disabled={loading || !ids.trim()}>
                         {loading ? <RefreshCw size={14} className="spin" /> : <Shield size={14} />} Detect Collusion
@@ -904,8 +969,9 @@ function AnalysisResultCard({ result }) {
 }
 
 
-function IntegrityReportCard({ data }) {
+function IntegrityReportCard({ data, userDirectory }) {
     const report = data.report || {}
+    const resolvedUser = userDirectory[data.user_id] || userDirectory[data.raw_analysis?.user_id]
     const sections = [
         { key: 'executive_summary', label: 'Executive Summary', icon: <FileText size={14} />, color: '#3b82f6' },
         { key: 'session_overview', label: 'Session Overview', icon: <Clock size={14} />, color: '#06b6d4' },
@@ -922,7 +988,7 @@ function IntegrityReportCard({ data }) {
             `${'='.repeat(50)}`,
             `Generated: ${data.generated_at ? new Date(data.generated_at).toLocaleString() : new Date().toLocaleString()}`,
             `Session: ${data.session_id || '—'}`,
-            `Candidate: ${data.candidate_name || data.user_id || '—'}`,
+            `Candidate: ${data.candidate_name || formatUserIdentity(resolvedUser, data.user_id)}`,
             `Exam: ${data.exam_title || '—'}`,
             `Fraud Score: ${data.fraud_score}/100`,
             `Risk Level: ${data.risk_level}`,
@@ -960,7 +1026,7 @@ function IntegrityReportCard({ data }) {
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', fontSize: '0.8rem', color: '#94a3b8' }}>
-                {data.candidate_name && <span>Candidate: <strong style={{ color: '#e2e8f0' }}>{data.candidate_name}</strong></span>}
+                {(data.candidate_name || data.user_id) && <span>Candidate: <strong style={{ color: '#e2e8f0' }}>{data.candidate_name || formatUserIdentity(resolvedUser, data.user_id)}</strong></span>}
                 {data.exam_title && <span>| Exam: <strong style={{ color: '#e2e8f0' }}>{data.exam_title}</strong></span>}
                 {report.overall_verdict && <span>| Verdict: <strong style={{ color: riskColors[report.overall_verdict] || '#e2e8f0' }}>{report.overall_verdict}</strong></span>}
             </div>
@@ -984,7 +1050,8 @@ function IntegrityReportCard({ data }) {
 //  Analysis Detail Modal
 // ═══════════════════════════════════════════════════════════════
 
-function AnalysisDetailModal({ data, onClose, onTerminate }) {
+function AnalysisDetailModal({ data, onClose, onTerminate, userDirectory }) {
+    const resolvedUser = userDirectory[data.user_id]
     const fullResult = data.full_result_json || {}
     return (
         <div style={{
@@ -1008,7 +1075,7 @@ function AnalysisDetailModal({ data, onClose, onTerminate }) {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16, fontSize: '0.8rem' }}>
                     <div style={{ color: '#64748b' }}>Session: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{data.session_id}</span></div>
                     <div style={{ color: '#64748b' }}>Source: <span style={{ color: '#e2e8f0' }}>{data.source}</span></div>
-                    <div style={{ color: '#64748b' }}>User: <span style={{ color: '#e2e8f0' }}>{data.user_id || '—'}</span></div>
+                    <div style={{ color: '#64748b' }}>User: <span style={{ color: '#e2e8f0' }}>{formatUserIdentity(resolvedUser, data.user_id)}</span></div>
                     <div style={{ color: '#64748b' }}>Exam: <span style={{ color: '#e2e8f0' }}>{data.exam_title || '—'}</span></div>
                 </div>
 
@@ -1069,7 +1136,7 @@ function AnalysisDetailModal({ data, onClose, onTerminate }) {
 }
 
 
-function ReportDetailModal({ data, onClose }) {
+function ReportDetailModal({ data, onClose, userDirectory }) {
     return (
         <div style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
@@ -1087,7 +1154,7 @@ function ReportDetailModal({ data, onClose }) {
                         <X size={20} />
                     </button>
                 </div>
-                <IntegrityReportCard data={data} />
+                <IntegrityReportCard data={data} userDirectory={userDirectory} />
             </div>
         </div>
     )

@@ -29,6 +29,24 @@ const formatSessionId = (session_id, user_id) => {
     return user_id ? `${user_id} (${last4})` : (session_id || '').slice(-12)
 }
 
+const formatUserIdentity = (user, userId) => {
+    if (user?.name && user?.email) return `${user.name} (${user.email})`
+    if (user?.name) return user.name
+    if (user?.email) return user.email
+    return userId || '—'
+}
+
+function UserIdentity({ userId, userDirectory }) {
+    const user = userDirectory[userId]
+    if (!userId) return <span style={{ color: '#94a3b8' }}>—</span>
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{user?.name || userId}</span>
+            <span style={{ color: '#64748b', fontSize: '0.72rem' }}>{user?.email || userId}</span>
+        </div>
+    )
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 //  Colour & style helpers
@@ -141,6 +159,7 @@ export default function BehaviorAnalysisDashboard() {
     const [dashboard, setDashboard] = useState(null)
     const [analyses, setAnalyses] = useState([])
     const [loading, setLoading] = useState(false)
+    const [userDirectory, setUserDirectory] = useState({})
 
     // Analyze form
     const [analyzeForm, setAnalyzeForm] = useState({ session_id: '', user_id: '', exam_title: '', problem_difficulty: 'medium' })
@@ -164,6 +183,28 @@ export default function BehaviorAnalysisDashboard() {
         fetchAnalyses()
     }, [])
 
+    const hydrateUsers = async (userIds) => {
+        const ids = [...new Set((userIds || []).map((id) => String(id || '').trim()).filter(Boolean))]
+        const unresolved = ids.filter((id) => !userDirectory[id])
+        if (!unresolved.length) return
+        const responses = await Promise.allSettled(
+            unresolved.map((id) => axios.get(`${API_BASE}/users/${encodeURIComponent(id)}`))
+        )
+        const resolvedUsers = {}
+        responses.forEach((response, index) => {
+            if (response.status !== 'fulfilled') return
+            const data = response.value?.data || {}
+            resolvedUsers[unresolved[index]] = {
+                id: data.id || unresolved[index],
+                name: data.name || '',
+                email: data.email || '',
+            }
+        })
+        if (Object.keys(resolvedUsers).length) {
+            setUserDirectory((prev) => ({ ...prev, ...resolvedUsers }))
+        }
+    }
+
     const fetchSessions = async () => {
         setSessionsLoading(true)
         try {
@@ -185,6 +226,17 @@ export default function BehaviorAnalysisDashboard() {
     useEffect(() => {
         if (tab === 'analyze' || tab === 'report') fetchSessions()
     }, [tab])
+
+    useEffect(() => {
+        hydrateUsers([
+            ...(dashboard?.recent_flagged || []).map((item) => item.user_id),
+            ...analyses.map((item) => item.user_id),
+            ...sessions.map((item) => item.user_id),
+            analyzeResult?.user_id,
+            reportResult?.user_id,
+            detailData?.user_id,
+        ])
+    }, [dashboard, analyses, sessions, analyzeResult, reportResult, detailData])
 
     const fetchDashboard = async () => {
         try {
@@ -343,7 +395,7 @@ export default function BehaviorAnalysisDashboard() {
             </div>
 
             {/* Tab Content */}
-            {tab === 'dashboard' && <DashboardTab dashboard={dashboard} analyses={analyses} onViewDetail={viewDetail} onRefresh={() => { fetchDashboard(); fetchAnalyses() }} />}
+            {tab === 'dashboard' && <DashboardTab dashboard={dashboard} analyses={analyses} onViewDetail={viewDetail} onRefresh={() => { fetchDashboard(); fetchAnalyses() }} userDirectory={userDirectory} />}
             {tab === 'analyze' && (
                 <AnalyzeTab
                     form={analyzeForm}
@@ -358,6 +410,7 @@ export default function BehaviorAnalysisDashboard() {
                     onFetchSessions={fetchSessions}
                     onSelectSession={(s) => selectSession(s, 'analyze')}
                     onClearData={clearAllData}
+                    userDirectory={userDirectory}
                 />
             )}
             {tab === 'report' && (
@@ -371,12 +424,13 @@ export default function BehaviorAnalysisDashboard() {
                     sessionsLoading={sessionsLoading}
                     onFetchSessions={fetchSessions}
                     onSelectSession={(s) => selectSession(s, 'report')}
+                    userDirectory={userDirectory}
                 />
             )}
 
             {/* Detail modal */}
             {detailId && detailData && (
-                <DetailModal data={detailData} onClose={() => { setDetailId(null); setDetailData(null) }} />
+                <DetailModal data={detailData} onClose={() => { setDetailId(null); setDetailData(null) }} userDirectory={userDirectory} />
             )}
         </div>
     )
@@ -387,7 +441,7 @@ export default function BehaviorAnalysisDashboard() {
 //  Dashboard Tab
 // ═══════════════════════════════════════════════════════════════
 
-function DashboardTab({ dashboard, analyses, onViewDetail, onRefresh }) {
+function DashboardTab({ dashboard, analyses, onViewDetail, onRefresh, userDirectory }) {
     if (!dashboard) return <div style={{ textAlign: 'center', color: '#64748b', padding: '3rem' }}>Loading dashboard...</div>
 
     const dist = dashboard.trust_distribution || {}
@@ -459,6 +513,7 @@ function DashboardTab({ dashboard, analyses, onViewDetail, onRefresh }) {
                             <div key={i} onClick={() => s.id && onViewDetail(s.id)} className="bad-flagged-row">
                                 <div>
                                     <span style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 }}>{formatSessionId(s.session_id, s.user_id)}</span>
+                                    <div style={{ marginTop: 4 }}><UserIdentity userId={s.user_id} userDirectory={userDirectory} /></div>
                                     {s.exam_title && <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: 8 }}>{s.exam_title}</span>}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -487,7 +542,7 @@ function DashboardTab({ dashboard, analyses, onViewDetail, onRefresh }) {
                             }}>
                                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                                     <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontFamily: 'monospace' }}>{formatSessionId(a.session_id, a.user_id)}</span>
-                                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{a.user_id}</span>
+                                    <UserIdentity userId={a.user_id} userDirectory={userDirectory} />
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     <span style={{ fontWeight: 600, color: (trustColors[a.trust_level] || '#94a3b8'), fontSize: '0.9rem' }}>{a.trust_score}</span>
@@ -507,7 +562,7 @@ function DashboardTab({ dashboard, analyses, onViewDetail, onRefresh }) {
 //  Analyze Session Tab
 // ═══════════════════════════════════════════════════════════════
 
-function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunProgress, sessions, sessionsLoading, onFetchSessions, onSelectSession, onClearData }) {
+function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunProgress, sessions, sessionsLoading, onFetchSessions, onSelectSession, onClearData, userDirectory }) {
     return (
         <div>
             {/* Available sessions - admin can pick one */}
@@ -553,7 +608,7 @@ function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunPr
                                     {s.session_id}
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: '#64748b', flexShrink: 0, marginLeft: 8, whiteSpace: 'nowrap' }}>
-                                    {s.user_id} • {s.event_count} events • {new Date(s.last_event).toLocaleString()}
+                                    {formatUserIdentity(userDirectory[s.user_id], s.user_id)} • {s.event_count} events • {new Date(s.last_event).toLocaleString()}
                                 </div>
                             </div>
                         ))}
@@ -601,10 +656,13 @@ function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunPr
                     <div style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start', marginBottom: 20 }}>
                         <TrustScoreGauge score={result.trust_score || 0} size={160} />
                         <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                                 <TrustBadge level={result.trust_level} />
                                 <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
                                     {result.total_events || 0} events analyzed • {Math.round((result.session_duration_sec || 0) / 60)}min session
+                                </span>
+                                <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
+                                    {formatUserIdentity(userDirectory[result.user_id], result.user_id)}
                                 </span>
                             </div>
 
@@ -720,7 +778,7 @@ function AnalyzeTab({ form, setForm, onRun, onRunAll, result, loading, autoRunPr
 //  Report Tab
 // ═══════════════════════════════════════════════════════════════
 
-function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessionsLoading, onFetchSessions, onSelectSession }) {
+function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessionsLoading, onFetchSessions, onSelectSession, userDirectory }) {
     return (
         <div>
             {/* Available sessions */}
@@ -757,7 +815,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessi
                                     {s.session_id}
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: '#64748b', flexShrink: 0, marginLeft: 8 }}>
-                                    {s.user_id} • {s.event_count} events
+                                    {formatUserIdentity(userDirectory[s.user_id], s.user_id)} • {s.event_count} events
                                 </div>
                             </div>
                         ))}
@@ -790,7 +848,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessi
                         <div>
                             <TrustBadge level={result.trust_level} />
                             <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: 4 }}>
-                                {result.candidate_name || result.user_id} • {result.exam_title || 'Assessment'}
+                                {result.candidate_name || formatUserIdentity(userDirectory[result.user_id], result.user_id)} • {result.exam_title || 'Assessment'}
                             </div>
                         </div>
                     </div>
@@ -817,7 +875,7 @@ function ReportTab({ form, setForm, onGenerate, result, loading, sessions, sessi
 //  Detail Modal
 // ═══════════════════════════════════════════════════════════════
 
-function DetailModal({ data, onClose }) {
+function DetailModal({ data, onClose, userDirectory }) {
     // Parse stored JSON fields
     const typing = typeof data.typing_json === 'string' ? JSON.parse(data.typing_json || '{}') : (data.typing_json || {})
     const progression = typeof data.progression_json === 'string' ? JSON.parse(data.progression_json || '{}') : (data.progression_json || {})
@@ -854,7 +912,7 @@ function DetailModal({ data, onClose }) {
                             Session: {data.session_id}
                         </div>
                         <div style={{ color: '#64748b', fontSize: '0.75rem' }}>
-                            {data.user_id} • {data.exam_title || 'N/A'} • {data.created_at}
+                            {formatUserIdentity(userDirectory[data.user_id], data.user_id)} • {data.exam_title || 'N/A'} • {data.created_at}
                         </div>
                     </div>
                 </div>
