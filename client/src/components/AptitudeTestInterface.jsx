@@ -170,7 +170,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             setShowWarning(true)
             setTimeout(() => setShowWarning(false), 3000)
         }
-    }, [faceDetection.noFaceCount, proctoring.enableFaceDetection, recordViolation])
+    }, [faceDetection.noFaceCount, proctoring.enableFaceDetection])
 
     useEffect(() => {
         if (!proctoring.detectMultipleFaces) return
@@ -180,7 +180,7 @@ function AptitudeTestInterface({ test, user, onClose, onComplete }) {
             setShowWarning(true)
             setTimeout(() => setShowWarning(false), 4000)
         }
-    }, [faceDetection.multipleFaceCount, proctoring.detectMultipleFaces, recordViolation])
+    }, [faceDetection.multipleFaceCount, proctoring.detectMultipleFaces])
 
     // ── Auto-terminate test ──
     const autoTerminateTest = useCallback(async (reason) => {
