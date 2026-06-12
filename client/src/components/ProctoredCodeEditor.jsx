@@ -1238,9 +1238,6 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
             // Stop all media (camera, microphone, recording)
             stopAllMedia()
 
-            // Download the camera recording
-            downloadRecording()
-
             if (onSubmitSuccess) {
                 onSubmitSuccess(response.data)
             }
