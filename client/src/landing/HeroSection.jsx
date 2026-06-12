@@ -91,9 +91,9 @@ export default function HeroSection() {
     ]
 
     const stats = [
-        { icon: Building2, value: '500+', label: 'Institutions' },
-        { icon: Users, value: '1M+', label: 'Assessments Conducted' },
-        { icon: Award, value: '5M+', label: 'Candidates Evaluated' },
+        { icon: Building2, value: '2', label: 'Institutions' },
+        { icon: Users, value: '10', label: 'Assessments Conducted' },
+        { icon: Award, value: '100', label: 'Candidates Evaluated' },
         { icon: MonitorCheck, value: '98.7%', label: 'Customer Satisfaction' },
     ]
 
