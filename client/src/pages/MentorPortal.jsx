@@ -7,6 +7,7 @@ import { AIChatbot, AIFloatingButton } from '../components/AIChatbot'
 import AptitudeReportModal from '../components/AptitudeReportModal'
 import StudentReportModal from '../components/StudentReportModal'
 import TestCasesManager from '../components/TestCasesManager'
+import LocalTestCasesManager from '../components/LocalTestCasesManager'
 import MentorLiveMonitoring from '../components/MentorLiveMonitoring'
 
 import InlineCodeFeedback from '../components/InlineCodeFeedback'
@@ -442,6 +443,7 @@ function UploadProblems({ user }) {
     const [submittingProblem, setSubmittingProblem] = useState(false)
     const csvInputRef = useRef(null)
     const [selectedProblemForTestCases, setSelectedProblemForTestCases] = useState(null)
+    const [showDraftTestCasesManager, setShowDraftTestCasesManager] = useState(false)
     const [problem, setProblem] = useState({
         title: '',
         type: 'Coding',
@@ -450,6 +452,7 @@ function UploadProblems({ user }) {
         description: '',
         testInput: '',
         expectedOutput: '',
+        testCases: [],
         deadline: '',
         status: 'live',
         // SQL specific fields
@@ -481,6 +484,7 @@ function UploadProblems({ user }) {
             description: generated.description || '',
             testInput: isSQL ? '' : (generated.sampleInput || ''),
             expectedOutput: isSQL ? '' : (generated.expectedOutput || ''),
+            testCases: isSQL ? [] : (Array.isArray(generated.testCases) ? generated.testCases : []),
             sqlSchema: isSQL ? (generated.sqlSchema || generated.schema || DEFAULT_SQL_SCHEMA) : '',
             expectedQueryResult: isSQL ? (generated.expectedQueryResult || generated.expectedResult || '') : '',
             deadline: problem.deadline,
@@ -609,11 +613,36 @@ function UploadProblems({ user }) {
         if (submittingProblem) return
         setSubmittingProblem(true)
         try {
-            await axios.post(`${API_BASE}/problems`, { ...problem, mentorId: user.id })
+            const normalizedTestCases = Array.isArray(problem.testCases)
+                ? problem.testCases
+                    .map((tc) => ({
+                        input: tc.input || '',
+                        expectedOutput: tc.expectedOutput || tc.expected_output || '',
+                        isHidden: !!tc.isHidden,
+                        points: tc.points || 10,
+                        description: tc.description || ''
+                    }))
+                    .filter((tc) => tc.input.trim() || tc.expectedOutput.trim())
+                : []
+            await axios.post(`${API_BASE}/problems`, {
+                ...problem,
+                testCases: normalizedTestCases.length > 0
+                    ? normalizedTestCases
+                    : (problem.testInput || problem.expectedOutput
+                        ? [{
+                            input: problem.testInput || '',
+                            expectedOutput: problem.expectedOutput || '',
+                            isHidden: false,
+                            points: 10,
+                            description: 'Sample case'
+                        }]
+                        : []),
+                mentorId: user.id
+            })
             setShowModal(false)
             setProblem({
                 title: '', type: 'Coding', language: 'Python', difficulty: 'Medium',
-                description: '', testInput: '', expectedOutput: '', deadline: '', status: 'live',
+                description: '', testInput: '', expectedOutput: '', testCases: [], deadline: '', status: 'live',
                 enableProctoring: false, enableVideoAudio: false, disableCopyPaste: false,
                 trackTabSwitches: false, maxTabSwitches: 3,
                 enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, excludedViolationTypes: ['window_blur']
@@ -875,14 +904,29 @@ function UploadProblems({ user }) {
                                         </div>
                                     </>
                                 ) : (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
-                                        <div className="form-group">
-                                            <label className="form-label">Sample Input</label>
-                                            <input type="text" placeholder="e.g., [1, 2, 3]" value={problem.testInput} onChange={(e) => setProblem({ ...problem, testInput: e.target.value })} />
+                                    <div style={{ marginBottom: '1.5rem' }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                                            <div className="form-group">
+                                                <label className="form-label">Sample Input</label>
+                                                <input type="text" placeholder="e.g., [1, 2, 3]" value={problem.testInput} onChange={(e) => setProblem({ ...problem, testInput: e.target.value })} />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Expected Output</label>
+                                                <input type="text" placeholder="e.g., 6" value={problem.expectedOutput} onChange={(e) => setProblem({ ...problem, expectedOutput: e.target.value })} />
+                                            </div>
                                         </div>
-                                        <div className="form-group">
-                                            <label className="form-label">Expected Output</label>
-                                            <input type="text" placeholder="e.g., 6" value={problem.expectedOutput} onChange={(e) => setProblem({ ...problem, expectedOutput: e.target.value })} />
+                                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                                            <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                                {problem.testCases?.length || 0} saved test case{(problem.testCases?.length || 0) === 1 ? '' : 's'}
+                                            </small>
+                                            <button
+                                                type="button"
+                                                className="btn-reset"
+                                                onClick={() => setShowDraftTestCasesManager(true)}
+                                                style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                                            >
+                                                <Code size={14} /> Manage Test Cases
+                                            </button>
                                         </div>
                                     </div>
                                 )}
@@ -1055,6 +1099,20 @@ function UploadProblems({ user }) {
                     problemId={selectedProblemForTestCases.id}
                     problemTitle={selectedProblemForTestCases.title}
                     onClose={() => setSelectedProblemForTestCases(null)}
+                />
+            )}
+
+            {showDraftTestCasesManager && (
+                <LocalTestCasesManager
+                    initialTestCases={problem.testCases || []}
+                    title={problem.title || 'Draft Coding Problem'}
+                    onUpdate={(cases) => setProblem(prev => ({
+                        ...prev,
+                        testCases: cases,
+                        testInput: cases[0]?.input || prev.testInput,
+                        expectedOutput: cases[0]?.expectedOutput || cases[0]?.expected_output || prev.expectedOutput,
+                    }))}
+                    onClose={() => setShowDraftTestCasesManager(false)}
                 />
             )}
         </div>

@@ -2838,6 +2838,7 @@ function GlobalProblems({ mode = 'all' }) {
     const forcedTab = mode === 'coding' || mode === 'sql' ? mode : null
     const [activeTab, setActiveTab] = useState(forcedTab || 'coding') // 'coding' or 'sql'
     const [selectedProblemForTestCases, setSelectedProblemForTestCases] = useState(null)
+    const [showDraftTestCasesManager, setShowDraftTestCasesManager] = useState(false)
     const [allocatingProblem, setAllocatingProblem] = useState(null)
     const [orgStudents, setOrgStudents] = useState([])
     const [selectedStudents, setSelectedStudents] = useState(new Set())
@@ -2854,6 +2855,7 @@ function GlobalProblems({ mode = 'all' }) {
         description: '',
         sampleInput: '',
         expectedOutput: '',
+        testCases: [],
         deadline: '',
         status: 'live',
         // SQL specific fields
@@ -2898,6 +2900,7 @@ function GlobalProblems({ mode = 'all' }) {
             description: '',
             sampleInput: '',
             expectedOutput: '',
+            testCases: [],
             sqlSchema: activeTab === 'sql' ? DEFAULT_SQL_SCHEMA : '',
             expectedQueryResult: ''
         }))
@@ -2913,6 +2916,7 @@ function GlobalProblems({ mode = 'all' }) {
             description: generated.description || '',
             sampleInput: isSQL ? '' : (generated.sampleInput || ''),
             expectedOutput: isSQL ? '' : (generated.expectedOutput || ''),
+            testCases: isSQL ? [] : (Array.isArray(generated.testCases) ? generated.testCases : []),
             sqlSchema: isSQL ? (generated.sqlSchema || generated.schema || DEFAULT_SQL_SCHEMA) : '',
             expectedQueryResult: isSQL ? (generated.expectedQueryResult || generated.expectedResult || '') : '',
             deadline: problem.deadline,
@@ -2966,6 +2970,7 @@ function GlobalProblems({ mode = 'all' }) {
                 description: generated.question || generated.description || `Solve: ${problemAiPrompt.topic}`,
                 sampleInput: generated.testCases?.[0]?.input || '',
                 expectedOutput: generated.testCases?.[0]?.expected_output || generated.testCases?.[0]?.expectedOutput || '',
+                testCases: Array.isArray(generated.testCases) ? generated.testCases : [],
             }
             setGeneratedProblemDraft(draft)
         } catch (e) {
@@ -3039,15 +3044,37 @@ function GlobalProblems({ mode = 'all' }) {
         if (submittingProblem) return
         setSubmittingProblem(true)
         try {
+            const normalizedTestCases = Array.isArray(problem.testCases)
+                ? problem.testCases
+                    .map((tc) => ({
+                        input: tc.input || '',
+                        expectedOutput: tc.expectedOutput || tc.expected_output || '',
+                        isHidden: !!tc.isHidden,
+                        points: tc.points || 10,
+                        description: tc.description || ''
+                    }))
+                    .filter((tc) => tc.input.trim() || tc.expectedOutput.trim())
+                : []
             await axios.post(`${API_BASE}/problems`, {
                 ...problem,
+                testCases: normalizedTestCases.length > 0
+                    ? normalizedTestCases
+                    : (problem.sampleInput || problem.expectedOutput
+                        ? [{
+                            input: problem.sampleInput || '',
+                            expectedOutput: problem.expectedOutput || '',
+                            isHidden: false,
+                            points: 10,
+                            description: 'Sample case'
+                        }]
+                        : []),
                 mentorId: ADMIN_ID,
                 deadline: problem.deadline || null,
             })
             setShowModal(false)
             setProblem({
                 title: '', type: 'Coding', language: 'Python', difficulty: 'Medium',
-                description: '', sampleInput: '', expectedOutput: '', deadline: '', status: 'live',
+                description: '', sampleInput: '', expectedOutput: '', testCases: [], deadline: '', status: 'live',
                 sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '',
                 enableProctoring: false, enableVideoAudio: false, enableMicrophone: false, disableCopyPaste: false, trackTabSwitches: false, maxTabSwitches: 3,
                 detectPhoneUsage: false, detectCameraBlocking: false, enforceFullscreen: false,
@@ -3233,7 +3260,7 @@ function GlobalProblems({ mode = 'all' }) {
                                     language: activeTab === 'sql' ? 'SQL' : 'Python'
                                 })
                                 if (activeTab === 'sql') {
-                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '' }))
+                                    setProblem(prev => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', testCases: [], sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '' }))
                                 } else {
                                     setProblem(prev => ({
                                         ...prev,
@@ -3243,6 +3270,7 @@ function GlobalProblems({ mode = 'all' }) {
                                         description: '',
                                         sampleInput: '',
                                         expectedOutput: '',
+                                        testCases: [],
                                         sqlSchema: activeTab === 'sql' ? DEFAULT_SQL_SCHEMA : '',
                                         expectedQueryResult: ''
                                     }))
@@ -3277,7 +3305,7 @@ function GlobalProblems({ mode = 'all' }) {
                                     language: activeTab === 'sql' ? 'SQL' : 'Python'
                                 })
                                 if (activeTab === 'sql') {
-                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '' }))
+                                    setProblem((prev) => ({ ...prev, type: 'SQL', language: 'SQL', title: '', description: '', sampleInput: '', expectedOutput: '', testCases: [], sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '' }))
                                 } else {
                                     setProblem((prev) => ({
                                         ...prev,
@@ -3287,6 +3315,7 @@ function GlobalProblems({ mode = 'all' }) {
                                         description: '',
                                         sampleInput: '',
                                         expectedOutput: '',
+                                        testCases: [],
                                         sqlSchema: activeTab === 'sql' ? DEFAULT_SQL_SCHEMA : '',
                                         expectedQueryResult: '',
                                     }))
@@ -3845,6 +3874,19 @@ function GlobalProblems({ mode = 'all' }) {
                                                 />
                                             </div>
                                         </div>
+                                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                                            <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                                {problem.testCases?.length || 0} saved test case{(problem.testCases?.length || 0) === 1 ? '' : 's'}
+                                            </small>
+                                            <button
+                                                type="button"
+                                                className="btn-reset"
+                                                onClick={() => setShowDraftTestCasesManager(true)}
+                                                style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                                            >
+                                                <Code size={14} /> Manage Test Cases
+                                            </button>
+                                        </div>
                                     </AdminCreateSectionCard>
                                 )}
 
@@ -3929,6 +3971,20 @@ function GlobalProblems({ mode = 'all' }) {
                     problemId={selectedProblemForTestCases.id}
                     problemTitle={selectedProblemForTestCases.title}
                     onClose={() => setSelectedProblemForTestCases(null)}
+                />
+            )}
+
+            {showDraftTestCasesManager && (
+                <LocalTestCasesManager
+                    initialTestCases={problem.testCases || []}
+                    title={problem.title || 'Draft Coding Problem'}
+                    onUpdate={(cases) => setProblem(prev => ({
+                        ...prev,
+                        testCases: cases,
+                        sampleInput: cases[0]?.input || prev.sampleInput,
+                        expectedOutput: cases[0]?.expectedOutput || cases[0]?.expected_output || prev.expectedOutput,
+                    }))}
+                    onClose={() => setShowDraftTestCasesManager(false)}
                 />
             )}
 

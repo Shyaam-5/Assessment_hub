@@ -81,6 +81,7 @@ class ProblemCreate(BaseModel):
     title: str
     description: str
     sampleInput: str | None = None
+    testInput: str | None = None
     expectedOutput: str | None = None
     difficulty: str = "medium"
     type: str = "coding"
@@ -90,6 +91,7 @@ class ProblemCreate(BaseModel):
     # SQL-specific
     sqlSchema: str | None = None
     expectedQueryResult: str | None = None
+    testCases: list[dict] | None = None
     # Proctoring
     enableProctoring: bool | None = False
     enableVideoAudio: bool | None = False
@@ -107,20 +109,51 @@ class ProblemCreate(BaseModel):
     excludedViolationTypes: list[str] | None = None
 
 
+class TestCasePayload(BaseModel):
+    input: str | None = ""
+    expectedOutput: str | None = ""
+    isHidden: bool | None = False
+    points: int | None = 10
+    description: str | None = ""
+
+
+def _normalize_test_cases(raw_cases) -> list[dict]:
+    if isinstance(raw_cases, str):
+        try:
+            raw_cases = json.loads(raw_cases)
+        except Exception:
+            raw_cases = []
+    if not isinstance(raw_cases, list):
+        return []
+
+    normalized: list[dict] = []
+    for case in raw_cases:
+        if not isinstance(case, dict):
+            continue
+        normalized.append({
+            "id": str(case.get("id") or uuid.uuid4()),
+            "input": str(case.get("input") or case.get("sampleInput") or ""),
+            "expectedOutput": str(case.get("expectedOutput") or case.get("expected_output") or ""),
+            "isHidden": bool(case.get("isHidden") or case.get("is_hidden") or False),
+            "points": max(1, int(case.get("points") or 10)),
+            "description": str(case.get("description") or ""),
+        })
+    return normalized
+
+
+def _problem_sample_input(body: ProblemCreate) -> str | None:
+    return body.sampleInput if body.sampleInput is not None else body.testInput
+
+
 def _enrich_problem(p: dict) -> dict:
     """Normalise column names and attach proctoring settings."""
     p["mentorId"] = p.pop("mentor_id", None)
     p["sampleInput"] = p.pop("sample_input", None)
+    p["testInput"] = p["sampleInput"]
     p["expectedOutput"] = p.pop("expected_output", None)
     p["sqlSchema"] = p.pop("sql_schema", None)
     p["expectedQueryResult"] = p.pop("expected_query_result", None)
-    raw_test_cases = p.pop("test_cases", None)
-    if isinstance(raw_test_cases, str):
-        try:
-            raw_test_cases = __import__("json").loads(raw_test_cases)
-        except Exception:
-            raw_test_cases = []
-    p["testCases"] = raw_test_cases if isinstance(raw_test_cases, list) else []
+    p["testCases"] = _normalize_test_cases(p.pop("test_cases", None))
     is_sql_problem = str(p.get("type") or "").upper() == "SQL" or str(p.get("language") or "").upper() == "SQL"
     if is_sql_problem and not p["sqlSchema"]:
         p["sqlSchema"] = DEFAULT_SQL_SCHEMA
@@ -301,9 +334,11 @@ async def create_problem(body: ProblemCreate, request: Request):
     if not await _has_any_permission(actor_id, ["coding.create"]):
         raise HTTPException(status_code=403, detail="Permission denied")
     await assert_assessment_limit_for_actor(actor_id)
+    sample_input = _problem_sample_input(body)
     sql_schema = body.sqlSchema
     if (body.type or "").upper() == "SQL" or (body.language or "").upper() == "SQL":
         sql_schema = sql_schema or DEFAULT_SQL_SCHEMA
+    test_cases = _normalize_test_cases(body.testCases)
     problem_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     normalized_deadline = body.deadline or None
@@ -314,18 +349,18 @@ async def create_problem(body: ProblemCreate, request: Request):
                 """INSERT INTO problems (
                     id, mentor_id, title, description, sample_input, expected_output,
                     difficulty, type, language, status, deadline,
-                    sql_schema, expected_query_result,
+                    sql_schema, expected_query_result, test_cases,
                     enable_proctoring, enable_video_audio, enable_microphone, disable_copy_paste,
                     track_tab_switches, max_tab_switches,
                     detect_phone_usage, detect_camera_blocking, enforce_fullscreen,
                     enable_face_detection, detect_multiple_faces, track_face_lookaway, auto_submit_on_violation, excluded_violation_types,
                     created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     problem_id, body.mentorId, body.title, body.description,
-                    body.sampleInput, body.expectedOutput,
+                    sample_input, body.expectedOutput,
                     body.difficulty, body.type, body.language, body.status, normalized_deadline,
-                    sql_schema, body.expectedQueryResult,
+                    sql_schema, body.expectedQueryResult, json.dumps(test_cases),
                     str(body.enableProctoring).lower(),
                     str(body.enableVideoAudio).lower(),
                     str(body.enableMicrophone).lower(),
@@ -354,8 +389,99 @@ async def create_problem(body: ProblemCreate, request: Request):
         details={"title": body.title, "type": body.type, "difficulty": body.difficulty, "mentorId": body.mentorId},
     )
     payload = body.model_dump()
+    payload["sampleInput"] = sample_input
+    payload["testInput"] = sample_input
     payload["sqlSchema"] = sql_schema
+    payload["testCases"] = test_cases
     return {"id": problem_id, **payload, "completedBy": [], "createdAt": str(now)}
+
+
+@router.get("/problems/{problem_id}/test-cases")
+async def get_problem_test_cases(problem_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["tests.view", "coding.create", "coding.assign"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT test_cases FROM problems WHERE id = %s LIMIT 1", (problem_id,))
+            row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Problem not found")
+    return _normalize_test_cases(row.get("test_cases"))
+
+
+@router.post("/problems/{problem_id}/test-cases")
+async def add_problem_test_case(problem_id: str, body: TestCasePayload, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["coding.create"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT test_cases FROM problems WHERE id = %s LIMIT 1", (problem_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Problem not found")
+            test_cases = _normalize_test_cases(row.get("test_cases"))
+            test_case = _normalize_test_cases([body.model_dump()])[0]
+            test_cases.append(test_case)
+            await cur.execute(
+                "UPDATE problems SET test_cases = %s WHERE id = %s",
+                (json.dumps(test_cases), problem_id),
+            )
+        await conn.commit()
+    return test_case
+
+
+@router.put("/test-cases/{test_case_id}")
+async def update_problem_test_case(test_case_id: str, body: TestCasePayload, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["coding.create"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id, test_cases FROM problems")
+            rows = await cur.fetchall()
+            for row in rows or []:
+                test_cases = _normalize_test_cases(row.get("test_cases"))
+                idx = next((i for i, case in enumerate(test_cases) if case.get("id") == test_case_id), -1)
+                if idx < 0:
+                    continue
+                updated_case = _normalize_test_cases([{**body.model_dump(), "id": test_case_id}])[0]
+                test_cases[idx] = updated_case
+                await cur.execute(
+                    "UPDATE problems SET test_cases = %s WHERE id = %s",
+                    (json.dumps(test_cases), row["id"]),
+                )
+                await conn.commit()
+                return updated_case
+    raise HTTPException(status_code=404, detail="Test case not found")
+
+
+@router.delete("/test-cases/{test_case_id}")
+async def delete_problem_test_case(test_case_id: str, request: Request):
+    actor_id = (getattr(request.state, "auth_user_id", None) or "").strip()
+    if not await _has_any_permission(actor_id, ["coding.create"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            await cur.execute("SELECT id, test_cases FROM problems")
+            rows = await cur.fetchall()
+            for row in rows or []:
+                test_cases = _normalize_test_cases(row.get("test_cases"))
+                remaining = [case for case in test_cases if case.get("id") != test_case_id]
+                if len(remaining) == len(test_cases):
+                    continue
+                await cur.execute(
+                    "UPDATE problems SET test_cases = %s WHERE id = %s",
+                    (json.dumps(remaining), row["id"]),
+                )
+                await conn.commit()
+                return {"success": True}
+    raise HTTPException(status_code=404, detail="Test case not found")
 
 
 @router.delete("/problems/{problem_id}")
