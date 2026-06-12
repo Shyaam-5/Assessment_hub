@@ -186,6 +186,41 @@ def _evaluate_sql(data: dict, expected_result: str) -> dict:
         }
 
 
+def _coerce_analysis_metric(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(round(value))
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+    qualitative_map = {
+        "excellent": 40,
+        "good": 30,
+        "fair": 20,
+        "average": 20,
+        "poor": 10,
+        "bad": 10,
+        "n/a": None,
+        "na": None,
+        "not applicable": None,
+        "?": None,
+    }
+    if lowered in qualitative_map:
+        return qualitative_map[lowered]
+
+    numeric_match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if numeric_match:
+        return int(round(float(numeric_match.group(0))))
+
+    return None
+
+
 # â”€â”€â”€ Penalty helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _apply_penalties(
@@ -573,8 +608,8 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
                     body.submissionType, body.fileName, body.language,
                     final_score, final_status, feedback,
                     eval_result.get("aiExplanation", ""),
-                    analysis.get("correctness"), analysis.get("efficiency"),
-                    analysis.get("codeStyle"), analysis.get("bestPractices"),
+                    _coerce_analysis_metric(analysis.get("correctness")), _coerce_analysis_metric(analysis.get("efficiency")),
+                    _coerce_analysis_metric(analysis.get("codeStyle")), _coerce_analysis_metric(analysis.get("bestPractices")),
                     "true" if plagiarism["detected"] else "false",
                     plagiarism.get("copiedFrom"), plagiarism.get("copiedFromName"),
                     body.tabSwitches or 0,
@@ -705,10 +740,10 @@ Return strict JSON:
                         sub_id, body.studentId, body.taskId, code_content, ml_type, body.fileName,
                         ai_result.get("score", 0), ai_result.get("status", "accepted"),
                         ai_result.get("feedback", ""), ai_result.get("summary", ""),
-                        f"{ai_result.get('metrics',{}).get('Correctness','N/A')}/100",
-                        f"{ai_result.get('metrics',{}).get('Code Quality','N/A')}/100",
-                        f"{ai_result.get('metrics',{}).get('Documentation','N/A')}/100",
-                        f"{ai_result.get('metrics',{}).get('Model Performance','N/A')}/100",
+                        _coerce_analysis_metric(ai_result.get('metrics', {}).get('Correctness')),
+                        _coerce_analysis_metric(ai_result.get('metrics', {}).get('Code Quality')),
+                        _coerce_analysis_metric(ai_result.get('metrics', {}).get('Documentation')),
+                        _coerce_analysis_metric(ai_result.get('metrics', {}).get('Model Performance')),
                     ),
                 )
                 if (ai_result.get("score", 0) >= 60) or ai_result.get("status") == "accepted":
@@ -849,8 +884,8 @@ Respond JSON: {{"score":0-100,"status":"accepted|partial|rejected","feedback":".
                     submissionType or "editor", language,
                     final_score, final_status, feedback,
                     eval_result.get("aiExplanation", ""),
-                    str(analysis.get("correctness", "")), str(analysis.get("efficiency", "")),
-                    str(analysis.get("codeStyle", "")), str(analysis.get("bestPractices", "")),
+                    _coerce_analysis_metric(analysis.get("correctness")), _coerce_analysis_metric(analysis.get("efficiency")),
+                    _coerce_analysis_metric(analysis.get("codeStyle")), _coerce_analysis_metric(analysis.get("bestPractices")),
                     tabSwitches, copyPasteAttempts,
                     cameraBlockedCount, phoneDetectionCount,
                     faceNotDetectedCount, multipleFacesDetectionCount,
