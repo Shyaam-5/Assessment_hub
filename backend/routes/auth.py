@@ -426,7 +426,7 @@ def _verify_google_credential_jwt(credential: str) -> dict:
 
 @router.post("/auth/google")
 async def login_with_google(body: GoogleLoginRequest, request: Request):
-    """Validate Google token, then require the same email OTP as password login."""
+    """Validate Google token for an already-provisioned user, then issue a session."""
     client_ip = _client_ip_from_request(request)
     if not body.credential or not body.credential.strip():
         raise HTTPException(status_code=400, detail="Missing Google credential")

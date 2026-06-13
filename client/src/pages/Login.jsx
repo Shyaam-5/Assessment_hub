@@ -434,6 +434,15 @@ function Login() {
                                                                 setChallengeId(res.challengeId)
                                                                 setEmailMasked(res.emailMasked || '')
                                                                 setStep('otp')
+                                                                setLoading(false)
+                                                                return
+                                                            }
+                                                            if (res.mustChangePassword && res.setupToken) {
+                                                                setSetupToken(res.setupToken)
+                                                                setPendingName(res.user?.name || '')
+                                                                setStep('firstPassword')
+                                                                setLoading(false)
+                                                                return
                                                             }
                                                             setLoading(false)
                                                         }}

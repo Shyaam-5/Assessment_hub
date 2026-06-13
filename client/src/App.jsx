@@ -298,6 +298,15 @@ function App() {
                 }
             }
 
+            if (data.mustChangePassword && data.setupToken) {
+                return {
+                    success: true,
+                    mustChangePassword: true,
+                    setupToken: data.setupToken,
+                    user: data.user,
+                }
+            }
+
             if (!data.user || !data.user.id) {
                 return { success: false, error: 'Unexpected response from server after Google sign-in. Try again.' }
             }
