@@ -95,6 +95,19 @@ const getImportValue = (row, aliases) => {
 
 const stripImportExtension = (name) => String(name || 'Assessment').replace(/\.(csv|xls|xlsx)$/i, '')
 
+const getCreatorTestStatus = (test) => {
+    const rawStatus = String(test?.status || 'draft').trim().toLowerCase()
+    if (rawStatus === 'live') {
+        const deadline = test?.deadline ? new Date(test.deadline) : null
+        if (deadline && !Number.isNaN(deadline.getTime()) && deadline.getTime() < Date.now()) {
+            return 'ended'
+        }
+    }
+    return rawStatus || 'draft'
+}
+
+const isCreatorTestLive = (test) => getCreatorTestStatus(test) === 'live'
+
 const parseCsvRows = (text) => {
     const rows = []
     let row = []
@@ -4751,7 +4764,7 @@ function GlobalTestsAdmin() {
                     <div className="stat-icon" style={{ background: 'var(--success-alpha)', color: 'var(--success)' }}><CheckCircle size={24} /></div>
                     <div className="stat-info">
                         <span className="stat-label">Live</span>
-                        <span className="stat-value">{tests.filter(t => t.status === 'live').length}</span>
+                        <span className="stat-value">{tests.filter(isCreatorTestLive).length}</span>
                     </div>
                 </div>
                 <div className="stat-card glass">
@@ -4826,14 +4839,14 @@ function GlobalTestsAdmin() {
                                             <span style={{
                                                 padding: '0.3rem 0.85rem',
                                                 borderRadius: '999px',
-                                                background: t.status === 'live' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(107, 114, 128, 0.18)',
-                                                color: t.status === 'live' ? '#10b981' : '#94a3b8',
-                                                border: t.status === 'live' ? '1px solid rgba(16, 185, 129, 0.24)' : '1px solid rgba(148, 163, 184, 0.2)',
+                                                background: getCreatorTestStatus(t) === 'live' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(107, 114, 128, 0.18)',
+                                                color: getCreatorTestStatus(t) === 'live' ? '#10b981' : '#94a3b8',
+                                                border: getCreatorTestStatus(t) === 'live' ? '1px solid rgba(16, 185, 129, 0.24)' : '1px solid rgba(148, 163, 184, 0.2)',
                                                 fontSize: '0.8rem',
                                                 fontWeight: 700,
                                                 textTransform: 'lowercase'
                                             }}>
-                                                {t.status}
+                                                {getCreatorTestStatus(t)}
                                             </span>
                                         </td>
                                         <td>
@@ -4863,7 +4876,7 @@ function GlobalTestsAdmin() {
                                                 >
                                                     Allocate
                                                 </button>
-                                                {t.status === 'live' ? (
+                                                {getCreatorTestStatus(t) === 'live' ? (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleUpdateStatus(t.id, 'draft')}
@@ -5943,7 +5956,7 @@ function AptitudeTestsAdmin() {
                     </div>
                     <div className="stat-info">
                         <span className="stat-label">Live Tests</span>
-                        <span className="stat-value">{tests.filter(t => t.status === 'live').length}</span>
+                        <span className="stat-value">{tests.filter(isCreatorTestLive).length}</span>
                     </div>
                 </div>
                 <div className="stat-card glass">
@@ -6033,20 +6046,20 @@ function AptitudeTestsAdmin() {
                                         <span style={{
                                             padding: '0.25rem 0.75rem',
                                             borderRadius: '20px',
-                                            background: test.status === 'live'
+                                            background: getCreatorTestStatus(test) === 'live'
                                                 ? 'rgba(16, 185, 129, 0.15)'
-                                                : test.status === 'ended'
+                                                : getCreatorTestStatus(test) === 'ended'
                                                     ? 'rgba(239, 68, 68, 0.15)'
                                                     : 'rgba(107, 114, 128, 0.15)',
-                                            color: test.status === 'live'
+                                            color: getCreatorTestStatus(test) === 'live'
                                                 ? '#10b981'
-                                                : test.status === 'ended'
+                                                : getCreatorTestStatus(test) === 'ended'
                                                     ? '#ef4444'
                                                     : '#6b7280',
                                             fontSize: '0.8rem',
                                             fontWeight: 500
                                         }}>
-                                            {test.status}
+                                            {getCreatorTestStatus(test)}
                                         </span>
                                     </td>
                                     <td>
@@ -6097,20 +6110,20 @@ function AptitudeTestsAdmin() {
                                                 onClick={() => handleToggleStatus(test)}
                                                 style={{
                                                     padding: '0.4rem 0.8rem',
-                                                    background: test.status === 'live'
+                                                    background: getCreatorTestStatus(test) === 'live'
                                                         ? 'rgba(245, 158, 11, 0.1)'
                                                         : 'rgba(16, 185, 129, 0.1)',
-                                                    border: test.status === 'live'
+                                                    border: getCreatorTestStatus(test) === 'live'
                                                         ? '1px solid rgba(245, 158, 11, 0.3)'
                                                         : '1px solid rgba(16, 185, 129, 0.3)',
                                                     borderRadius: '6px',
-                                                    color: test.status === 'live' ? '#f59e0b' : '#10b981',
+                                                    color: getCreatorTestStatus(test) === 'live' ? '#f59e0b' : '#10b981',
                                                     cursor: 'pointer',
                                                     fontSize: '0.8rem'
                                                 }}
-                                                title={test.status === 'live' ? 'End test (hide from students)' : 'Make test live (show to students)'}
+                                                title={getCreatorTestStatus(test) === 'live' ? 'End test (hide from students)' : 'Make test live (show to students)'}
                                             >
-                                                {test.status === 'live' ? 'End' : 'Activate'}
+                                                {getCreatorTestStatus(test) === 'live' ? 'End' : 'Activate'}
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteTest(test.id)}
