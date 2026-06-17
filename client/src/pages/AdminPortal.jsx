@@ -2874,6 +2874,7 @@ function GlobalProblems({ mode = 'all' }) {
         // SQL specific fields
         sqlSchema: DEFAULT_SQL_SCHEMA,
         expectedQueryResult: '',
+        referenceQuery: '',
         enableProctoring: false,
         enableVideoAudio: false,
         enableMicrophone: false,
@@ -2932,6 +2933,7 @@ function GlobalProblems({ mode = 'all' }) {
             testCases: isSQL ? [] : (Array.isArray(generated.testCases) ? generated.testCases : []),
             sqlSchema: isSQL ? (generated.sqlSchema || generated.schema || DEFAULT_SQL_SCHEMA) : '',
             expectedQueryResult: isSQL ? (generated.expectedOutput || generated.expectedQueryResult || generated.expectedResult || '') : '',
+            referenceQuery: isSQL ? (generated.referenceQuery || generated.solutionQuery || generated.reference_query || '') : '',
             deadline: problem.deadline,
             status: generated.status || 'live',
             enableProctoring: problem.enableProctoring,
@@ -2975,6 +2977,7 @@ function GlobalProblems({ mode = 'all' }) {
                 description: generated.question || generated.description || `Write a SQL query for: ${problemAiPrompt.topic}`,
                 sqlSchema: generated.schema || generated.sqlSchema || '',
                 expectedQueryResult: generated.expectedOutput || generated.expectedQueryResult || '',
+                referenceQuery: generated.solutionQuery || generated.referenceQuery || generated.reference_query || '',
             } : {
                 title: generated.title || problemAiPrompt.topic,
                 type: 'Coding',
@@ -3088,7 +3091,7 @@ function GlobalProblems({ mode = 'all' }) {
             setProblem({
                 title: '', type: 'Coding', language: 'Python', difficulty: 'Medium',
                 description: '', sampleInput: '', expectedOutput: '', testCases: [], deadline: '', status: 'live',
-                sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '',
+                sqlSchema: DEFAULT_SQL_SCHEMA, expectedQueryResult: '', referenceQuery: '',
                 enableProctoring: false, enableVideoAudio: false, enableMicrophone: false, disableCopyPaste: false, trackTabSwitches: false, maxTabSwitches: 3,
                 detectPhoneUsage: false, detectCameraBlocking: false, enforceFullscreen: false,
                 enableFaceDetection: false, detectMultipleFaces: false, trackFaceLookaway: false, autoSubmitOnViolation: false, excludedViolationTypes: ['window_blur']

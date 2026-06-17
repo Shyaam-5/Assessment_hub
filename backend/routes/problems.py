@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
+import duckdb
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from database import get_pool, get_primary_pool
@@ -93,6 +94,7 @@ class ProblemCreate(BaseModel):
     # SQL-specific
     sqlSchema: str | None = None
     expectedQueryResult: str | None = None
+    referenceQuery: str | None = None  # correct answer query — auto-executed to produce expectedQueryResult
     testCases: list[dict] | None = None
     # Proctoring
     enableProctoring: bool | None = False
@@ -145,6 +147,31 @@ def _normalize_test_cases(raw_cases) -> list[dict]:
 
 def _problem_sample_input(body: ProblemCreate) -> str | None:
     return body.sampleInput if body.sampleInput is not None else body.testInput
+
+
+async def _run_reference_query(schema: str, query: str) -> str | None:
+    """Run the reference/solution query against DuckDB and return formatted output."""
+    def _execute():
+        conn = duckdb.connect(":memory:")
+        for stmt in schema.split(";"):
+            s = stmt.strip()
+            if s:
+                conn.execute(s)
+        result = conn.execute(query).fetchall()
+        columns = [d[0] for d in conn.description] if conn.description else []
+        if not columns:
+            return None
+        output = " | ".join(columns) + "\n"
+        output += "-" * (sum(len(str(c)) for c in columns) + len(columns) * 3) + "\n"
+        for row in result:
+            output += " | ".join(str(cell) for cell in row) + "\n"
+        conn.close()
+        return output.strip()
+
+    try:
+        return await asyncio.to_thread(_execute)
+    except Exception:
+        return None
 
 
 async def _ensure_problem_test_cases_column(conn) -> bool:
@@ -367,8 +394,15 @@ async def create_problem(body: ProblemCreate, request: Request):
     await assert_assessment_limit_for_actor(actor_id)
     sample_input = _problem_sample_input(body)
     sql_schema = body.sqlSchema
-    if (body.type or "").upper() == "SQL" or (body.language or "").upper() == "SQL":
+    is_sql = (body.type or "").upper() == "SQL" or (body.language or "").upper() == "SQL"
+    if is_sql:
         sql_schema = sql_schema or DEFAULT_SQL_SCHEMA
+    # If admin provided a reference/solution query, run it now to get the real expected output.
+    expected_query_result = body.expectedQueryResult
+    if is_sql and body.referenceQuery and body.referenceQuery.strip():
+        computed = await _run_reference_query(sql_schema, body.referenceQuery.strip())
+        if computed:
+            expected_query_result = computed
     test_cases = _normalize_test_cases(body.testCases)
     problem_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -394,7 +428,7 @@ async def create_problem(body: ProblemCreate, request: Request):
                             problem_id, body.mentorId, body.title, body.description,
                             sample_input, body.expectedOutput,
                             body.difficulty, body.type, body.language, body.status, normalized_deadline,
-                            sql_schema, body.expectedQueryResult, json.dumps(test_cases),
+                            sql_schema, expected_query_result, json.dumps(test_cases),
                             str(body.enableProctoring).lower(),
                             str(body.enableVideoAudio).lower(),
                             str(body.enableMicrophone).lower(),
@@ -427,7 +461,7 @@ async def create_problem(body: ProblemCreate, request: Request):
                             problem_id, body.mentorId, body.title, body.description,
                             sample_input, body.expectedOutput,
                             body.difficulty, body.type, body.language, body.status, normalized_deadline,
-                            sql_schema, body.expectedQueryResult,
+                            sql_schema, expected_query_result,
                             str(body.enableProctoring).lower(),
                             str(body.enableVideoAudio).lower(),
                             str(body.enableMicrophone).lower(),
@@ -464,7 +498,7 @@ async def create_problem(body: ProblemCreate, request: Request):
                             problem_id, body.mentorId, body.title, body.description,
                             sample_input, body.expectedOutput,
                             body.difficulty, body.type, body.language, body.status, normalized_deadline,
-                            sql_schema, body.expectedQueryResult, json.dumps(test_cases),
+                            sql_schema, expected_query_result, json.dumps(test_cases),
                             str(body.enableProctoring).lower(),
                             str(body.enableVideoAudio).lower(),
                             str(body.enableMicrophone).lower(),

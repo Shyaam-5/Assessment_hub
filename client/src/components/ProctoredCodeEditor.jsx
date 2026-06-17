@@ -1127,47 +1127,30 @@ function ProctoredCodeEditor({ problem, user, onClose, onSubmitSuccess }) {
         setTestResults([])
 
         try {
-            const results = []
+            const res = await axios.post(`${API_BASE}/run-with-tests`, {
+                code,
+                language: selectedLanguage,
+                problemId: problem.id,
+                sqlSchema: problem.sqlSchema,
+            })
 
-            for (let i = 0; i < testCases.length; i++) {
-                const testCase = testCases[i]
-                try {
-                    const res = await axios.post(`${API_BASE}/run`, {
-                        code,
-                        language: selectedLanguage,
-                        problemId: problem.id,
-                        sqlSchema: problem.sqlSchema,
-                        stdin: testCase.input || testCase.stdin || ''
-                    })
-
-                    const expectedOutput = (testCase.expectedOutput || testCase.expected_output || '').trim()
-                    const actualOutput = (res.data.output || '').trim()
-                    const passed = actualOutput === expectedOutput && !res.data.error
-
-                    results.push({
-                        testNumber: i + 1,
-                        input: testCase.input || testCase.stdin || 'N/A',
-                        expected: expectedOutput,
-                        actual: actualOutput,
-                        passed,
-                        error: res.data.error || null
-                    })
-                } catch (err) {
-                    results.push({
-                        testNumber: i + 1,
-                        input: testCase.input || testCase.stdin || 'N/A',
-                        expected: testCase.expectedOutput || testCase.expected_output || 'N/A',
-                        actual: 'ERROR',
-                        passed: false,
-                        error: err.response?.data?.error || err.message
-                    })
-                }
+            if (!res.data.success) {
+                alert(res.data.error || 'Error running tests')
+                return
             }
+
+            const results = (res.data.testResults || []).map((r) => ({
+                testNumber: r.index,
+                input: r.input || 'N/A',
+                expected: r.expectedOutput,
+                actual: r.actualOutput,
+                passed: r.passed,
+                error: r.error || null,
+            }))
 
             setTestResults(results)
             setActiveOutputTab('tests')
 
-            // Check if all passed
             const allPassed = results.every(r => r.passed)
             if (allPassed) {
                 socketService.emitTestSuccess(

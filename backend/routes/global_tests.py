@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+import duckdb
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from pydantic import BaseModel
@@ -525,25 +526,34 @@ async def _run_inline_coding_tests(code: str, language: str, test_cases: list) -
 
 
 async def _run_sql_and_compare(schema: str, query: str, expected_output: str) -> dict:
-    """Run SQL via Piston and compare output."""
+    """Run SQL via DuckDB and compare output."""
     expected = (expected_output or "").strip().replace("\r", "")
+
+    def _execute():
+        conn = duckdb.connect(":memory:")
+        if schema:
+            for stmt in schema.split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(s)
+        result = conn.execute(query).fetchall()
+        columns = [d[0] for d in conn.description] if conn.description else []
+        output = ""
+        if columns:
+            output = " | ".join(columns) + "\n"
+            output += "-" * (sum(len(str(c)) for c in columns) + len(columns) * 3) + "\n"
+        for row in result:
+            output += " | ".join(str(cell) for cell in row) + "\n"
+        conn.close()
+        return output.strip()
+
     try:
-        full_q = f"{schema}\n\n{query}" if schema else query
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(PISTON_URL, json={
-                "language": "sqlite3",
-                "version": "3.36.0",
-                "files": [{"content": full_q}],
-            })
-        data = resp.json()
-        actual = (data.get("run", {}).get("output") or "").strip().replace("\r", "")
-        is_correct = False
-        if data.get("run", {}).get("code") == 0:
-            is_correct = (
-                actual == expected
-                or _normalize_sql(actual) == _normalize_sql(expected)
-                or _compare_sql_data_only(actual, expected)
-            )
+        actual = await asyncio.to_thread(_execute)
+        is_correct = (
+            actual == expected
+            or _normalize_sql(actual) == _normalize_sql(expected)
+            or _compare_sql_data_only(actual, expected)
+        )
         return {"isCorrect": is_correct, "output": actual}
     except Exception as e:
         return {"isCorrect": False, "output": str(e)}

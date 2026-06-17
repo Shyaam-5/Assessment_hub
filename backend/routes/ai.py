@@ -115,8 +115,8 @@ _SQL_SYSTEM = (
     '- "difficulty": "Easy" | "Medium" | "Hard"\n'
     '- "type": "SQL"\n'
     '- "language": "SQL"\n'
-    '- "sqlSchema": string (CREATE TABLE statements)\n'
-    '- "expectedQueryResult": string (expected result preview)\n'
+    '- "sqlSchema": string (CREATE TABLE + INSERT INTO statements with sample data)\n'
+    '- "referenceQuery": string (the correct SQL query that solves the problem)\n'
     '- "sampleInput": string (the query task)\n'
     '- "expectedOutput": string\n'
 )
@@ -137,13 +137,50 @@ _DEFAULT_SQL_SCHEMA = (
     "  id INT PRIMARY KEY,\n"
     "  name VARCHAR(100),\n"
     "  department VARCHAR(100),\n"
-    "  salary DECIMAL(10,2)\n"
-    ");\n\n"
+    "  salary DECIMAL(10,2),\n"
+    "  hire_date DATE,\n"
+    "  manager_id INT\n"
+    ");\n"
+    "INSERT INTO employees VALUES\n"
+    "(1,'Alice Johnson','Engineering',95000,'2020-03-15',NULL),\n"
+    "(2,'Bob Smith','Engineering',88000,'2021-07-01',1),\n"
+    "(3,'Carol Williams','Marketing',72000,'2019-11-20',NULL),\n"
+    "(4,'David Brown','Marketing',68000,'2022-01-10',3),\n"
+    "(5,'Eve Davis','Sales',76000,'2020-06-25',NULL);\n\n"
     "CREATE TABLE departments (\n"
     "  id INT PRIMARY KEY,\n"
     "  name VARCHAR(100),\n"
+    "  budget DECIMAL(12,2),\n"
     "  location VARCHAR(100)\n"
-    ");"
+    ");\n"
+    "INSERT INTO departments VALUES\n"
+    "(1,'Engineering',500000,'New York'),\n"
+    "(2,'Marketing',300000,'San Francisco'),\n"
+    "(3,'Sales',350000,'Chicago');\n\n"
+    "CREATE TABLE projects (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  name VARCHAR(100),\n"
+    "  department_id INT,\n"
+    "  start_date DATE,\n"
+    "  end_date DATE,\n"
+    "  status VARCHAR(50)\n"
+    ");\n"
+    "INSERT INTO projects VALUES\n"
+    "(1,'Website Redesign',1,'2024-01-15','2024-06-30','completed'),\n"
+    "(2,'Mobile App',1,'2024-03-01','2024-12-31','in_progress'),\n"
+    "(3,'Q1 Campaign',2,'2024-01-01','2024-03-31','completed');\n\n"
+    "CREATE TABLE orders (\n"
+    "  id INT PRIMARY KEY,\n"
+    "  customer_name VARCHAR(100),\n"
+    "  product VARCHAR(100),\n"
+    "  quantity INT,\n"
+    "  price DECIMAL(10,2),\n"
+    "  order_date DATE\n"
+    ");\n"
+    "INSERT INTO orders VALUES\n"
+    "(1,'John Doe','Laptop',2,1200,'2024-01-15'),\n"
+    "(2,'Jane Smith','Keyboard',5,75,'2024-01-20'),\n"
+    "(3,'Bob Johnson','Monitor',3,450,'2024-02-10');"
 )
 
 _APTITUDE_SECTION_GUIDE = {
@@ -250,7 +287,7 @@ def _normalize_sql_problem(problem: dict) -> dict:
         "difficulty": str(problem.get("difficulty", "Medium")).title(),
         "schema": problem.get("schema") or problem.get("sqlSchema") or _DEFAULT_SQL_SCHEMA,
         "expectedOutput": expected_output,
-        "solutionQuery": problem.get("solutionQuery") or problem.get("reference_query") or "",
+        "solutionQuery": problem.get("solutionQuery") or problem.get("referenceQuery") or problem.get("reference_query") or "",
         "hints": problem.get("hints") or ([hint] if hint else []),
     }
 

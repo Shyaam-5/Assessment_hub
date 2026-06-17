@@ -6,7 +6,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
+import asyncio
+
+import duckdb
 from fastapi import APIRouter, HTTPException, Query, Form, File, UploadFile, Request, Depends
 from pydantic import BaseModel
 
@@ -21,7 +23,6 @@ from audit_logger import get_audit_logger, AuditEventType
 router = APIRouter(prefix="/api", tags=["submissions"])
 audit_logger = get_audit_logger()
 
-PISTON_URL = "https://emkc.org/api/v2/piston/execute"
 
 
 async def _require_actor(request: Request):
@@ -145,20 +146,36 @@ def _compare_sql_outputs(actual: list | None, expected: list | None) -> bool:
     return sort_key(actual) == sort_key(expected)
 
 
-async def _run_sql_via_piston(schema: str, code: str) -> dict:
-    full_query = f".headers on\n.mode list\n{schema}\n\n{code}"
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(PISTON_URL, json={
-            "language": "sqlite3",
-            "version": "3.36.0",
-            "files": [{"content": full_query}],
-        })
-    return resp.json()
+async def _run_sql_via_duckdb(schema: str, code: str) -> dict:
+    """Execute SQL using DuckDB — same engine as /api/run so run and submit are consistent."""
+    def _execute():
+        conn = duckdb.connect(":memory:")
+        if schema:
+            for stmt in schema.split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(s)
+        result = conn.execute(code).fetchall()
+        columns = [d[0] for d in conn.description] if conn.description else []
+        output = ""
+        if columns:
+            output = " | ".join(columns) + "\n"
+            output += "-" * (sum(len(str(c)) for c in columns) + len(columns) * 3) + "\n"
+        for row in result:
+            output += " | ".join(str(cell) for cell in row) + "\n"
+        conn.close()
+        return output.strip()
+
+    try:
+        output = await asyncio.to_thread(_execute)
+        return {"output": output, "error": "", "code": 0}
+    except Exception as e:
+        return {"output": "", "error": str(e), "code": 1}
 
 
 def _evaluate_sql(data: dict, expected_result: str) -> dict:
-    actual_output = (data.get("run", {}).get("output", "") or "").strip()
-    executed_ok = data.get("run", {}).get("code") == 0
+    actual_output = (data.get("output", "") or "").strip()
+    executed_ok = data.get("code") == 0
     actual_parsed = _parse_sql_output(actual_output)
     expected_parsed = _parse_sql_output(expected_result.strip())
     is_correct = _compare_sql_outputs(actual_parsed, expected_parsed)
@@ -553,7 +570,7 @@ async def create_submission(body: SubmissionCreate, request: Request):
                 prob = await cur.fetchone()
         if prob and prob.get("sql_schema") and prob.get("expected_query_result"):
             try:
-                data = await _run_sql_via_piston(prob["sql_schema"], body.code)
+                data = await _run_sql_via_duckdb(prob["sql_schema"], body.code)
                 eval_result = _evaluate_sql(data, prob["expected_query_result"])
             except Exception as e:
                 eval_result = {"score": 0, "status": "rejected", "feedback": f"SQL Eval Error: {e}", "analysis": {}}
@@ -822,7 +839,7 @@ async def proctored_submission(body: ProctoredSubmission, request: Request):
         expected = problem.get("expected_query_result")
         if schema and expected:
             try:
-                data = await _run_sql_via_piston(schema, code)
+                data = await _run_sql_via_duckdb(schema, code)
                 eval_result = _evaluate_sql(data, expected)
             except Exception as e:
                 eval_result["feedback"] = f"SQL Eval Error: {e}"
