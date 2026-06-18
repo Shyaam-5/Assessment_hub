@@ -24,13 +24,12 @@ class PrescanSocketManager {
 
     this.socket = io(target, {
       transports: ['websocket', 'polling'],
-      query: { 'ngrok-skip-browser-warning': 'true' },
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
-      extraHeaders: { 'ngrok-skip-browser-warning': 'true' },
+      withCredentials: false,
     });
 
     this.socket.on('connect_error', (err) => {
