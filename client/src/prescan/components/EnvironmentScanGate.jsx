@@ -53,7 +53,9 @@ export default function EnvironmentScanGate({ userId, examTitle, onApproved, onC
   }, []);
 
   const sessionToken = session?.session_token ?? null;
-  const socketTarget = resolveSocketBase(session?.websocket_url || session?.mobile_url || null);
+  // Use only websocket_url (EC2 backend). mobile_url is the QR link for the student's
+  // phone and must never be used as a socket.io server target.
+  const socketTarget = resolveSocketBase(session?.websocket_url || null);
 
   const {
     connected,
